@@ -6,8 +6,8 @@ from typing import BinaryIO
 
 import pytest
 
-from glpi_ticketing_automation import audio_files
-from glpi_ticketing_automation.audio_files import (
+from glpi_ticketing_common import audio_files
+from glpi_ticketing_common.audio_files import (
     InvalidAudioFilenameError,
     UnsupportedAudioExtensionError,
     atomic_write,

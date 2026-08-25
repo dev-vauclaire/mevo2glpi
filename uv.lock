@@ -2,6 +2,14 @@ version = 1
 revision = 3
 requires-python = ">=3.12"
 
+[manifest]
+members = [
+    "glpi-ticketing-automation-workspace",
+    "glpi-ticketing-common",
+    "glpi-ticketing-web",
+    "glpi-ticketing-worker-automation",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.5"
@@ -225,20 +233,13 @@ wheels = [
 ]
 
 [[package]]
-name = "glpi-ticketing-automation"
+name = "glpi-ticketing-automation-workspace"
 version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "jinja2" },
-    { name = "pydantic-settings" },
-    { name = "python-multipart" },
-    { name = "uvicorn" },
-]
+source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-timeout" },
@@ -248,23 +249,59 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.116,<1" },
-    { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "jinja2", specifier = ">=3.1,<4" },
-    { name = "pydantic-settings", specifier = ">=2.10,<3" },
-    { name = "python-multipart", specifier = ">=0.0.20,<1" },
-    { name = "uvicorn", specifier = ">=0.35,<1" },
-]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pytest", specifier = ">=8.4,<10" },
     { name = "pytest-asyncio", specifier = ">=1.1,<2" },
     { name = "pytest-timeout", specifier = ">=2.4,<3" },
     { name = "respx", specifier = ">=0.22,<1" },
     { name = "ruff", specifier = ">=0.12,<1" },
     { name = "testcontainers", specifier = ">=4.12,<5" },
+]
+
+[[package]]
+name = "glpi-ticketing-common"
+version = "0.1.0"
+source = { editable = "packages/common" }
+
+[[package]]
+name = "glpi-ticketing-web"
+version = "0.1.0"
+source = { editable = "apps/web" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "glpi-ticketing-common" },
+    { name = "jinja2" },
+    { name = "pydantic-settings" },
+    { name = "python-multipart" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.116,<1" },
+    { name = "glpi-ticketing-common", editable = "packages/common" },
+    { name = "jinja2", specifier = ">=3.1,<4" },
+    { name = "pydantic-settings", specifier = ">=2.10,<3" },
+    { name = "python-multipart", specifier = ">=0.0.20,<1" },
+    { name = "uvicorn", specifier = ">=0.35,<1" },
+]
+
+[[package]]
+name = "glpi-ticketing-worker-automation"
+version = "0.1.0"
+source = { editable = "apps/worker-automation" }
+dependencies = [
+    { name = "glpi-ticketing-common" },
+    { name = "pydantic-settings" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "glpi-ticketing-common", editable = "packages/common" },
+    { name = "pydantic-settings", specifier = ">=2.10,<3" },
 ]
 
 [[package]]

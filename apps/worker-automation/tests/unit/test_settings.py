@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from glpi_ticketing_automation.settings import Settings
+from glpi_ticketing_worker_automation.settings import WorkerSettings
 
 
 def test_default_audio_directories_are_distinct(
@@ -18,7 +18,10 @@ def test_default_audio_directories_are_distinct(
         monkeypatch.delenv(variable_name, raising=False)
         monkeypatch.delenv(variable_name.lower(), raising=False)
 
-    settings = Settings(public_base_url="http://localhost:8000", _env_file=None)
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        _env_file=None,
+    )
 
     assert settings.audio_pending_dir == Path("/data/audio-pending")
     assert settings.audio_processing_dir == Path("/data/audio-processing")
@@ -33,7 +36,7 @@ def test_failed_directory_can_be_overridden(
     failed_dir = tmp_path / "failed"
     monkeypatch.setenv("AUDIO_FAILED_DIR", str(failed_dir))
 
-    settings = Settings(
+    settings = WorkerSettings(
         public_base_url="http://localhost:8000",
         _env_file=None,
     )
@@ -41,7 +44,7 @@ def test_failed_directory_can_be_overridden(
     assert settings.audio_failed_dir == failed_dir
 
 
-def test_settings_read_environment_overrides(
+def test_worker_settings_read_environment_overrides(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -55,7 +58,7 @@ def test_settings_read_environment_overrides(
     monkeypatch.setenv("AUDIO_COMPLETED_DIR", str(completed_dir))
     monkeypatch.setenv("AUDIO_FAILED_DIR", str(failed_dir))
 
-    settings = Settings(_env_file=None)
+    settings = WorkerSettings(_env_file=None)
 
     assert settings.public_base_url.scheme == "https"
     assert settings.public_base_url.host == "tickets.example.test"
@@ -73,7 +76,7 @@ def test_required_public_base_url_is_validated(
     monkeypatch.delenv("public_base_url", raising=False)
 
     with pytest.raises(ValidationError):
-        Settings(_env_file=None)
+        WorkerSettings(_env_file=None)
 
     invalid_public_base_urls = (
         "not-an-http-url",
@@ -84,17 +87,23 @@ def test_required_public_base_url_is_validated(
     )
     for invalid_public_base_url in invalid_public_base_urls:
         with pytest.raises(ValidationError):
-            Settings(public_base_url=invalid_public_base_url, _env_file=None)
+            WorkerSettings(
+                public_base_url=invalid_public_base_url,
+                _env_file=None,
+            )
 
-    settings = Settings(public_base_url="http://serveur-poc:8000", _env_file=None)
+    settings = WorkerSettings(
+        public_base_url="http://serveur-poc:8000",
+        _env_file=None,
+    )
 
     assert settings.public_base_url.host == "serveur-poc"
 
 
-def test_secrets_are_not_in_settings_repr() -> None:
+def test_secrets_are_not_in_worker_settings_repr() -> None:
     password = "not-a-real-password"
     client_secret = "not-a-real-client-secret"
-    settings = Settings(
+    settings = WorkerSettings(
         public_base_url="http://localhost:8000",
         glpi_password=password,
         glpi_client_secret=client_secret,
@@ -107,11 +116,11 @@ def test_secrets_are_not_in_settings_repr() -> None:
     assert client_secret not in settings_repr
 
 
-def test_audio_directories_must_be_distinct(tmp_path: Path) -> None:
+def test_worker_audio_directories_must_be_distinct(tmp_path: Path) -> None:
     shared_dir = tmp_path / "shared"
 
     with pytest.raises(ValidationError, match="Audio directories must be distinct"):
-        Settings(
+        WorkerSettings(
             public_base_url="http://localhost:8000",
             audio_pending_dir=tmp_path / "pending",
             audio_processing_dir=shared_dir,

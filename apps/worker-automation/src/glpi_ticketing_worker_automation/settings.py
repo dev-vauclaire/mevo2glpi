@@ -1,4 +1,4 @@
-"""Typed application configuration loaded from the environment."""
+"""Typed configuration for the automation worker."""
 
 from pathlib import Path
 from typing import Self
@@ -7,8 +7,8 @@ from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    """Application settings shared by the future web and worker processes."""
+class WorkerSettings(BaseSettings):
+    """Configuration owned by the automation worker process."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
