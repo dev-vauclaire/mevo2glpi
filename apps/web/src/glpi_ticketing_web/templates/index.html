@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Déposer un audio</title>
+  </head>
+  <body>
+    <main>
+      <h1>Déposer un audio</h1>
+      <form
+        action="{{ url_for('upload_audio') }}"
+        method="post"
+        enctype="multipart/form-data"
+      >
+        <label for="audio-file">Fichier audio</label>
+        <input
+          id="audio-file"
+          name="audio_file"
+          type="file"
+          accept=".wav,.mp3,.ogg,.m4a"
+          required
+        >
+        <button type="submit">Envoyer</button>
+      </form>
+      <p>Taille maximale : {{ max_upload_bytes }} octets.</p>
+    </main>
+  </body>
+</html>
