@@ -19,6 +19,7 @@ from .models import (
     JobUuid,
     ResponseLogEntry,
     Submission,
+    TranscriptionOperation,
     TranscriptionProvider,
 )
 
@@ -59,7 +60,7 @@ class TranscriptionClient:
         """Submit one audio file to the batch endpoint."""
         audio_path = _validate_audio_path(audio_path)
         media_type = _require_audio_media_type(audio_path)
-        operation = "submit"
+        operation = TranscriptionOperation.SUBMIT
 
         try:
             with audio_path.open("rb") as audio_stream:
@@ -132,8 +133,8 @@ class TranscriptionClient:
 
     def get_job(self, job_uuid: JobUuid) -> JobSnapshot:
         """Fetch and normalize one transcription job response."""
-        job_uuid = JobUuid(_validate_job_uuid(job_uuid, self.provider, "get_job"))
-        operation = "get_job"
+        operation = TranscriptionOperation.GET_JOB
+        job_uuid = JobUuid(_validate_job_uuid(job_uuid, self.provider, operation))
 
         try:
             response = self._http_client.get(
@@ -320,7 +321,7 @@ def _require_audio_media_type(audio_path: Path) -> str:
 def _validate_job_uuid(
     value: object,
     provider: TranscriptionProvider,
-    operation: str,
+    operation: TranscriptionOperation,
 ) -> str:
     if not isinstance(value, str):
         raise TranscriptionProtocolError(
@@ -348,7 +349,7 @@ def _validate_job_uuid(
 def _require_successful_http_status(
     response: httpx.Response,
     provider: TranscriptionProvider,
-    operation: str,
+    operation: TranscriptionOperation,
 ) -> None:
     if response.status_code == 200:
         return
@@ -364,7 +365,7 @@ def _require_successful_http_status(
 
 def _non_success_error_log(
     response: httpx.Response,
-    operation: str,
+    operation: TranscriptionOperation,
 ) -> ResponseLogEntry | None:
     if (
         not 400 <= response.status_code < 500
@@ -393,7 +394,7 @@ def _non_success_error_log(
 def _decode_object(
     response: httpx.Response,
     provider: TranscriptionProvider,
-    operation: str,
+    operation: TranscriptionOperation,
 ) -> Mapping[str, object]:
     try:
         payload = response.json()
@@ -416,7 +417,7 @@ def _require_object_field(
     payload: Mapping[str, object],
     field: str,
     provider: TranscriptionProvider,
-    operation: str,
+    operation: TranscriptionOperation,
 ) -> Mapping[str, object]:
     value = payload.get(field)
     if not isinstance(value, Mapping):
@@ -432,7 +433,7 @@ def _require_string_field(
     payload: Mapping[str, object],
     field: str,
     provider: TranscriptionProvider,
-    operation: str,
+    operation: TranscriptionOperation,
 ) -> str:
     value = payload.get(field)
     if not isinstance(value, str):

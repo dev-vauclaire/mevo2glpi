@@ -8,6 +8,7 @@ from .models import (
     JobUuid,
     ResponseLogEntry,
     Submission,
+    TranscriptionOperation,
     TranscriptionProvider,
 )
 
@@ -39,11 +40,13 @@ class TranscriptionTransportError(TranscriptionClientError):
     def __init__(
         self,
         provider: TranscriptionProvider,
-        operation: str,
+        operation: TranscriptionOperation,
     ) -> None:
         self.provider = provider
         self.operation = operation
-        super().__init__(f"{provider.value} transcription {operation} request failed")
+        super().__init__(
+            f"{provider.value} transcription {operation.value} request failed"
+        )
 
 
 class TranscriptionHttpError(TranscriptionClientError):
@@ -52,7 +55,7 @@ class TranscriptionHttpError(TranscriptionClientError):
     def __init__(
         self,
         provider: TranscriptionProvider,
-        operation: str,
+        operation: TranscriptionOperation,
         status_code: int,
         *,
         retryable: bool,
@@ -62,7 +65,8 @@ class TranscriptionHttpError(TranscriptionClientError):
         self.status_code = status_code
         self.retryable = retryable
         super().__init__(
-            f"{provider.value} transcription {operation} returned HTTP {status_code}"
+            f"{provider.value} transcription {operation.value} "
+            f"returned HTTP {status_code}"
         )
 
 
@@ -72,14 +76,15 @@ class TranscriptionProtocolError(TranscriptionClientError):
     def __init__(
         self,
         provider: TranscriptionProvider,
-        operation: str,
+        operation: TranscriptionOperation,
         reason: str,
     ) -> None:
         self.provider = provider
         self.operation = operation
         self.reason = reason
         super().__init__(
-            f"{provider.value} transcription {operation} response is invalid: {reason}"
+            f"{provider.value} transcription {operation.value} "
+            f"response is invalid: {reason}"
         )
 
 

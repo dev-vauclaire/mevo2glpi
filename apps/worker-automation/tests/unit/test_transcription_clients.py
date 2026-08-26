@@ -10,6 +10,7 @@ from glpi_ticketing_worker_automation.transcription import (
     JobUuid,
     TranscriptionClient,
     TranscriptionHttpError,
+    TranscriptionOperation,
     TranscriptionProtocolError,
     TranscriptionSubmissionRejectedError,
     TranscriptionTransportError,
@@ -82,6 +83,7 @@ def test_transcription_client_submit_sends_expected_multipart_request(
         submission = client.submit(audio_path)
 
     assert submission.job_uuid == JOB_UUID
+    assert submission.response_log.operation is TranscriptionOperation.SUBMIT
     assert submission.response_log.provider_status == "success"
     assert "Votre demande" not in repr(submission.response_log)
 
@@ -175,6 +177,7 @@ def test_transcription_client_get_job_maps_non_terminal_statuses(
 
     assert snapshot.status is expected_status
     assert snapshot.transcription is None
+    assert snapshot.response_log.operation is TranscriptionOperation.GET_JOB
     assert snapshot.response_log.job_status == provider_job_status
 
 
@@ -318,7 +321,7 @@ def test_transcription_client_transport_error_does_not_expose_api_key() -> None:
         client.get_job(JOB_UUID)
 
     assert API_KEY not in str(error_info.value)
-    assert error_info.value.operation == "get_job"
+    assert error_info.value.operation is TranscriptionOperation.GET_JOB
 
 
 @pytest.mark.parametrize(

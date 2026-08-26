@@ -15,6 +15,7 @@ from .models import (
     JobUuid,
     ResponseLogEntry,
     Submission,
+    TranscriptionOperation,
     TranscriptionProvider,
 )
 from .poller import (
@@ -34,6 +35,7 @@ __all__ = [
     "TranscriptionClientError",
     "TranscriptionClientProtocol",
     "TranscriptionHttpError",
+    "TranscriptionOperation",
     "TranscriptionPoller",
     "TranscriptionProcessingFailed",
     "TranscriptionProtocolError",

@@ -24,6 +24,7 @@ from .models import (
     JobStatus,
     JobUuid,
     ResponseLogEntry,
+    TranscriptionOperation,
     TranscriptionProvider,
 )
 
@@ -36,7 +37,7 @@ MAX_RESPONSE_LOGS = 20
 class _SanitizedResponseLog:
     """Allowlisted provider metadata suitable for an error report."""
 
-    operation: str
+    operation: TranscriptionOperation
     http_status: int | None
     provider_status: str | None
     job_status: str | None
@@ -45,7 +46,9 @@ class _SanitizedResponseLog:
     def from_client_log(cls, entry: ResponseLogEntry) -> "_SanitizedResponseLog":
         """Remove unexpected status values before retaining response metadata."""
         operation = (
-            entry.operation if entry.operation in {"submit", "get_job"} else "unknown"
+            entry.operation
+            if isinstance(entry.operation, TranscriptionOperation)
+            else TranscriptionOperation.UNKNOWN
         )
         provider_status = _allowlisted_status(
             entry.provider_status,
@@ -66,7 +69,7 @@ class _SanitizedResponseLog:
 
     def as_payload(self) -> dict[str, object]:
         """Return the compact JSON object written only for terminal failures."""
-        payload: dict[str, object] = {"operation": self.operation}
+        payload: dict[str, object] = {"operation": self.operation.value}
         if self.http_status is not None:
             payload["http_status"] = self.http_status
         if self.provider_status is not None:
@@ -341,7 +344,12 @@ def _validate_positive_seconds(value: float, field_name: str) -> float:
 
 def _log_from_client_error(error: TranscriptionClientError) -> ResponseLogEntry:
     status_code = error.status_code if isinstance(error, TranscriptionHttpError) else 0
-    operation = getattr(error, "operation", "unknown")
+    raw_operation = getattr(error, "operation", TranscriptionOperation.UNKNOWN)
+    operation = (
+        raw_operation
+        if isinstance(raw_operation, TranscriptionOperation)
+        else TranscriptionOperation.UNKNOWN
+    )
     return ResponseLogEntry(
         operation=operation,
         http_status=status_code or None,

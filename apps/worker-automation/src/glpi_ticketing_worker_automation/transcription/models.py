@@ -22,11 +22,19 @@ class JobStatus(StrEnum):
     FAILED = "failed"
 
 
+class TranscriptionOperation(StrEnum):
+    """Operation performed against a transcription provider."""
+
+    SUBMIT = "submit"
+    GET_JOB = "get_job"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True, slots=True)
 class ResponseLogEntry:
     """Small sanitized summary of one provider response."""
 
-    operation: str
+    operation: TranscriptionOperation
     http_status: int | None
     provider_status: str | None
     job_status: str | None

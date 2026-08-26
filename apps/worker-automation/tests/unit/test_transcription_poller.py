@@ -12,6 +12,7 @@ from glpi_ticketing_worker_automation.transcription import (
     ResponseLogEntry,
     Submission,
     TranscriptionHttpError,
+    TranscriptionOperation,
     TranscriptionProvider,
     TranscriptionTransportError,
 )
@@ -67,7 +68,10 @@ class FakeTranscriptionClient:
             raise self.submit_error
         return Submission(
             job_uuid=JOB_UUID,
-            response_log=_response_log("submit", job_status=None),
+            response_log=_response_log(
+                TranscriptionOperation.SUBMIT,
+                job_status=None,
+            ),
         )
 
     def get_job(self, job_uuid: JobUuid) -> JobSnapshot:
@@ -194,7 +198,7 @@ def test_post_transport_error_is_terminal_and_never_retried(
         events=[],
         submit_error=TranscriptionTransportError(
             TranscriptionProvider.LEGACY,
-            "submit",
+            TranscriptionOperation.SUBMIT,
         ),
     )
     clock = FakeClock()
@@ -223,7 +227,7 @@ def test_post_500_is_treated_as_an_ambiguous_submission(
         events=[],
         submit_error=TranscriptionHttpError(
             TranscriptionProvider.LEGACY,
-            "submit",
+            TranscriptionOperation.SUBMIT,
             500,
             retryable=False,
         ),
@@ -237,7 +241,12 @@ def test_post_500_is_treated_as_an_ambiguous_submission(
         poller.transcribe(audio_path)
 
     payload = _read_failure_payload(failed_directory)
-    assert payload["response_logs"] == [{"http_status": 500, "operation": "submit"}]
+    assert payload["response_logs"] == [
+        {
+            "http_status": 500,
+            "operation": TranscriptionOperation.SUBMIT.value,
+        }
+    ]
 
 
 def test_ambiguous_get_leaves_audio_in_processing_for_a_fresh_submission(
@@ -249,7 +258,7 @@ def test_ambiguous_get_leaves_audio_in_processing_for_a_fresh_submission(
         events=[
             TranscriptionTransportError(
                 TranscriptionProvider.LEGACY,
-                "get_job",
+                TranscriptionOperation.GET_JOB,
             ),
             _completed_snapshot(),
         ]
@@ -286,7 +295,7 @@ def test_retryable_get_http_error_leaves_audio_in_processing(
         events=[
             TranscriptionHttpError(
                 TranscriptionProvider.LEGACY,
-                "get_job",
+                TranscriptionOperation.GET_JOB,
                 503,
                 retryable=True,
             )
@@ -384,7 +393,7 @@ def test_untrusted_status_values_are_sanitized_before_the_error_report(
     assert payload["response_logs"][-1] == {
         "http_status": 200,
         "job_status": "OTHER",
-        "operation": "unknown",
+        "operation": TranscriptionOperation.UNKNOWN.value,
         "provider_status": "other",
     }
 
@@ -413,7 +422,10 @@ def test_response_history_is_bounded_until_terminal_failure(
     response_logs = _read_failure_payload(failed_directory)["response_logs"]
     assert isinstance(response_logs, list)
     assert len(response_logs) == MAX_RESPONSE_LOGS
-    assert all(log["operation"] == "get_job" for log in response_logs)
+    assert all(
+        log["operation"] == TranscriptionOperation.GET_JOB.value
+        for log in response_logs
+    )
     assert response_logs[-1]["job_status"] == "FAILED"
 
 
@@ -459,7 +471,7 @@ def _write_audio(processing_directory: Path) -> Path:
 
 
 def _response_log(
-    operation: str,
+    operation: TranscriptionOperation,
     *,
     job_status: str | None,
 ) -> ResponseLogEntry:
@@ -476,7 +488,10 @@ def _snapshot(status: JobStatus) -> JobSnapshot:
         job_uuid=JOB_UUID,
         status=status,
         transcription=None,
-        response_log=_response_log("get_job", job_status=status.value.upper()),
+        response_log=_response_log(
+            TranscriptionOperation.GET_JOB,
+            job_status=status.value.upper(),
+        ),
     )
 
 
@@ -485,7 +500,10 @@ def _completed_snapshot() -> JobSnapshot:
         job_uuid=JOB_UUID,
         status=JobStatus.COMPLETED,
         transcription=SYNTHETIC_TRANSCRIPTION,
-        response_log=_response_log("get_job", job_status="COMPLETED"),
+        response_log=_response_log(
+            TranscriptionOperation.GET_JOB,
+            job_status="COMPLETED",
+        ),
     )
 
 
