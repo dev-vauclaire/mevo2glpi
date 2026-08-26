@@ -42,3 +42,19 @@ outils de développement déclarés à la racine :
 ```bash
 uv run --all-packages pytest apps/web/tests
 ```
+
+Le test réel de transcription est volontairement opt-in, car chaque exécution
+crée un job et consomme son résultat. Il utilise un fichier audio local qui ne
+doit pas être ajouté au dépôt :
+
+```bash
+export RUN_LIVE_TRANSCRIBE=1
+export LIVE_TRANSCRIBE_BASE_URL=http://localhost:5000
+export LIVE_TRANSCRIBE_AUDIO_PATH=/chemin/vers/audio.m4a
+read -rsp "API key: " LIVE_TRANSCRIBE_API_KEY
+export LIVE_TRANSCRIBE_API_KEY
+uv run --all-packages pytest \
+  apps/worker-automation/tests/integration/test_transcription_client_live.py \
+  -m live_transcribe -vv
+unset LIVE_TRANSCRIBE_API_KEY RUN_LIVE_TRANSCRIBE
+```

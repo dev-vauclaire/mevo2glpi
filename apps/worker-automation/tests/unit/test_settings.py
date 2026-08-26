@@ -5,6 +5,18 @@ from pydantic import ValidationError
 
 from glpi_ticketing_worker_automation.settings import WorkerSettings
 
+TRANSCRIPTION_BASE_URL = "https://transcription.example.test"
+TRANSCRIPTION_API_KEY = "synthetic-api-key"
+
+
+@pytest.fixture(autouse=True)
+def configure_required_transcription_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provide the mandatory transcription settings unless a test removes one."""
+    monkeypatch.setenv("LEGACY_TRANSCRIPTION_BASE_URL", TRANSCRIPTION_BASE_URL)
+    monkeypatch.setenv("LEGACY_TRANSCRIPTION_API_KEY", TRANSCRIPTION_API_KEY)
+
 
 def test_default_audio_directories_are_distinct(
     monkeypatch: pytest.MonkeyPatch,
@@ -103,10 +115,13 @@ def test_required_public_base_url_is_validated(
 def test_secrets_are_not_in_worker_settings_repr() -> None:
     password = "not-a-real-password"
     client_secret = "not-a-real-client-secret"
+    transcription_api_key = "not-a-real-transcription-api-key"
     settings = WorkerSettings(
         public_base_url="http://localhost:8000",
         glpi_password=password,
         glpi_client_secret=client_secret,
+        legacy_transcription_base_url="http://transcription.example.test",
+        legacy_transcription_api_key=transcription_api_key,
         _env_file=None,
     )
 
@@ -114,6 +129,7 @@ def test_secrets_are_not_in_worker_settings_repr() -> None:
 
     assert password not in settings_repr
     assert client_secret not in settings_repr
+    assert transcription_api_key not in settings_repr
 
 
 def test_worker_audio_directories_must_be_distinct(tmp_path: Path) -> None:
@@ -128,3 +144,75 @@ def test_worker_audio_directories_must_be_distinct(tmp_path: Path) -> None:
             audio_failed_dir=shared_dir / ".." / "shared",
             _env_file=None,
         )
+
+
+def test_legacy_transcription_settings_are_typed() -> None:
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        legacy_transcription_base_url="https://transcription.example.test/prefix",
+        legacy_transcription_api_key="synthetic-api-key",
+        transcription_http_timeout_seconds=4.5,
+        transcription_poll_interval_seconds=1.5,
+        transcription_job_timeout_seconds=120,
+        _env_file=None,
+    )
+
+    assert settings.legacy_transcription_base_url.path == "/prefix"
+    assert (
+        settings.legacy_transcription_api_key.get_secret_value() == "synthetic-api-key"
+    )
+    assert settings.transcription_http_timeout_seconds == 4.5
+    assert settings.transcription_poll_interval_seconds == 1.5
+    assert settings.transcription_job_timeout_seconds == 120
+
+
+@pytest.mark.parametrize(
+    ("missing_environment_variable", "missing_field"),
+    [
+        ("LEGACY_TRANSCRIPTION_BASE_URL", "legacy_transcription_base_url"),
+        ("LEGACY_TRANSCRIPTION_API_KEY", "legacy_transcription_api_key"),
+    ],
+)
+def test_transcription_credentials_are_required(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_environment_variable: str,
+    missing_field: str,
+) -> None:
+    monkeypatch.delenv(missing_environment_variable)
+
+    with pytest.raises(ValidationError) as error_info:
+        WorkerSettings(public_base_url="http://localhost:8000", _env_file=None)
+
+    assert missing_field in {
+        str(error["loc"][0]) for error in error_info.value.errors()
+    }
+
+
+def test_transcription_api_key_rejects_control_characters() -> None:
+    with pytest.raises(ValidationError, match="control characters"):
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            legacy_transcription_base_url="http://transcription.example.test",
+            legacy_transcription_api_key="synthetic\napi-key",
+            _env_file=None,
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "transcription_http_timeout_seconds",
+        "transcription_poll_interval_seconds",
+        "transcription_job_timeout_seconds",
+    ],
+)
+def test_transcription_durations_must_be_positive_and_finite(
+    field_name: str,
+) -> None:
+    for invalid_value in (0, -1, float("inf"), float("nan")):
+        with pytest.raises(ValidationError):
+            WorkerSettings(
+                public_base_url="http://localhost:8000",
+                **{field_name: invalid_value},
+                _env_file=None,
+            )

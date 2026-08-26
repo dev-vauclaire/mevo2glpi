@@ -295,12 +295,14 @@ version = "0.1.0"
 source = { editable = "apps/worker-automation" }
 dependencies = [
     { name = "glpi-ticketing-common" },
+    { name = "httpx" },
     { name = "pydantic-settings" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "glpi-ticketing-common", editable = "packages/common" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
 ]
 
