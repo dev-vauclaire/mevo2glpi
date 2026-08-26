@@ -149,7 +149,7 @@ vérité ; `uv.lock` fixe les versions exactes installées pour le dépôt.
 | HTTPX 2 | `>=2,<3`, groupe de développement | Anticipation de migration et compatibilité des tests |
 | Pytest | `>=8.4,<10` | Tests unitaires et tests d'intégration opt-in |
 | Ruff | `>=0.12,<1` | Formatage et analyse statique |
-| Testcontainers | `>=4.12,<5`, groupe de développement | Préparation des futurs tests d'intégration GLPI |
+| Testcontainers | `>=4.12,<5`, groupe de développement | Stack GLPI/MySQL jetable pour les tests d'intégration OAuth |
 
 Les trois distributions du projet utilisent `uv_build` comme backend de
 construction et portent actuellement la version `0.1.0`.
@@ -163,9 +163,12 @@ construction et portent actuellement la version `0.1.0`.
   future exécution des applications ;
 - uniquement pour le test `live_transcribe` : une instance accessible de
   Transcribe AI, une clé API et un audio local pris en charge.
+- uniquement pour les tests marqués `glpi` : Docker avec le plugin Compose.
 
 Docker, GLPI et Transcribe AI ne sont pas nécessaires pour exécuter la suite
-unitaire par défaut.
+unitaire par défaut. L'instance GLPI utilisée par les tests d'intégration est
+construite et détruite automatiquement ; aucune installation GLPI locale n'est
+attendue.
 
 ## Installation depuis la racine
 
@@ -225,12 +228,21 @@ d'import `importlib`. Les marqueurs enregistrés sont :
 | Marqueur | Politique |
 | --- | --- |
 | `live_transcribe` | Appelle une véritable instance locale de Transcribe AI ; opt-in et susceptible de créer un job |
-| `glpi` | Réservé aux tests démarrant une instance GLPI jetable avec Testcontainers ; aucun flux GLPI n'est encore implémenté |
+| `glpi` | Démarre une seule stack GLPI 11/MySQL jetable, configure l'API V2 et vérifie le grant OAuth Password |
 | `e2e` | Réservé au futur scénario complet avec services externes |
 
 Le test réel de transcription possède une double protection : le marqueur
 `live_transcribe` et la variable `RUN_LIVE_TRANSCRIBE=1`. Il ne doit jamais
 utiliser un audio contenant des données sensibles non autorisées.
+
+La suite `glpi` construit une image strictement réservée aux tests à partir de
+GLPI 11.0.8, épinglé par digest, et utilise une image MySQL 8.4.11 également
+épinglée. Une fixture de session expose GLPI sur un port aléatoire lié à
+`127.0.0.1`, attend sa disponibilité HTTP, puis crée avec les classes métier
+GLPI un utilisateur et un client OAuth Password limités au scope `api`. Tous
+les identifiants sont éphémères et transmis par variables d'environnement. La
+suite ne doit pas être parallélisée ; son teardown supprime les conteneurs, le
+réseau, les volumes Compose et l'image custom construite pour la session.
 
 ## Commandes de validation depuis la racine
 
@@ -238,6 +250,12 @@ Suite locale sans service externe :
 
 ```bash
 uv run --all-packages pytest -m "not glpi and not live_transcribe and not e2e"
+```
+
+Intégration GLPI jetable, à exécuter séparément et sans parallélisation :
+
+```bash
+uv run pytest -m glpi tests/integration/glpi -vv --maxfail=1
 ```
 
 Tests ciblés par membre :
