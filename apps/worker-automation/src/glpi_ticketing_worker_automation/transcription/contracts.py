@@ -10,6 +10,7 @@ from .models import (
     Submission,
     TranscriptionOperation,
     TranscriptionProvider,
+    TranscriptionResult,
 )
 
 
@@ -28,6 +29,32 @@ class TranscriptionClientProtocol(Protocol):
     def get_job(self, job_uuid: JobUuid) -> JobSnapshot:
         """Fetch one snapshot of a previously submitted job."""
         ...
+
+
+class TranscriberProtocol(Protocol):
+    """Complete one asynchronous transcription attempt for an audio."""
+
+    def transcribe(self, audio_path: Path) -> TranscriptionResult:
+        """Return a result or raise a sanitized retry/terminal error."""
+        ...
+
+
+class TranscriptionTerminalError(Exception):
+    """Report a terminal transcription failure without moving the audio."""
+
+    def __init__(self, code: str, audio_path: Path) -> None:
+        self.code = code
+        self.audio_path = audio_path
+        super().__init__(f"transcription terminal error with code {code}")
+
+
+class TranscriptionRetryRequired(Exception):
+    """Request a fresh submission while leaving the audio in processing."""
+
+    def __init__(self, code: str, audio_path: Path) -> None:
+        self.code = code
+        self.audio_path = audio_path
+        super().__init__(f"transcription retry required with code {code}")
 
 
 class TranscriptionClientError(Exception):

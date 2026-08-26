@@ -3,8 +3,8 @@
 POC Python destiné à automatiser la création de tickets GLPI à partir de
 fichiers audio. Le dépôt couvre actuellement la publication robuste d'un audio,
 son cycle de vie sur des volumes partagés, sa transcription asynchrone et le
-client de création de tickets GLPI. Le branchement de ce client au worker et la
-finalisation du fichier audio constituent encore la suite du pipeline.
+traitement complet par le worker jusqu'à la création d'un ticket GLPI et la
+publication de l'audio dans `completed`.
 
 Le POC repose volontairement sur une architecture simple : une application
 web, un worker unique et des répertoires partagés utilisés comme file de
@@ -27,25 +27,31 @@ travail. Il n'utilise actuellement ni base de données, ni broker de messages.
   `processing` ;
 - isolation des erreurs terminales dans `failed`, accompagnées d'un sidecar
   JSON expurgé ;
-- retour de la transcription en mémoire, sans journaliser son contenu ;
+- conservation interne de la transcription en mémoire, sans journaliser son
+  contenu ;
 - authentification OAuth Password auprès de GLPI V2.3.0 ;
 - récupération ou création d'un ticket GLPI corrélé par l'`external_id` de
-  l'audio, sans rejeu aveugle d'une création au résultat incertain.
+  l'audio, sans rejeu aveugle d'une création au résultat incertain ;
+- orchestration transcription → ticketing → finalisation avec des résultats
+  typés `idle`, `retry`, `completed`, `failed` et `blocked` ;
+- conservation privée de la transcription en mémoire pendant les reprises
+  GLPI, puis publication du fichier dans `completed` après confirmation du
+  ticket.
 
 ### Fonctionnalités restant à intégrer
 
 - point d'entrée exécutable pour assembler et démarrer l'application web ;
 - point d'entrée exécutable pour construire le client HTTP et démarrer le
   worker ;
-- branchement du client GLPI au résultat de transcription ;
-- transition d'un traitement réussi de `processing` vers `completed` ;
-- orchestration complète de bout en bout, déploiement et supervision.
+- déploiement, supervision et mécanisme opérateur pour les traitements
+  bloqués ou classés dans `failed`.
 
 Le dépôt ne fournit donc pas encore de commande de démarrage applicatif. Le
-module web expose une fabrique `create_app(...)` et le worker expose des
-fonctions injectables `run_once(...)` et `run_forever(...)`. Documenter une
-commande `uvicorn` ou une CLI worker à ce stade masquerait l'absence de ces
-bootstraps.
+module web expose une fabrique `create_app(...)`. Le worker expose
+`AudioProcessor.run_once()` et la boucle injectable `run_forever(...)`, mais
+aucune composition ne construit encore les clients HTTP à partir de
+`WorkerSettings`. Documenter une commande `uvicorn` ou une CLI worker à ce
+stade masquerait l'absence de ces bootstraps.
 
 ## Architecture du workspace
 
@@ -58,7 +64,7 @@ explicitement ses dépendances d'exécution.
 | Membre | Distribution Python | Responsabilité actuelle | Documentation |
 | --- | --- | --- | --- |
 | `apps/web` | `glpi-ticketing-web` | Interface FastAPI de dépôt dans `pending` et de lecture depuis `completed` | [Application web](apps/web/README.md) |
-| `apps/worker-automation` | `glpi-ticketing-worker-automation` | Réclamation des audios, appel de Transcribe AI, polling et adaptation de GLPI V2.3.0 | [Worker d'automatisation](apps/worker-automation/README.md) |
+| `apps/worker-automation` | `glpi-ticketing-worker-automation` | Pipeline avec état privé : réclamation, transcription, ticket GLPI et finalisation | [Worker d'automatisation](apps/worker-automation/README.md) |
 | `packages/common` | `glpi-ticketing-common` | Nommage UUID, découverte des audios et transitions robustes entre volumes | [Package commun](packages/common/README.md) |
 
 Les deux applications dépendent du package commun par la source workspace
@@ -85,13 +91,16 @@ flowchart LR
     Q -->|indisponibilité| B[Attente puis nouvelle soumission]
     B --> R
     Q -->|erreur terminale| F[(failed + error.json)]
-    Q -->|COMPLETED| M[TranscriptionResult en mémoire]
-    M -. client implémenté, branchement à faire .-> G[Création ou récupération du ticket GLPI]
-    G -. transition à implémenter .-> C[(completed)]
+    Q -->|COMPLETED| M[Transcription privée en mémoire]
+    M --> G[Recherche ou création du ticket GLPI]
+    G -->|indisponibilité| GR[Attente puis nouvelle tentative GLPI]
+    GR --> G
+    G -->|erreur terminale propre à l'audio| F
+    G -->|erreur systémique| K[blocked : arrêt du runner]
+    G -->|ticket confirmé| J[Publication finale]
+    J -->|succès| C[(completed)]
+    J -->|échec de publication| K
     C -->|GET /audios/UUID| W
-
-    classDef future fill:#fff,stroke:#777,stroke-width:1px,stroke-dasharray:5 5;
-    class G,C future;
 ```
 
 1. L'application web valide l'extension et la taille du flux reçu. Elle
@@ -105,39 +114,83 @@ flowchart LR
    interroge son état. L'audio reste dans `processing` pendant toute cette
    séquence.
 4. Une indisponibilité réseau, une réponse temporaire ou l'expiration du délai
-   de polling provoque une attente puis une nouvelle soumission du même audio.
-   L'API ne fournissant pas de mécanisme d'idempotence exploitable, un nouveau
-   job distant peut alors être créé.
-5. Une erreur explicitement terminale publie d'abord l'audio et son sidecar
-   dans `failed`, puis supprime la source de `processing`. Le worker ne parcourt
-   jamais `failed` : une nouvelle tentative nécessite une décision opérateur.
-6. En cas de succès, le worker retourne l'UUID de l'audio, son chemin et la
-   transcription dans un `TranscriptionResult`. Le fichier reste dans
-   `processing`. Le gestionnaire appelé par `run_forever(...)` doit le faire
-   avancer avant de rendre la main ; ce gestionnaire métier n'est pas encore
-   implémenté.
-7. Le client GLPI épinglé en V2.3.0 sait rechercher un ticket par
-   `external_id`, en créer un avec la transcription et l'URL audio, puis
-   retourner son identifiant. Son appel depuis le gestionnaire métier reste à
-   brancher.
-8. La route de téléchargement web ne lit que `completed`. Elle est déjà
-   disponible, mais le pipeline actuel ne produit pas encore lui-même ce
-   fichier final.
+   de polling produit un résultat `retry`. La boucle attend puis relance une
+   transcription du même audio. L'API ne fournissant pas de clé d'idempotence,
+   un nouveau job distant peut alors être créé.
+5. Une transcription réussie est conservée dans l'état privé du processeur.
+   Elle n'est exposée dans aucun résultat public et elle est réutilisée sans
+   retranscription tant que les tentatives GLPI restent dans le même processus.
+6. Le client GLPI épinglé en V2.3.0 recherche le ticket par `external_id`, le
+   crée si nécessaire, puis retourne son identifiant. Une indisponibilité ou un
+   résultat de création incertain produit `retry` sans déplacer l'audio.
+7. Une erreur terminale propre à l'audio publie d'abord l'audio et un sidecar
+   expurgé dans `failed`, puis supprime `processing`. Une erreur systémique,
+   une incohérence ou une publication impossible produit `blocked` et arrête
+   la boucle afin que l'opérateur inspecte le résultat et les artefacts
+   éventuellement déjà publiés.
+8. Après confirmation du ticket, l'audio est publié dans `completed`. Le
+   résultat `completed` contient l'UUID, le chemin final et l'identifiant GLPI,
+   mais jamais la transcription.
 
 Les publications inter-volumes ne supposent pas qu'un renommage atomique soit
 possible entre deux systèmes de fichiers. La destination est copiée dans un
 fichier `.part`, synchronisée puis publiée par renommage dans son propre
 répertoire ; la source n'est supprimée qu'après cette publication.
 
+Si une synchronisation signale un `OSError` après la suppression de la source,
+le processeur vérifie l'état observable avant de bloquer. Une destination
+`completed` complète produit malgré tout `CompletedOutcome`. Pour `failed`,
+l'audio et le sidecar doivent tous deux être présents et le JSON doit
+correspondre exactement à l'échec mémorisé pour produire `FailedOutcome`.
+
 Un sidecar terminal porte le nom `{uuid}.error.json` et contient uniquement :
 
 - l'UUID de l'audio ;
-- l'étape `transcription` ;
+- l'étape `transcription` ou `ticketing` ;
 - une catégorie d'erreur ;
 - un code technique non sensible ;
 - un horodatage UTC.
 
 Il ne contient ni transcription, ni clé API, ni réponse HTTP brute.
+
+La politique GLPI actuelle est explicite : seuls un `external_id` dupliqué et
+les statuts HTTP `400`, `409` ou `422` de l'opération `CREATE_TICKET` conduisent
+à `failed`. Une erreur invalide issue d'une autre opération, ou un `404`/`405`
+pendant la création, conduit à `blocked`, car elle peut signaler un défaut de
+route, de version ou de configuration plutôt qu'un problème propre à l'audio.
+
+### État et résultats du worker
+
+`AudioProcessor` est volontairement avec état et réservé au worker unique du
+POC. Son état privé distingue `_AwaitingTranscription`, `_AwaitingTicket`,
+`_AwaitingFinalization` et `_AwaitingFailurePublication`. La transcription
+n'existe que dans l'attente du ticket et son `repr` est masqué. L'état de
+publication d'échec conserve l'étape, le code expurgé et l'horodatage afin qu'un
+nouvel appel sur la même instance reprenne uniquement la publication dans
+`failed`, sans rappeler Transcribe AI ou GLPI.
+
+Un redémarrage perd cet état : le scanner reprend alors l'audio dans
+`processing`, le retranscrit et laisse `ensure_ticket()` réconcilier le ticket
+par `external_id`.
+
+Chaque appel à `AudioProcessor.run_once()` retourne un objet immuable et
+expurgé :
+
+| Résultat | Effet de `run_forever()` |
+| --- | --- |
+| `IdleOutcome` | Attend l'intervalle de scan. |
+| `RetryOutcome` | Attend l'intervalle propre à l'étape, puis reprend le même état privé. |
+| `CompletedOutcome` | Continue immédiatement avec l'audio suivant. |
+| `FailedOutcome` | Continue immédiatement ; le fichier est terminal dans `failed`. |
+| `BlockedOutcome` | Lève `WorkerBlockedError` et arrête la boucle pour intervention. |
+
+Aucun de ces résultats ne transporte la transcription, un secret ou une
+réponse distante brute.
+
+Un résultat `blocked` expose normalement le chemin encore présent dans
+`processing`. Si une erreur de synchronisation rend la localisation ambiguë
+après suppression de la source, ce chemin vaut `None` et `inspection_paths`
+indique explicitement les artefacts que l'opérateur doit contrôler.
 
 ## Technologies
 
@@ -201,16 +254,17 @@ ne doivent jamais être ajoutés au dépôt.
 
 `WebSettings` et `WorkerSettings` valident déjà ce contrat, mais les futurs
 points de démarrage devront encore injecter ces valeurs dans `create_app(...)`,
-`TranscriptionClient`, `GlpiClient` et `run_forever(...)`.
+`TranscriptionClient`, `GlpiClient`, `AudioProcessor` et `run_forever(...)`.
 
 | Variables | Propriétaire | Rôle défini par la configuration |
 | --- | --- | --- |
 | `AUDIO_PENDING_DIR` | web et worker | Dépôt des uploads et entrée de la file |
 | `AUDIO_PROCESSING_DIR` | worker | Audio réclamé et traitement en cours |
-| `AUDIO_COMPLETED_DIR` | web et worker | Lecture web ; écriture worker encore future |
+| `AUDIO_COMPLETED_DIR` | web et worker | Publication des succès par le worker et lecture par le web |
 | `AUDIO_FAILED_DIR` | worker | Audio terminal et sidecar expurgé |
 | `MAX_UPLOAD_BYTES` | web | Taille maximale d'un upload |
-| `PUBLIC_BASE_URL` | worker | URL publique requise par sa configuration, prévue pour les futurs liens audio |
+| `WORKER_SCAN_INTERVAL_SECONDS` | worker | Attente d'un résultat `idle`, `1` seconde par défaut |
+| `PUBLIC_BASE_URL` | worker | Base utilisée par la composition pour construire l'URL audio du ticket |
 | `LEGACY_TRANSCRIPTION_BASE_URL` | worker | URL obligatoire de l'API batch actuellement intégrée |
 | `LEGACY_TRANSCRIPTION_API_KEY` | worker | Clé obligatoire, représentée par un type secret |
 | `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | worker | Délai maximal d'une requête HTTP |
@@ -219,6 +273,7 @@ points de démarrage devront encore injecter ces valeurs dans `create_app(...)`,
 | `GLPI_BASE_URL`, `GLPI_USERNAME` | worker | Instance GLPI et utilisateur du grant OAuth Password |
 | `GLPI_PASSWORD`, `GLPI_CLIENT_ID`, `GLPI_CLIENT_SECRET` | worker | Identifiants OAuth obligatoires, avec les deux secrets masqués |
 | `GLPI_HTTP_TIMEOUT_SECONDS` | worker | Timeout des opérations OAuth, recherche et création |
+| `GLPI_RETRY_INTERVAL_SECONDS` | worker | Attente avant de reprendre un résultat GLPI `retry`, `2` secondes par défaut |
 | `GLPI_TICKET_TITLE`, `GLPI_TICKET_TYPE` | worker | Titre fixe et type appliqués aux tickets |
 | `GLPI_TICKET_URGENCY`, `GLPI_TICKET_IMPACT` | worker | Niveaux fixes dont GLPI déduit la priorité |
 
@@ -234,6 +289,11 @@ tests utilisent notamment des répertoires temporaires, des clients simulés et
 l'injection de l'horloge et de la fonction de sommeil. Ils vérifient les
 résultats observables et les invariants de publication des fichiers, sans
 attendre réellement.
+
+Les anciens tests unitaires plats du scanner et du worker ont été répartis sous
+`apps/worker-automation/tests/unit/worker/` : outcomes, scanner, transcription
+du processeur, ticketing du processeur et runner. Les contrats HTTP restent
+testés séparément au niveau de leurs adaptateurs.
 
 Pytest est configuré avec `--strict-config`, `--strict-markers` et le mode
 d'import `importlib`. Les marqueurs enregistrés sont :
@@ -284,6 +344,12 @@ Tests ciblés par membre :
 uv run --all-packages pytest apps/web/tests
 uv run --all-packages pytest apps/worker-automation/tests/unit
 uv run --all-packages pytest packages/common/tests
+```
+
+Tests ciblés du pipeline et de sa boucle :
+
+```bash
+uv run --all-packages pytest apps/worker-automation/tests/unit/worker
 ```
 
 Vérifications de style :

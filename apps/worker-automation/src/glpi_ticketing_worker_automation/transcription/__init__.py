@@ -2,11 +2,14 @@
 
 from .client import TranscriptionClient
 from .contracts import (
+    TranscriberProtocol,
     TranscriptionClientError,
     TranscriptionClientProtocol,
     TranscriptionHttpError,
     TranscriptionProtocolError,
+    TranscriptionRetryRequired,
     TranscriptionSubmissionRejectedError,
+    TranscriptionTerminalError,
     TranscriptionTransportError,
 )
 from .models import (
@@ -17,13 +20,9 @@ from .models import (
     Submission,
     TranscriptionOperation,
     TranscriptionProvider,
-)
-from .poller import (
-    TranscriptionPoller,
-    TranscriptionProcessingFailed,
     TranscriptionResult,
-    TranscriptionRetryRequired,
 )
+from .poller import TranscriptionPoller
 
 __all__ = [
     "JobUuid",
@@ -37,11 +36,12 @@ __all__ = [
     "TranscriptionHttpError",
     "TranscriptionOperation",
     "TranscriptionPoller",
-    "TranscriptionProcessingFailed",
     "TranscriptionProtocolError",
     "TranscriptionProvider",
     "TranscriptionResult",
     "TranscriptionRetryRequired",
     "TranscriptionSubmissionRejectedError",
+    "TranscriptionTerminalError",
     "TranscriptionTransportError",
+    "TranscriberProtocol",
 ]

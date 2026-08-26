@@ -28,6 +28,11 @@ class WorkerSettings(BaseSettings):
     audio_processing_dir: Path = Path("/data/audio-processing")
     audio_completed_dir: Path = Path("/data/audio-completed")
     audio_failed_dir: Path = Path("/data/audio-failed")
+    worker_scan_interval_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
 
     legacy_transcription_base_url: HttpUrl
     legacy_transcription_api_key: SecretStr = Field(repr=False)
@@ -54,6 +59,11 @@ class WorkerSettings(BaseSettings):
     glpi_client_secret: SecretStr = Field(repr=False)
     glpi_http_timeout_seconds: float = Field(
         default=10.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
+    glpi_retry_interval_seconds: float = Field(
+        default=2.0,
         gt=0,
         allow_inf_nan=False,
     )

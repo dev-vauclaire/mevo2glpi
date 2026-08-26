@@ -99,6 +99,54 @@ def test_worker_settings_read_environment_overrides(
     assert settings.audio_failed_dir == failed_dir
 
 
+def test_runner_intervals_have_safe_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for variable_name in (
+        "WORKER_SCAN_INTERVAL_SECONDS",
+        "GLPI_RETRY_INTERVAL_SECONDS",
+    ):
+        monkeypatch.delenv(variable_name, raising=False)
+        monkeypatch.delenv(variable_name.lower(), raising=False)
+
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        _env_file=None,
+    )
+
+    assert settings.worker_scan_interval_seconds == 1.0
+    assert settings.glpi_retry_interval_seconds == 2.0
+
+
+def test_runner_intervals_read_environment_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WORKER_SCAN_INTERVAL_SECONDS", "1.25")
+    monkeypatch.setenv("GLPI_RETRY_INTERVAL_SECONDS", "3.5")
+
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        _env_file=None,
+    )
+
+    assert settings.worker_scan_interval_seconds == 1.25
+    assert settings.glpi_retry_interval_seconds == 3.5
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["worker_scan_interval_seconds", "glpi_retry_interval_seconds"],
+)
+def test_runner_intervals_must_be_positive_and_finite(field_name: str) -> None:
+    for invalid_value in (0, -1, float("inf"), float("nan")):
+        with pytest.raises(ValidationError):
+            WorkerSettings(
+                public_base_url="http://localhost:8000",
+                **{field_name: invalid_value},
+                _env_file=None,
+            )
+
+
 def test_required_public_base_url_is_validated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -2,7 +2,9 @@
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import NewType
+from uuid import UUID
 
 JobUuid = NewType("JobUuid", str)
 
@@ -68,3 +70,12 @@ class JobSnapshot:
             raise ValueError("a completed job must contain a transcription")
         if self.status is not JobStatus.COMPLETED and self.transcription is not None:
             raise ValueError("only a completed job may contain a transcription")
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptionResult:
+    """Successful transcription associated with its processing audio."""
+
+    audio_path: Path
+    audio_uuid: UUID
+    transcription: str = field(repr=False)

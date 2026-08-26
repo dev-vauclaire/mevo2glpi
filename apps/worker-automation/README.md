@@ -1,15 +1,15 @@
 # Worker d'automatisation
 
 Ce workspace contient l'application chargée de consommer les fichiers audio,
-de demander leur transcription et d'adapter l'API GLPI V2. Le POC fonctionne
-avec **un seul worker** : il scrute des répertoires partagés, traite un audio à
-la fois et s'appuie sur le package commun pour publier les changements de
-volume de manière sûre.
+de demander leur transcription, de retrouver ou créer le ticket GLPI associé,
+puis de publier l'audio terminé. Le POC fonctionne avec **un seul worker** :
+`AudioProcessor` conserve l'avancement d'un seul audio en mémoire et
+`run_forever()` planifie ses reprises.
 
-Le client GLPI permet de retrouver ou créer un ticket, mais il n'est pas encore
-branché à la sortie de transcription. Le worker ne possède pas non plus de
-point d'entrée exécutable. L'assemblage de ces composants dans un processus
-déployable relève d'une étape ultérieure.
+Le pipeline applicatif est implémenté et testable par injection. Il ne possède
+pas encore de point d'entrée exécutable assemblant `WorkerSettings`, les deux
+clients HTTP et leurs ressources ; cette composition relève d'une étape
+ultérieure.
 
 ## Entrées et sorties
 
@@ -17,13 +17,14 @@ déployable relève d'une étape ultérieure.
 
 - un fichier audio complet dans `processing`, ou à défaut dans `pending` ;
 - les quatre répertoires du cycle de vie audio ;
-- un objet respectant `TranscriptionClientProtocol` ;
-- les intervalles et délais de transcription ;
-- pour le client réel, l'URL de base et la clé de l'API de transcription.
+- un objet respectant `TranscriberProtocol` ;
+- un objet respectant `GlpiClientProtocol` ;
+- une fonction `audio_url_for(UUID)` ;
+- les intervalles de scan, de transcription et de reprise GLPI.
 
-Le client GLPI reçoit séparément la transcription réussie, l'UUID stable de
-l'audio et son URL publique. Ses identifiants OAuth Password et les valeurs
-fixes du ticket proviennent de `WorkerSettings`.
+Le processeur transforme lui-même la transcription réussie en
+`GlpiTicketInput`. Les identifiants OAuth Password et les valeurs fixes du
+ticket proviennent de `WorkerSettings` lors de la future composition.
 
 Un nom de fichier audio doit suivre la convention
 `{uuid}.{extension}` avec un UUID canonique et une extension parmi `.wav`,
@@ -32,33 +33,45 @@ fichiers terminant par `.part` ne sont pas consommés.
 
 ### Sorties
 
-`run_once()` produit l'une des sorties suivantes :
+`AudioProcessor.run_once()` retourne toujours un `RunOutcome` immuable et
+expurgé :
 
-- `None` lorsqu'aucun audio prêt n'est disponible ;
-- un `TranscriptionResult` en cas de succès, contenant l'UUID local de l'audio,
-  son chemin dans `processing` et la transcription en mémoire ;
-- une `TranscriptionProcessingFailed` après isolation d'une erreur terminale
-  dans `failed`.
+| Résultat | Signification |
+| --- | --- |
+| `IdleOutcome` | Aucun audio prêt ; porte l'intervalle de scan. |
+| `RetryOutcome` | Échec récupérable ; conserve l'audio et l'état privé pour une reprise après l'intervalle indiqué. |
+| `CompletedOutcome` | Ticket confirmé et audio publié dans `completed`. |
+| `FailedOutcome` | Échec terminal propre à l'audio, publié dans `failed` avec son sidecar. |
+| `BlockedOutcome` | Le traitement ne peut progresser sûrement sans intervention ; le runner s'arrête sans lancer de transition automatique supplémentaire. |
 
-Une indisponibilité n'est pas une sortie terminale de `run_once()` : la
-fonction attend l'intervalle configuré puis réessaie le **même fichier**.
+La transcription n'appartient à aucun résultat public. `CompletedOutcome`
+contient uniquement l'UUID, le chemin final et l'identifiant du ticket.
+`BlockedOutcome` porte le chemin `processing` tant qu'il est observable. Si la
+source a déjà disparu lors d'une publication ambiguë, ce champ vaut `None` et
+`inspection_paths` désigne les emplacements que l'opérateur doit vérifier.
 
 ## Cycle de vie d'un audio
 
 ```mermaid
 flowchart TD
     P["pending<br/>audio complet"] -->|"publication dans processing<br/>puis suppression de la source"| R["processing"]
-    R --> S["POST : création d'un job"]
+    R --> S["POST : création d'un job Transcribe AI"]
     S --> G["GET : polling du job"]
     G -->|"PENDING ou PROCESSING"| W["attente configurable"]
     W --> G
     S -->|"indisponibilité"| U["attente puis nouvelle tentative"]
     G -->|"indisponibilité ou délai dépassé"| U
     U --> S
-    G -->|"COMPLETED"| M["TranscriptionResult en mémoire"]
-    M -->|"callback aval obligatoire"| C["completed ou étape suivante"]
-    S -->|"erreur terminale"| F["failed<br/>audio + sidecar expurgé"]
-    G -->|"erreur terminale"| F
+    G -->|"COMPLETED"| M["transcription privée en mémoire"]
+    M --> T["ensure_ticket par external_id"]
+    T -->|"indisponibilité ou résultat inconnu"| V["attente puis reprise GLPI"]
+    V --> T
+    T -->|"ticket confirmé"| C["publication dans completed"]
+    S -->|"erreur terminale audio"| F["failed<br/>audio + sidecar expurgé"]
+    G -->|"erreur terminale audio"| F
+    T -->|"CREATE 400/409/422 ou external_id dupliqué"| F
+    T -->|"erreur systémique"| B["blocked<br/>arrêt du runner"]
+    C -->|"publication impossible"| B
     F --> O["décision opérateur"]
 ```
 
@@ -75,36 +88,56 @@ Le déplacement fourni par `glpi-ticketing-common` est compatible avec des
 volumes distincts : le fichier est copié vers un nom temporaire `.part`, vidé
 sur disque, publié sous son nom définitif, puis la source est supprimée. Un
 fichier partiel ne devient donc jamais visible comme travail prêt.
+Si la synchronisation du répertoire `pending` échoue après cette suppression,
+le scanner reconnaît le fichier complet déjà visible dans `processing` et le
+retourne comme réclamé au lieu de provoquer un rejeu ambigu.
 
 ### Signification des volumes
 
 | Volume | Responsabilité actuelle |
 | --- | --- |
 | `pending` | Fichiers complets en attente de réclamation. |
-| `processing` | Fichier réclamé, conservé pendant la soumission et tout le polling. Il est prioritaire après un redémarrage. |
+| `processing` | Fichier réclamé, conservé pendant la transcription et le ticketing. Il est prioritaire après un redémarrage. |
 | `failed` | Échecs terminaux. Le scanner n'y reprend rien automatiquement ; une décision opérateur est nécessaire. |
-| `completed` | Destination configurée pour la suite du pipeline. Le worker de transcription ne déplace pas encore lui-même les succès vers ce volume. |
+| `completed` | Audio dont le ticket GLPI a été confirmé ; il devient téléchargeable par l'application web. |
 
-## Scanner et boucle du worker
+## Package `worker` et état privé
 
-Les trois fonctions publiques de `worker.py` ont des responsabilités séparées :
+L'ancien module unique `worker.py` est devenu un package cohésif :
 
-- `claim_next_audio()` sélectionne ou réclame un fichier, sans appeler de
-  service externe ;
-- `run_once()` réclame au plus un fichier, construit le poller et attend son
-  succès ou son échec terminal ;
-- `run_forever()` répète `run_once()` et attend l'intervalle de scan lorsqu'il
-  n'y a aucun travail.
+- `worker/models.py` définit les répertoires, étapes, statuts et cinq outcomes
+  publics ;
+- `worker/processor.py` contient `claim_next_audio()` et `AudioProcessor`, le
+  cas d'usage complet d'un audio ;
+- `worker/runner.py` contient la boucle de planification et
+  `WorkerBlockedError` ;
+- `worker/__init__.py` constitue l'API publique stable du package.
 
-`run_forever()` reçoit obligatoirement un callback
-`handle_transcription(TranscriptionResult)`. Avant de rendre la main, ce
-callback doit faire avancer le fichier réussi hors de `processing`, normalement
-vers `completed` après le traitement aval. Si le fichier existe encore à son
-chemin initial au retour du callback, le worker lève une `RuntimeError` afin de
-ne pas soumettre silencieusement le même audio en boucle.
+`AudioProcessor` possède un état privé non persistant parmi quatre phases :
 
-Le callback concret et le traitement métier post-transcription ne sont pas
-encore fournis dans ce workspace.
+1. `_AwaitingTranscription` : chemin et UUID de l'audio ;
+2. `_AwaitingTicket` : mêmes identifiants et transcription masquée du `repr` ;
+3. `_AwaitingFinalization` : identifiants de l'audio et du ticket confirmé ;
+4. `_AwaitingFailurePublication` : audio, étape, erreur expurgée et horodatage
+   figé du sidecar à publier.
+
+Un appel traverse immédiatement les phases qui réussissent et s'arrête au
+premier résultat observable. Il peut donc produire directement `completed`, ou
+rendre la main plus tôt avec `retry`, `failed` ou `blocked`.
+
+Cet état permet de réessayer GLPI sans retranscrire et de réessayer une
+publication dans `completed` ou `failed` sans rappeler un service externe. Une
+publication `failed` interrompue reprend le même échec et le même horodatage
+lorsqu'on rappelle `run_once()` sur la même instance. L'état privé n'est ni
+exporté, ni sérialisé dans les outcomes. Après un redémarrage, il est perdu : le
+fichier prioritaire de `processing` est retranscrit, puis le client GLPI
+réconcilie le ticket par `external_id`.
+
+`run_forever()` interprète les outcomes sans connaître les services :
+
+- `idle` et `retry` provoquent l'attente portée par le résultat ;
+- `completed` et `failed` passent immédiatement au prochain audio ;
+- `blocked` lève `WorkerBlockedError` et arrête la boucle pour intervention.
 
 ## Transcription
 
@@ -141,12 +174,12 @@ Les situations suivantes sont considérées comme des indisponibilités :
 - tous les codes HTTP `5xx` ;
 - délai global d'un job dépassé pendant le polling.
 
-Dans ces cas, l'audio reste dans `processing`. `run_once()` attend la valeur de
-son argument injecté `transcription_poll_interval_seconds` (deux secondes par
-défaut), puis démarre une nouvelle tentative qui crée un nouveau job distant.
-Le futur bootstrap devra alimenter cet argument depuis
-`TRANSCRIPTION_POLL_INTERVAL_SECONDS`. Il n'y a actuellement ni nombre maximal
-de tentatives, ni backoff progressif, ni jitter.
+Dans ces cas, l'audio reste dans `processing`. Le poller lève une
+`TranscriptionRetryRequired`, le processeur retourne `RetryOutcome`, puis le
+runner attend l'intervalle de transcription avant une nouvelle tentative qui
+crée un nouveau job distant. Le futur bootstrap devra alimenter cet intervalle
+depuis `TRANSCRIPTION_POLL_INTERVAL_SECONDS`. Il n'y a actuellement ni nombre
+maximal de tentatives, ni backoff progressif, ni jitter.
 
 ### Erreurs terminales
 
@@ -154,14 +187,25 @@ Une soumission explicitement refusée, une erreur HTTP non réessayable, un
 contrat de réponse invalide, un UUID distant incohérent, un job distant en
 échec ou une transcription absente à l'état `COMPLETED` sont terminaux.
 
-Dans ce cas, le package commun publie d'abord dans `failed` :
+Le poller traduit ces situations en `TranscriptionTerminalError` sans déplacer
+l'audio. `AudioProcessor` est l'unique responsable de publier ensuite dans
+`failed` :
 
 1. l'audio complet ;
 2. le sidecar `{uuid}.error.json` complet ;
 3. puis seulement supprime l'audio de `processing`.
 
 Si la publication échoue tant que la source existe, les artefacts partiellement
-publiés sont nettoyés et la source reste dans `processing`.
+publiés sont nettoyés et la source reste dans `processing`. Le processeur
+conserve alors `_AwaitingFailurePublication` : après intervention, un nouvel
+appel sur la même instance réessaie uniquement la publication, sans rappeler
+Transcribe AI ou GLPI.
+
+Un `OSError` de synchronisation peut survenir après la publication effective.
+Le processeur réconcilie ce cas au lieu de déclarer un blocage si la source a
+disparu et que la destination complète est déjà visible : audio plus sidecar
+strictement conforme dans `failed`, ou audio régulier dans `completed`. Il
+retourne alors respectivement `FailedOutcome` ou `CompletedOutcome`.
 
 Le sidecar contient exactement les informations opérationnelles suivantes :
 
@@ -175,8 +219,10 @@ Le sidecar contient exactement les informations opérationnelles suivantes :
 }
 ```
 
-Il ne contient ni transcription, ni clé API, ni réponse HTTP brute, ni message
-fourni par le service distant.
+Le même schéma est utilisé pour une erreur terminale de ticketing, avec
+`"step": "ticketing"` et les identifiants expurgés du client GLPI. Il ne
+contient ni transcription, ni clé API, ni réponse HTTP brute, ni message fourni
+par un service distant.
 
 ## GLPI
 
@@ -212,6 +258,33 @@ il expose un résultat inconnu à l'orchestrateur. Les tokens, identifiants
 secrets, transcriptions et réponses HTTP brutes sont exclus des logs et des
 exceptions.
 
+### Politique ticketing, failed et blocked
+
+Le processeur applique la classification du client GLPI :
+
+- une erreur réessayable ou un résultat de création inconnu produit
+  `RetryOutcome` à l'étape `ticketing` ; la transcription privée est conservée
+  et le prochain appel reprend directement GLPI ;
+- `FailedOutcome` est volontairement limité à un `external_id` dupliqué ou à
+  une erreur HTTP `400`, `409` ou `422` produite par l'opération
+  `CREATE_TICKET` ; dans la politique actuelle, ces cas sont traités comme
+  propres à l'entrée audio ;
+- une erreur déclarée invalide pendant une autre opération, ainsi qu'un `404`
+  ou `405` même pendant `CREATE_TICKET`, produit `BlockedOutcome` : elle peut
+  révéler une route, une version d'API ou un contrat mal configuré ;
+- une erreur d'authentification, d'autorisation ou une autre erreur systémique
+  non réessayable produit `BlockedOutcome` afin de ne pas classer à tort
+  l'audio dans `failed` ;
+- une URL audio impossible à construire ou une incohérence entre le résultat
+  d'une étape et l'audio actif bloque également le worker ;
+- une impossibilité de publier dans `failed` ou `completed` produit
+  `BlockedOutcome`, en conservant l'état nécessaire à une intervention sûre.
+
+Après confirmation du ticket, le processeur mémorise uniquement son ID avant
+de déplacer l'audio vers `completed`. Un nouvel appel sur la même instance peut
+donc réessayer uniquement cette finalisation. La boucle standard s'arrête
+toutefois dès le premier résultat `blocked`.
+
 ## Configuration
 
 `WorkerSettings` charge les variables d'environnement et, en développement, le
@@ -225,11 +298,12 @@ ou démarrer un daemon.
 
 | Variable | Obligatoire | Défaut | Rôle prévu lors de la composition |
 | --- | --- | --- | --- |
-| `PUBLIC_BASE_URL` | oui | — | URL publique validée et réservée à la construction de futurs liens audio ; pas encore utilisée par le flux de transcription. |
+| `PUBLIC_BASE_URL` | oui | — | Base destinée à la fonction `audio_url_for()` qui construit le lien placé dans le ticket. |
 | `AUDIO_PENDING_DIR` | non | `/data/audio-pending` | Volume d'entrée. |
 | `AUDIO_PROCESSING_DIR` | non | `/data/audio-processing` | Volume de travail et de reprise. |
-| `AUDIO_COMPLETED_DIR` | non | `/data/audio-completed` | Volume prévu pour les succès traités par l'étape aval. |
+| `AUDIO_COMPLETED_DIR` | non | `/data/audio-completed` | Volume de publication après confirmation du ticket. |
 | `AUDIO_FAILED_DIR` | non | `/data/audio-failed` | Volume terminal et sidecars d'erreur. |
+| `WORKER_SCAN_INTERVAL_SECONDS` | non | `1` | Attente portée par `IdleOutcome` lorsqu'aucun audio n'est prêt. |
 | `LEGACY_TRANSCRIPTION_BASE_URL` | oui | — | URL de l'API batch actuellement adaptée par `TranscriptionClient`. |
 | `LEGACY_TRANSCRIPTION_API_KEY` | oui | — | Clé envoyée dans `X-API-KEY`. |
 | `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | non | `10` | Timeout à transmettre au client pour chaque appel HTTP. |
@@ -241,6 +315,7 @@ ou démarrer un daemon.
 | `GLPI_CLIENT_ID` | oui | — | Identifiant du client OAuth autorisé pour le scope `api`. |
 | `GLPI_CLIENT_SECRET` | oui | — | Secret du client OAuth conservé comme secret. |
 | `GLPI_HTTP_TIMEOUT_SECONDS` | non | `10` | Timeout de chaque requête HTTP vers GLPI. |
+| `GLPI_RETRY_INTERVAL_SECONDS` | non | `2` | Attente portée par un `RetryOutcome` de ticketing. |
 | `GLPI_TICKET_TITLE` | oui | — | Titre fixe des tickets, imprimable et limité à 255 caractères. |
 | `GLPI_TICKET_TYPE` | oui | — | Type GLPI : `1` pour un incident, `2` pour une demande. |
 | `GLPI_TICKET_URGENCY` | oui | — | Urgence fixe comprise entre `1` et `5`. |
@@ -269,21 +344,34 @@ apps/worker-automation/
 ├── src/glpi_ticketing_worker_automation/
 │   ├── __init__.py
 │   ├── settings.py
-│   ├── worker.py
 │   ├── glpi/
 │   │   ├── __init__.py
 │   │   ├── client.py
 │   │   ├── contracts.py
 │   │   └── models.py
-│   └── transcription/
+│   ├── transcription/
+│   │   ├── __init__.py
+│   │   ├── client.py
+│   │   ├── contracts.py
+│   │   ├── models.py
+│   │   └── poller.py
+│   └── worker/
 │       ├── __init__.py
-│       ├── client.py
-│       ├── contracts.py
 │       ├── models.py
-│       └── poller.py
+│       ├── processor.py
+│       └── runner.py
 └── tests/
     ├── unit/
-    │   └── test_glpi_client.py
+    │   ├── test_glpi_client.py
+    │   ├── test_settings.py
+    │   ├── test_transcription_clients.py
+    │   ├── test_transcription_poller.py
+    │   └── worker/
+    │       ├── test_outcomes.py
+    │       ├── test_processor_ticketing.py
+    │       ├── test_processor_transcription.py
+    │       ├── test_runner.py
+    │       └── test_scanner.py
     └── integration/
         ├── glpi/
         │   ├── compose.yml
@@ -305,18 +393,20 @@ Conventions à préserver :
 - conserver le *src layout* : le code importable reste sous `src/` ;
 - laisser les primitives de cycle de vie des fichiers dans
   `glpi-ticketing-common.audio_files` ;
-- laisser la sélection et l'orchestration globale dans `worker.py` ;
+- laisser les outcomes expurgés dans `worker/models.py`, le cas d'usage dans
+  `worker/processor.py` et la planification dans `worker/runner.py` ;
 - isoler les détails HTTP dans les adaptateurs `transcription/client.py` et
   `glpi/client.py` ;
-- faire dépendre le poller du protocole, pas du client concret, afin de pouvoir
-  injecter un faux client en test ou remplacer l'adaptateur HTTP ;
+- faire dépendre le poller et le processeur de protocoles, pas des clients
+  concrets, afin de pouvoir injecter des doubles en test ;
 - exprimer les contrats avec des modèles typés et les valeurs fermées avec des
   énumérations (`JobStatus`, `TranscriptionOperation`, `TicketType`,
   `TicketLevel`) plutôt qu'avec des valeurs primitives dispersées ;
 - injecter le sommeil et l'horloge dans les composants qui attendent, pour
   conserver des tests rapides et déterministes ;
-- placer les tests unitaires au même niveau fonctionnel que le module testé et
-  réserver `tests/integration/` aux appels réels explicitement activés.
+- regrouper sous `tests/unit/worker/` les tests des outcomes, du scanner, des
+  deux étapes du processeur et du runner ; réserver `tests/integration/` aux
+  appels réels explicitement activés.
 
 ## Journalisation et sécurité
 
@@ -352,12 +442,20 @@ Exécuter tous les tests unitaires du worker :
 uv run --all-packages pytest apps/worker-automation/tests/unit
 ```
 
-Exécuter séparément les tests du scanner et de l'intégration de transcription
-dans le worker :
+Exécuter les tests du nouveau package `worker` :
 
 ```bash
-uv run --all-packages pytest apps/worker-automation/tests/unit/test_worker_scanner.py
-uv run --all-packages pytest apps/worker-automation/tests/unit/test_worker_transcription.py
+uv run --all-packages pytest apps/worker-automation/tests/unit/worker
+```
+
+Exécuter séparément une responsabilité du pipeline :
+
+```bash
+uv run --all-packages pytest apps/worker-automation/tests/unit/worker/test_outcomes.py
+uv run --all-packages pytest apps/worker-automation/tests/unit/worker/test_scanner.py
+uv run --all-packages pytest apps/worker-automation/tests/unit/worker/test_processor_transcription.py
+uv run --all-packages pytest apps/worker-automation/tests/unit/worker/test_processor_ticketing.py
+uv run --all-packages pytest apps/worker-automation/tests/unit/worker/test_runner.py
 ```
 
 Exécuter la suite locale du dépôt sans service externe :
@@ -430,9 +528,15 @@ Les tests unitaires couvrent séparément :
 - la recherche et la création idempotente au mieux d'un ticket GLPI ;
 - le polling, les délais, les reprises et la classification des erreurs ;
 - l'ordre de sélection `processing` puis `pending` ;
-- la publication sûre dans `failed` et l'expurgation du sidecar ;
-- la non-divulgation de la transcription dans les logs ;
-- la reprise après interruption et le contrat du callback de succès.
+- les transitions sûres dans `failed` et `completed` ;
+- la reprise locale d'une publication `failed` et la réconciliation des
+  erreurs de synchronisation sur une destination déjà complète ;
+- les cinq outcomes, leurs invariants et l'absence de canal public pour la
+  transcription ;
+- la conservation privée de la transcription pendant une reprise GLPI ;
+- la séparation `retry`/`failed`/`blocked` et l'arrêt explicite du runner ;
+- la non-divulgation de la transcription dans les logs et sidecars ;
+- la reprise après interruption depuis le fichier présent dans `processing`.
 
 Le sommeil, l'horloge et le client sont injectés dans les tests : la suite
 unitaire ne dort pas et ne contacte aucun service. Les marqueurs globaux du
@@ -446,22 +550,28 @@ dépôt sont :
 
 - L'application n'a pas encore de CLI, de fonction `main` ni de composition qui
   transforme `WorkerSettings` en clients HTTP et lance `run_forever()`.
-- Le callback aval qui consomme `TranscriptionResult` et déplace le succès vers
-  `completed` n'est pas encore implémenté ; il n'appelle donc pas encore le
-  client GLPI.
-- La transcription et l'UUID du job distant ne sont pas persistés par le worker.
+- L'état privé du processeur, notamment la transcription, l'identifiant du
+  ticket avant finalisation et une publication d'échec en attente, n'est pas
+  persisté. Après redémarrage, le fichier de `processing` repart donc de la
+  transcription.
 - L'UUID local de l'audio sert actuellement d'`external_id` GLPI sans être
   aligné sur l'UUID du job Transcribe AI. Cet alignement dépend d'une évolution
   future de l'API de transcription.
 - `external_id` n'est pas une contrainte d'unicité dans GLPI. La recherche avant
   création est adaptée au worker unique du POC, mais ne fournit pas
   d'idempotence atomique en présence de plusieurs auteurs concurrents.
+- La classification terminale des réponses `CREATE_TICKET` `400`/`409`/`422`
+  est une convention du POC. Avant la production, elle devra s'appuyer sur un
+  code métier GLPI stable afin de distinguer un ticket réellement rejeté d'une
+  dérive de configuration ou de contrat.
 - L'API ne fournit pas de clé d'idempotence. Après une réponse ambiguë, un délai
   dépassé ou un redémarrage, un fichier conservé dans `processing` est resoumis
   et peut créer plusieurs jobs distants pour le même audio.
-- La politique d'indisponibilité réessaie indéfiniment avec un intervalle fixe ;
-  elle ne propose encore ni backoff, ni jitter, ni circuit breaker.
+- La politique `retry` réessaie indéfiniment avec des intervalles fixes ; elle
+  ne propose encore ni backoff, ni jitter, ni circuit breaker.
 - Le POC suppose un seul worker et un seul auteur pour un UUID audio. Il n'y a
   pas de verrou distribué pour plusieurs consommateurs concurrents.
 - `failed` est terminal : aucun outil de décision opérateur ou de réinjection
   n'est fourni actuellement.
+- `blocked` arrête le runner, mais aucun superviseur ni commande opérateur ne
+  fournit encore la correction et la reprise contrôlée du traitement.

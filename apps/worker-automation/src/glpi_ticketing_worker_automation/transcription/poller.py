@@ -3,7 +3,7 @@
 import math
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Never
@@ -16,12 +16,15 @@ from .contracts import (
     TranscriptionClientProtocol,
     TranscriptionHttpError,
     TranscriptionProtocolError,
+    TranscriptionRetryRequired,
     TranscriptionSubmissionRejectedError,
+    TranscriptionTerminalError,
     TranscriptionTransportError,
 )
 from .models import (
     JobStatus,
     JobUuid,
+    TranscriptionResult,
 )
 
 DEFAULT_POLL_INTERVAL_SECONDS = 2.0
@@ -37,33 +40,6 @@ class _TranscriptionAttempt:
     job_uuid: JobUuid | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class TranscriptionResult:
-    """Successful transcription associated with its processing audio."""
-
-    audio_path: Path
-    audio_uuid: UUID
-    transcription: str = field(repr=False)
-
-
-class TranscriptionProcessingFailed(Exception):
-    """Raised after an audio has been isolated in the failed directory."""
-
-    def __init__(self, code: str, failed_audio_path: Path) -> None:
-        self.code = code
-        self.failed_audio_path = failed_audio_path
-        super().__init__(f"transcription failed with code {code}")
-
-
-class TranscriptionRetryRequired(Exception):
-    """Raised while leaving an audio in processing for a fresh submission."""
-
-    def __init__(self, code: str, audio_path: Path) -> None:
-        self.code = code
-        self.audio_path = audio_path
-        super().__init__(f"transcription retry required with code {code}")
-
-
 class TranscriptionPoller:
     """Submit a new job for each call, then poll it until a terminal state."""
 
@@ -71,14 +47,12 @@ class TranscriptionPoller:
         self,
         *,
         client: TranscriptionClientProtocol,
-        failed_directory: Path,
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         job_timeout_seconds: float = DEFAULT_JOB_TIMEOUT_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._client = client
-        self._failed_directory = Path(failed_directory)
         self._poll_interval_seconds = _validate_positive_seconds(
             poll_interval_seconds,
             "poll_interval_seconds",
@@ -110,9 +84,8 @@ class TranscriptionPoller:
         try:
             submission = self._client.submit(audio_path)
         except TranscriptionSubmissionRejectedError:
-            self._mark_failed(
+            self._raise_terminal(
                 audio_path,
-                attempt,
                 code="submission_rejected",
             )
         except TranscriptionTransportError:
@@ -126,21 +99,18 @@ class TranscriptionPoller:
                     "submission_unavailable",
                     audio_path,
                 ) from None
-            self._mark_failed(
+            self._raise_terminal(
                 audio_path,
-                attempt,
                 code="submission_http_error",
             )
         except TranscriptionProtocolError:
-            self._mark_failed(
+            self._raise_terminal(
                 audio_path,
-                attempt,
                 code="submission_protocol_error",
             )
         except TranscriptionClientError:
-            self._mark_failed(
+            self._raise_terminal(
                 audio_path,
-                attempt,
                 code="submission_failed",
             )
 
@@ -175,36 +145,31 @@ class TranscriptionPoller:
                         "polling_unavailable",
                         audio_path,
                     ) from None
-                self._mark_failed(
+                self._raise_terminal(
                     audio_path,
-                    attempt,
                     code="polling_http_error",
                 )
             except TranscriptionProtocolError:
-                self._mark_failed(
+                self._raise_terminal(
                     audio_path,
-                    attempt,
                     code="polling_protocol_error",
                 )
             except TranscriptionClientError:
-                self._mark_failed(
+                self._raise_terminal(
                     audio_path,
-                    attempt,
                     code="polling_failed",
                 )
 
             if snapshot.job_uuid != job_uuid:
-                self._mark_failed(
+                self._raise_terminal(
                     audio_path,
-                    attempt,
                     code="polling_job_mismatch",
                 )
 
             if snapshot.status is JobStatus.COMPLETED:
                 if snapshot.transcription is None:
-                    self._mark_failed(
+                    self._raise_terminal(
                         audio_path,
-                        attempt,
                         code="missing_transcription",
                     )
                 return TranscriptionResult(
@@ -213,9 +178,8 @@ class TranscriptionPoller:
                     transcription=snapshot.transcription,
                 )
             if snapshot.status is JobStatus.FAILED:
-                self._mark_failed(
+                self._raise_terminal(
                     audio_path,
-                    attempt,
                     code="remote_job_failed",
                 )
 
@@ -227,27 +191,13 @@ class TranscriptionPoller:
             return
         self._sleep(min(self._poll_interval_seconds, remaining_seconds))
 
-    def _mark_failed(
+    def _raise_terminal(
         self,
         audio_path: Path,
-        attempt: _TranscriptionAttempt,
         *,
         code: str,
     ) -> Never:
-        payload: dict[str, object] = {
-            "uuid": str(attempt.audio_uuid),
-            "step": "transcription",
-            "category": "terminal",
-            "code": code,
-            "timestamp": _format_utc(self._current_time()),
-        }
-
-        transition = audio_files.move_to_failed(
-            audio_path,
-            self._failed_directory,
-            payload,
-        )
-        raise TranscriptionProcessingFailed(code, transition.audio_path)
+        raise TranscriptionTerminalError(code, audio_path)
 
     def _current_time(self) -> datetime:
         current_time = self._now()
@@ -283,7 +233,3 @@ def _is_server_error(status_code: int) -> bool:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-def _format_utc(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
