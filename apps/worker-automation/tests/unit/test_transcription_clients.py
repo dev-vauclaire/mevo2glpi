@@ -287,9 +287,11 @@ def test_transcription_client_get_job_keeps_429_error_envelope_retryable() -> No
         (404, False),
         (422, False),
         (429, True),
-        (500, False),
+        (500, True),
+        (501, True),
         (502, True),
         (503, True),
+        (599, True),
     ],
 )
 def test_transcription_client_http_errors_are_classified(

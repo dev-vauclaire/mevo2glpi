@@ -354,7 +354,7 @@ def _require_successful_http_status(
     if response.status_code == 200:
         return
     status_code = response.status_code
-    retryable = status_code in RETRYABLE_HTTP_STATUSES
+    retryable = status_code in RETRYABLE_HTTP_STATUSES or 500 <= status_code < 600
     raise TranscriptionHttpError(
         provider,
         operation,

@@ -6,7 +6,18 @@ from uuid import uuid4
 import pytest
 
 from glpi_ticketing_worker_automation import worker
-from glpi_ticketing_worker_automation.worker import run_forever, run_once
+from glpi_ticketing_worker_automation.transcription import (
+    JobSnapshot,
+    JobUuid,
+    Submission,
+    TranscriptionProvider,
+    TranscriptionResult,
+)
+from glpi_ticketing_worker_automation.worker import (
+    claim_next_audio,
+    run_forever,
+    run_once,
+)
 
 PENDING_FILENAME = "00000000-0000-0000-0000-000000000001.wav"
 PROCESSING_FILENAME = "ffffffff-ffff-ffff-ffff-ffffffffffff.ogg"
@@ -17,17 +28,33 @@ SYNTHETIC_AUDIO = b"RIFF\x10\x00\x00\x00WAVEfmt \x00\x00\x00\x00data"
 class AudioDirectories:
     pending: Path
     processing: Path
+    failed: Path
+
+
+class UnusedTranscriptionClient:
+    """Protocol-compatible client that must not be called by scanner tests."""
+
+    provider = TranscriptionProvider.LEGACY
+
+    def submit(self, _audio_path: Path) -> Submission:
+        raise AssertionError("the scanner must not submit an audio")
+
+    def get_job(self, _job_uuid: JobUuid) -> JobSnapshot:
+        raise AssertionError("the scanner must not poll a transcription job")
 
 
 @pytest.fixture
 def audio_directories(tmp_path: Path) -> AudioDirectories:
     pending_directory = tmp_path / "pending"
     processing_directory = tmp_path / "processing"
+    failed_directory = tmp_path / "failed"
     pending_directory.mkdir()
     processing_directory.mkdir()
+    failed_directory.mkdir()
     return AudioDirectories(
         pending=pending_directory,
         processing=processing_directory,
+        failed=failed_directory,
     )
 
 
@@ -39,7 +66,7 @@ def test_processing_file_has_priority_over_pending(
     pending_audio.write_bytes(b"pending-audio")
     processing_audio.write_bytes(b"processing-audio")
 
-    selected_audio = run_once(
+    selected_audio = claim_next_audio(
         pending_directory=audio_directories.pending,
         processing_directory=audio_directories.processing,
     )
@@ -75,7 +102,7 @@ def test_pending_file_is_claimed_into_processing(
 
     monkeypatch.setattr(worker.audio_files, "move_audio", tracked_move_audio)
 
-    claimed_audio = run_once(
+    claimed_audio = claim_next_audio(
         pending_directory=audio_directories.pending,
         processing_directory=audio_directories.processing,
     )
@@ -92,7 +119,7 @@ def test_pending_source_is_deleted_after_claim(
     pending_audio = audio_directories.pending / PENDING_FILENAME
     pending_audio.write_bytes(SYNTHETIC_AUDIO)
 
-    claimed_audio = run_once(
+    claimed_audio = claim_next_audio(
         pending_directory=audio_directories.pending,
         processing_directory=audio_directories.processing,
     )
@@ -110,7 +137,7 @@ def test_part_file_is_ignored(audio_directories: AudioDirectories) -> None:
     pending_part.write_bytes(b"partial-pending")
     processing_part.write_bytes(b"partial-processing")
 
-    selected_audio = run_once(
+    selected_audio = claim_next_audio(
         pending_directory=audio_directories.pending,
         processing_directory=audio_directories.processing,
     )
@@ -122,11 +149,9 @@ def test_part_file_is_ignored(audio_directories: AudioDirectories) -> None:
 
 def test_failed_directory_is_never_scanned(
     audio_directories: AudioDirectories,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    failed_directory = tmp_path / "failed"
-    failed_directory.mkdir()
+    failed_directory = audio_directories.failed
     failed_audio = failed_directory / PROCESSING_FILENAME
     failed_audio.write_bytes(SYNTHETIC_AUDIO)
     real_iterdir = Path.iterdir
@@ -138,7 +163,7 @@ def test_failed_directory_is_never_scanned(
 
     monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
 
-    selected_audio = run_once(
+    selected_audio = claim_next_audio(
         pending_directory=audio_directories.pending,
         processing_directory=audio_directories.processing,
     )
@@ -150,12 +175,14 @@ def test_failed_directory_is_never_scanned(
 def test_run_once_returns_none_when_empty(
     audio_directories: AudioDirectories,
 ) -> None:
-    selected_audio = run_once(
+    result = run_once(
         pending_directory=audio_directories.pending,
         processing_directory=audio_directories.processing,
+        failed_directory=audio_directories.failed,
+        transcription_client=UnusedTranscriptionClient(),
     )
 
-    assert selected_audio is None
+    assert result is None
 
 
 def test_run_forever_uses_injected_sleep(
@@ -170,10 +197,16 @@ def test_run_forever_uses_injected_sleep(
         sleep_calls.append(seconds)
         raise StopPolling
 
+    def reject_unexpected_result(_result: TranscriptionResult) -> None:
+        pytest.fail("an empty scanner must not produce a transcription")
+
     with pytest.raises(StopPolling):
         run_forever(
             pending_directory=audio_directories.pending,
             processing_directory=audio_directories.processing,
+            failed_directory=audio_directories.failed,
+            transcription_client=UnusedTranscriptionClient(),
+            handle_transcription=reject_unexpected_result,
             poll_interval_seconds=2.5,
             sleep=stop_after_first_sleep,
         )

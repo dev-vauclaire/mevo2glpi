@@ -2,7 +2,6 @@
 
 import math
 import time
-from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -23,60 +22,10 @@ from .contracts import (
 from .models import (
     JobStatus,
     JobUuid,
-    ResponseLogEntry,
-    TranscriptionOperation,
-    TranscriptionProvider,
 )
 
 DEFAULT_POLL_INTERVAL_SECONDS = 2.0
 DEFAULT_JOB_TIMEOUT_SECONDS = 15 * 60.0
-MAX_RESPONSE_LOGS = 20
-
-
-@dataclass(frozen=True, slots=True)
-class _SanitizedResponseLog:
-    """Allowlisted provider metadata suitable for an error report."""
-
-    operation: TranscriptionOperation
-    http_status: int | None
-    provider_status: str | None
-    job_status: str | None
-
-    @classmethod
-    def from_client_log(cls, entry: ResponseLogEntry) -> "_SanitizedResponseLog":
-        """Remove unexpected status values before retaining response metadata."""
-        operation = (
-            entry.operation
-            if isinstance(entry.operation, TranscriptionOperation)
-            else TranscriptionOperation.UNKNOWN
-        )
-        provider_status = _allowlisted_status(
-            entry.provider_status,
-            allowed={"success", "error"},
-            unknown="other",
-        )
-        job_status = _allowlisted_status(
-            entry.job_status,
-            allowed={"PENDING", "PROCESSING", "COMPLETED", "FAILED"},
-            unknown="OTHER",
-        )
-        return cls(
-            operation=operation,
-            http_status=entry.http_status,
-            provider_status=provider_status,
-            job_status=job_status,
-        )
-
-    def as_payload(self) -> dict[str, object]:
-        """Return the compact JSON object written only for terminal failures."""
-        payload: dict[str, object] = {"operation": self.operation.value}
-        if self.http_status is not None:
-            payload["http_status"] = self.http_status
-        if self.provider_status is not None:
-            payload["provider_status"] = self.provider_status
-        if self.job_status is not None:
-            payload["job_status"] = self.job_status
-        return payload
 
 
 @dataclass(slots=True)
@@ -84,16 +33,8 @@ class _TranscriptionAttempt:
     """Ephemeral state for one submission and its polling loop."""
 
     audio_uuid: UUID
-    provider: TranscriptionProvider
     deadline_at: datetime
     job_uuid: JobUuid | None = None
-    response_logs: deque[_SanitizedResponseLog] = field(
-        default_factory=lambda: deque(maxlen=MAX_RESPONSE_LOGS),
-    )
-
-    def record(self, log: ResponseLogEntry) -> None:
-        """Retain a bounded, sanitized summary of one provider interaction."""
-        self.response_logs.append(_SanitizedResponseLog.from_client_log(log))
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,13 +91,12 @@ class TranscriptionPoller:
         self._now = now or _utc_now
 
     def transcribe(self, audio_path: Path) -> TranscriptionResult:
-        """Submit one audio, leaving it in processing if result retrieval is ambiguous."""
+        """Submit one audio, leaving it in processing when a retry is required."""
         audio_path = _validate_audio_path(audio_path)
         audio_name = audio_files.parse_audio_filename(audio_path.name)
         started_at = self._current_time()
         attempt = _TranscriptionAttempt(
             audio_uuid=audio_name.audio_uuid,
-            provider=self._client.provider,
             deadline_at=started_at + timedelta(seconds=self._job_timeout_seconds),
         )
         self._submit_once(audio_path, attempt)
@@ -169,42 +109,42 @@ class TranscriptionPoller:
     ) -> None:
         try:
             submission = self._client.submit(audio_path)
-        except TranscriptionSubmissionRejectedError as error:
+        except TranscriptionSubmissionRejectedError:
             self._mark_failed(
                 audio_path,
                 attempt,
                 code="submission_rejected",
-                log=error.response_log,
             )
+        except TranscriptionTransportError:
+            raise TranscriptionRetryRequired(
+                "submission_unavailable",
+                audio_path,
+            ) from None
         except TranscriptionHttpError as error:
-            code = (
-                "ambiguous_submission"
-                if error.retryable or error.status_code >= 500
-                else "submission_http_error"
-            )
+            if error.retryable or _is_server_error(error.status_code):
+                raise TranscriptionRetryRequired(
+                    "submission_unavailable",
+                    audio_path,
+                ) from None
             self._mark_failed(
                 audio_path,
                 attempt,
-                code=code,
-                log=_log_from_client_error(error),
+                code="submission_http_error",
             )
-        except (TranscriptionTransportError, TranscriptionProtocolError) as error:
+        except TranscriptionProtocolError:
             self._mark_failed(
                 audio_path,
                 attempt,
-                code="ambiguous_submission",
-                log=_log_from_client_error(error),
+                code="submission_protocol_error",
             )
-        except TranscriptionClientError as error:
+        except TranscriptionClientError:
             self._mark_failed(
                 audio_path,
                 attempt,
                 code="submission_failed",
-                log=_log_from_client_error(error),
             )
 
         attempt.job_uuid = submission.job_uuid
-        attempt.record(submission.response_log)
 
     def _poll(
         self,
@@ -217,40 +157,42 @@ class TranscriptionPoller:
 
         while True:
             if self._current_time() >= attempt.deadline_at:
-                self._mark_failed(
+                raise TranscriptionRetryRequired(
+                    "polling_deadline_exceeded",
                     audio_path,
-                    attempt,
-                    code="polling_deadline_exceeded",
                 )
 
             try:
                 snapshot = self._client.get_job(job_uuid)
             except TranscriptionTransportError:
                 raise TranscriptionRetryRequired(
-                    "ambiguous_polling_response",
+                    "polling_unavailable",
                     audio_path,
                 ) from None
             except TranscriptionHttpError as error:
-                if error.retryable:
+                if error.retryable or _is_server_error(error.status_code):
                     raise TranscriptionRetryRequired(
-                        "ambiguous_polling_response",
+                        "polling_unavailable",
                         audio_path,
                     ) from None
                 self._mark_failed(
                     audio_path,
                     attempt,
                     code="polling_http_error",
-                    log=_log_from_client_error(error),
                 )
-            except TranscriptionClientError as error:
+            except TranscriptionProtocolError:
                 self._mark_failed(
                     audio_path,
                     attempt,
                     code="polling_protocol_error",
-                    log=_log_from_client_error(error),
+                )
+            except TranscriptionClientError:
+                self._mark_failed(
+                    audio_path,
+                    attempt,
+                    code="polling_failed",
                 )
 
-            attempt.record(snapshot.response_log)
             if snapshot.job_uuid != job_uuid:
                 self._mark_failed(
                     audio_path,
@@ -291,21 +233,14 @@ class TranscriptionPoller:
         attempt: _TranscriptionAttempt,
         *,
         code: str,
-        log: ResponseLogEntry | None = None,
     ) -> Never:
-        if log is not None:
-            attempt.record(log)
         payload: dict[str, object] = {
             "uuid": str(attempt.audio_uuid),
             "step": "transcription",
             "category": "terminal",
             "code": code,
             "timestamp": _format_utc(self._current_time()),
-            "provider": attempt.provider.value,
-            "response_logs": [log.as_payload() for log in attempt.response_logs],
         }
-        if attempt.job_uuid is not None:
-            payload["job_uuid"] = str(attempt.job_uuid)
 
         transition = audio_files.move_to_failed(
             audio_path,
@@ -342,20 +277,8 @@ def _validate_positive_seconds(value: float, field_name: str) -> float:
     return value
 
 
-def _log_from_client_error(error: TranscriptionClientError) -> ResponseLogEntry:
-    status_code = error.status_code if isinstance(error, TranscriptionHttpError) else 0
-    raw_operation = getattr(error, "operation", TranscriptionOperation.UNKNOWN)
-    operation = (
-        raw_operation
-        if isinstance(raw_operation, TranscriptionOperation)
-        else TranscriptionOperation.UNKNOWN
-    )
-    return ResponseLogEntry(
-        operation=operation,
-        http_status=status_code or None,
-        provider_status=None,
-        job_status=None,
-    )
+def _is_server_error(status_code: int) -> bool:
+    return 500 <= status_code < 600
 
 
 def _utc_now() -> datetime:
@@ -364,14 +287,3 @@ def _utc_now() -> datetime:
 
 def _format_utc(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _allowlisted_status(
-    value: str | None,
-    *,
-    allowed: set[str],
-    unknown: str,
-) -> str | None:
-    if value is None:
-        return None
-    return value if value in allowed else unknown

@@ -17,7 +17,6 @@ from glpi_ticketing_worker_automation.transcription import (
     TranscriptionTransportError,
 )
 from glpi_ticketing_worker_automation.transcription.poller import (
-    MAX_RESPONSE_LOGS,
     TranscriptionPoller,
     TranscriptionProcessingFailed,
     TranscriptionRetryRequired,
@@ -189,7 +188,7 @@ def test_pending_and_processing_are_polled_with_injected_sleep(
     assert clock.sleep_calls == [1.0, 1.0]
 
 
-def test_post_transport_error_is_terminal_and_never_retried(
+def test_post_transport_error_leaves_audio_in_processing_for_retry(
     audio_directories: tuple[Path, Path],
 ) -> None:
     processing_directory, failed_directory = audio_directories
@@ -205,20 +204,20 @@ def test_post_transport_error_is_terminal_and_never_retried(
     poller = _make_poller(client, failed_directory, clock)
 
     with pytest.raises(
-        TranscriptionProcessingFailed,
-        match="ambiguous_submission",
-    ):
+        TranscriptionRetryRequired,
+        match="submission_unavailable",
+    ) as error_info:
         poller.transcribe(audio_path)
 
     assert client.submit_calls == 1
     assert client.get_job_calls == 0
     assert clock.sleep_calls == []
-    payload = _read_failure_payload(failed_directory)
-    assert payload["code"] == "ambiguous_submission"
-    assert "job_uuid" not in payload
+    assert error_info.value.audio_path == audio_path
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
 
 
-def test_post_500_is_treated_as_an_ambiguous_submission(
+def test_post_500_leaves_audio_in_processing_even_if_client_flag_is_false(
     audio_directories: tuple[Path, Path],
 ) -> None:
     processing_directory, failed_directory = audio_directories
@@ -235,18 +234,13 @@ def test_post_500_is_treated_as_an_ambiguous_submission(
     poller = _make_poller(client, failed_directory, FakeClock())
 
     with pytest.raises(
-        TranscriptionProcessingFailed,
-        match="ambiguous_submission",
+        TranscriptionRetryRequired,
+        match="submission_unavailable",
     ):
         poller.transcribe(audio_path)
 
-    payload = _read_failure_payload(failed_directory)
-    assert payload["response_logs"] == [
-        {
-            "http_status": 500,
-            "operation": TranscriptionOperation.SUBMIT.value,
-        }
-    ]
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
 
 
 def test_ambiguous_get_leaves_audio_in_processing_for_a_fresh_submission(
@@ -268,7 +262,7 @@ def test_ambiguous_get_leaves_audio_in_processing_for_a_fresh_submission(
 
     with pytest.raises(
         TranscriptionRetryRequired,
-        match="ambiguous_polling_response",
+        match="polling_unavailable",
     ) as error_info:
         poller.transcribe(audio_path)
 
@@ -286,8 +280,14 @@ def test_ambiguous_get_leaves_audio_in_processing_for_a_fresh_submission(
     assert client.get_job_calls == 2
 
 
-def test_retryable_get_http_error_leaves_audio_in_processing(
+@pytest.mark.parametrize(
+    ("status_code", "retryable"),
+    [(429, True), (500, False), (599, False)],
+)
+def test_get_unavailable_http_error_leaves_audio_in_processing(
     audio_directories: tuple[Path, Path],
+    status_code: int,
+    retryable: bool,
 ) -> None:
     processing_directory, failed_directory = audio_directories
     audio_path = _write_audio(processing_directory)
@@ -296,21 +296,21 @@ def test_retryable_get_http_error_leaves_audio_in_processing(
             TranscriptionHttpError(
                 TranscriptionProvider.LEGACY,
                 TranscriptionOperation.GET_JOB,
-                503,
-                retryable=True,
+                status_code,
+                retryable=retryable,
             )
         ]
     )
     poller = _make_poller(client, failed_directory, FakeClock())
 
-    with pytest.raises(TranscriptionRetryRequired):
+    with pytest.raises(TranscriptionRetryRequired, match="polling_unavailable"):
         poller.transcribe(audio_path)
 
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
     assert not list(failed_directory.iterdir())
 
 
-def test_polling_deadline_moves_audio_to_failed(
+def test_polling_deadline_leaves_audio_in_processing_for_retry(
     audio_directories: tuple[Path, Path],
 ) -> None:
     processing_directory, failed_directory = audio_directories
@@ -327,20 +327,20 @@ def test_polling_deadline_moves_audio_to_failed(
     )
 
     with pytest.raises(
-        TranscriptionProcessingFailed,
+        TranscriptionRetryRequired,
         match="polling_deadline_exceeded",
-    ):
+    ) as error_info:
         poller.transcribe(audio_path)
 
     assert client.submit_calls == 1
     assert client.get_job_calls == 3
     assert clock.sleep_calls == [1.0, 1.0, 0.5]
-    payload = _read_failure_payload(failed_directory)
-    assert payload["code"] == "polling_deadline_exceeded"
-    assert payload["timestamp"] == "2026-08-25T14:00:02.500000Z"
+    assert error_info.value.audio_path == audio_path
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
 
 
-def test_remote_failure_moves_audio_with_sanitized_response_logs(
+def test_remote_failure_writes_only_the_allowed_sidecar_fields(
     audio_directories: tuple[Path, Path],
 ) -> None:
     processing_directory, failed_directory = audio_directories
@@ -353,18 +353,20 @@ def test_remote_failure_moves_audio_with_sanitized_response_logs(
 
     payload = _read_failure_payload(failed_directory)
     serialized_payload = json.dumps(payload)
-    assert payload["code"] == "remote_job_failed"
-    assert payload["provider"] == "legacy"
-    assert payload["job_uuid"] == JOB_UUID
-    assert payload["response_logs"][-1]["job_status"] == "FAILED"
-    assert "message" not in payload["response_logs"][-1]
+    assert payload == {
+        "category": "terminal",
+        "code": "remote_job_failed",
+        "step": "transcription",
+        "timestamp": "2026-08-25T14:00:00Z",
+        "uuid": AUDIO_UUID,
+    }
     assert SYNTHETIC_TRANSCRIPTION not in serialized_payload
     assert "synthetic-api-key" not in serialized_payload
     assert not audio_path.exists()
     assert (failed_directory / AUDIO_FILENAME).read_bytes() == SYNTHETIC_AUDIO
 
 
-def test_untrusted_status_values_are_sanitized_before_the_error_report(
+def test_untrusted_response_metadata_is_never_written_to_the_error_report(
     audio_directories: tuple[Path, Path],
 ) -> None:
     processing_directory, failed_directory = audio_directories
@@ -390,43 +392,7 @@ def test_untrusted_status_values_are_sanitized_before_the_error_report(
     payload = _read_failure_payload(failed_directory)
     serialized_payload = json.dumps(payload)
     assert sensitive_status not in serialized_payload
-    assert payload["response_logs"][-1] == {
-        "http_status": 200,
-        "job_status": "OTHER",
-        "operation": TranscriptionOperation.UNKNOWN.value,
-        "provider_status": "other",
-    }
-
-
-def test_response_history_is_bounded_until_terminal_failure(
-    audio_directories: tuple[Path, Path],
-) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
-    client = FakeTranscriptionClient(
-        events=[
-            *[_snapshot(JobStatus.PENDING) for _ in range(MAX_RESPONSE_LOGS + 2)],
-            _snapshot(JobStatus.FAILED),
-        ]
-    )
-    poller = _make_poller(
-        client,
-        failed_directory,
-        FakeClock(),
-        job_timeout_seconds=60.0,
-    )
-
-    with pytest.raises(TranscriptionProcessingFailed, match="remote_job_failed"):
-        poller.transcribe(audio_path)
-
-    response_logs = _read_failure_payload(failed_directory)["response_logs"]
-    assert isinstance(response_logs, list)
-    assert len(response_logs) == MAX_RESPONSE_LOGS
-    assert all(
-        log["operation"] == TranscriptionOperation.GET_JOB.value
-        for log in response_logs
-    )
-    assert response_logs[-1]["job_status"] == "FAILED"
+    assert set(payload) == {"uuid", "step", "category", "code", "timestamp"}
 
 
 def test_failed_storage_error_preserves_processing_audio(
