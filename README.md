@@ -2,9 +2,9 @@
 
 POC Python destiné à automatiser la création de tickets GLPI à partir de
 fichiers audio. Le dépôt couvre actuellement la publication robuste d'un audio,
-son cycle de vie sur des volumes partagés et sa transcription asynchrone. La
-création du ticket GLPI et la finalisation du fichier audio constituent encore
-la suite du pipeline à implémenter.
+son cycle de vie sur des volumes partagés, sa transcription asynchrone et le
+client de création de tickets GLPI. Le branchement de ce client au worker et la
+finalisation du fichier audio constituent encore la suite du pipeline.
 
 Le POC repose volontairement sur une architecture simple : une application
 web, un worker unique et des répertoires partagés utilisés comme file de
@@ -27,14 +27,17 @@ travail. Il n'utilise actuellement ni base de données, ni broker de messages.
   `processing` ;
 - isolation des erreurs terminales dans `failed`, accompagnées d'un sidecar
   JSON expurgé ;
-- retour de la transcription en mémoire, sans journaliser son contenu.
+- retour de la transcription en mémoire, sans journaliser son contenu ;
+- authentification OAuth Password auprès de GLPI V2.3.0 ;
+- récupération ou création d'un ticket GLPI corrélé par l'`external_id` de
+  l'audio, sans rejeu aveugle d'une création au résultat incertain.
 
 ### Fonctionnalités restant à intégrer
 
 - point d'entrée exécutable pour assembler et démarrer l'application web ;
 - point d'entrée exécutable pour construire le client HTTP et démarrer le
   worker ;
-- traitement métier de la transcription et création du ticket dans GLPI ;
+- branchement du client GLPI au résultat de transcription ;
 - transition d'un traitement réussi de `processing` vers `completed` ;
 - orchestration complète de bout en bout, déploiement et supervision.
 
@@ -55,7 +58,7 @@ explicitement ses dépendances d'exécution.
 | Membre | Distribution Python | Responsabilité actuelle | Documentation |
 | --- | --- | --- | --- |
 | `apps/web` | `glpi-ticketing-web` | Interface FastAPI de dépôt dans `pending` et de lecture depuis `completed` | [Application web](apps/web/README.md) |
-| `apps/worker-automation` | `glpi-ticketing-worker-automation` | Réclamation des audios, appel de Transcribe AI, polling, reprise et traitement des erreurs | [Worker d'automatisation](apps/worker-automation/README.md) |
+| `apps/worker-automation` | `glpi-ticketing-worker-automation` | Réclamation des audios, appel de Transcribe AI, polling et adaptation de GLPI V2.3.0 | [Worker d'automatisation](apps/worker-automation/README.md) |
 | `packages/common` | `glpi-ticketing-common` | Nommage UUID, découverte des audios et transitions robustes entre volumes | [Package commun](packages/common/README.md) |
 
 Les deux applications dépendent du package commun par la source workspace
@@ -83,7 +86,7 @@ flowchart LR
     B --> R
     Q -->|erreur terminale| F[(failed + error.json)]
     Q -->|COMPLETED| M[TranscriptionResult en mémoire]
-    M -. traitement métier à implémenter .-> G[Création du ticket GLPI]
+    M -. client implémenté, branchement à faire .-> G[Création ou récupération du ticket GLPI]
     G -. transition à implémenter .-> C[(completed)]
     C -->|GET /audios/UUID| W
 
@@ -113,7 +116,11 @@ flowchart LR
    `processing`. Le gestionnaire appelé par `run_forever(...)` doit le faire
    avancer avant de rendre la main ; ce gestionnaire métier n'est pas encore
    implémenté.
-7. La route de téléchargement web ne lit que `completed`. Elle est déjà
+7. Le client GLPI épinglé en V2.3.0 sait rechercher un ticket par
+   `external_id`, en créer un avec la transcription et l'URL audio, puis
+   retourner son identifiant. Son appel depuis le gestionnaire métier reste à
+   brancher.
+8. La route de téléchargement web ne lit que `completed`. Elle est déjà
    disponible, mais le pipeline actuel ne produit pas encore lui-même ce
    fichier final.
 
@@ -145,11 +152,11 @@ vérité ; `uv.lock` fixe les versions exactes installées pour le dépôt.
 | Uvicorn | `>=0.35,<1` | Serveur ASGI prévu pour le futur bootstrap web |
 | Jinja2 | `>=3.1,<4` | Pages HTML de dépôt et de confirmation |
 | Pydantic Settings | `>=2.10,<3` | Configuration typée depuis l'environnement |
-| HTTPX | `>=0.28,<1` | Client HTTP actuel de Transcribe AI |
+| HTTPX | `>=0.28,<1` | Clients HTTP de Transcribe AI et GLPI |
 | HTTPX 2 | `>=2,<3`, groupe de développement | Anticipation de migration et compatibilité des tests |
 | Pytest | `>=8.4,<10` | Tests unitaires et tests d'intégration opt-in |
 | Ruff | `>=0.12,<1` | Formatage et analyse statique |
-| Testcontainers | `>=4.12,<5`, groupe de développement | Stack GLPI/MySQL jetable pour les tests d'intégration OAuth |
+| Testcontainers | `>=4.12,<5`, groupe de développement | Stacks GLPI/MySQL et Transcribe AI jetables pour les tests d'intégration |
 
 Les trois distributions du projet utilisent `uv_build` comme backend de
 construction et portent actuellement la version `0.1.0`.
@@ -158,16 +165,18 @@ construction et portent actuellement la version `0.1.0`.
 
 - Python 3.12 ou supérieur ;
 - [`uv`](https://docs.astral.sh/uv/) ;
-- Bash pour le script de test réel de transcription ;
 - des répertoires audio distincts et accessibles au processus lors de la
   future exécution des applications ;
-- uniquement pour le test `live_transcribe` : une instance accessible de
-  Transcribe AI, une clé API et un audio local pris en charge.
-- uniquement pour les tests marqués `glpi` : Docker avec le plugin Compose.
+- uniquement pour les tests marqués `glpi` ou `transcribe_ai` : Docker avec le
+  plugin Compose ;
+- uniquement pour `transcribe_ai` : un hôte et un daemon Docker `linux/amd64`,
+  ainsi qu'un accès réseau à chaque session pour le modèle Whisper ; le premier
+  lancement télécharge aussi les images. Le mode GPU requiert en plus un GPU
+  NVIDIA et NVIDIA Container Toolkit.
 
 Docker, GLPI et Transcribe AI ne sont pas nécessaires pour exécuter la suite
-unitaire par défaut. L'instance GLPI utilisée par les tests d'intégration est
-construite et détruite automatiquement ; aucune installation GLPI locale n'est
+unitaire par défaut. Les deux stacks d'intégration sont démarrées et détruites
+automatiquement ; aucune installation locale de GLPI ou de Transcribe AI n'est
 attendue.
 
 ## Installation depuis la racine
@@ -192,7 +201,7 @@ ne doivent jamais être ajoutés au dépôt.
 
 `WebSettings` et `WorkerSettings` valident déjà ce contrat, mais les futurs
 points de démarrage devront encore injecter ces valeurs dans `create_app(...)`,
-`TranscriptionClient` et `run_forever(...)`.
+`TranscriptionClient`, `GlpiClient` et `run_forever(...)`.
 
 | Variables | Propriétaire | Rôle défini par la configuration |
 | --- | --- | --- |
@@ -207,12 +216,16 @@ points de démarrage devront encore injecter ces valeurs dans `create_app(...)`,
 | `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | worker | Délai maximal d'une requête HTTP |
 | `TRANSCRIPTION_POLL_INTERVAL_SECONDS` | worker | Intervalle entre deux lectures d'un job |
 | `TRANSCRIPTION_JOB_TIMEOUT_SECONDS` | worker | Durée maximale d'une tentative de polling |
-| `GLPI_PASSWORD`, `GLPI_CLIENT_SECRET` | worker | Secrets optionnels réservés à l'intégration GLPI future |
+| `GLPI_BASE_URL`, `GLPI_USERNAME` | worker | Instance GLPI et utilisateur du grant OAuth Password |
+| `GLPI_PASSWORD`, `GLPI_CLIENT_ID`, `GLPI_CLIENT_SECRET` | worker | Identifiants OAuth obligatoires, avec les deux secrets masqués |
+| `GLPI_HTTP_TIMEOUT_SECONDS` | worker | Timeout des opérations OAuth, recherche et création |
+| `GLPI_TICKET_TITLE`, `GLPI_TICKET_TYPE` | worker | Titre fixe et type appliqués aux tickets |
+| `GLPI_TICKET_URGENCY`, `GLPI_TICKET_IMPACT` | worker | Niveaux fixes dont GLPI déduit la priorité |
 
-Les variables `LIVE_TRANSCRIBE_*` et `RUN_LIVE_TRANSCRIBE` appartiennent au
-test réel, pas à la configuration applicative. Le script fourni demande la clé
-sans écho si elle n'est pas déjà exportée, puis retire ses variables à la fin.
-Évitez de placer une clé dans une commande conservée par l'historique du shell.
+`TRANSCRIBE_AI_TEST_DEVICE` appartient uniquement à la fixture d'intégration.
+Sa valeur est `cpu` par défaut ou `gpu` pour demander explicitement CUDA. Les
+identifiants de la stack sont générés en mémoire à chaque session pytest :
+aucune clé Transcribe AI ne doit être fournie par le développeur.
 
 ## Politique de tests
 
@@ -227,13 +240,17 @@ d'import `importlib`. Les marqueurs enregistrés sont :
 
 | Marqueur | Politique |
 | --- | --- |
-| `live_transcribe` | Appelle une véritable instance locale de Transcribe AI ; opt-in et susceptible de créer un job |
-| `glpi` | Démarre une seule stack GLPI 11/MySQL jetable, configure l'API V2 et vérifie le grant OAuth Password |
+| `transcribe_ai` | Démarre une stack Transcribe AI v1 jetable et exécute le contrat POST/polling réel |
+| `glpi` | Démarre une seule stack GLPI 11/MySQL jetable et teste le client V2.3.0 réel |
 | `e2e` | Réservé au futur scénario complet avec services externes |
 
-Le test réel de transcription possède une double protection : le marqueur
-`live_transcribe` et la variable `RUN_LIVE_TRANSCRIBE=1`. Il ne doit jamais
-utiliser un audio contenant des données sensibles non autorisées.
+La suite `transcribe_ai` lance PostgreSQL, Redis, l'API, le worker batch et le
+service Whisper STT une seule fois par session. Les images sont épinglées par
+digest, l'API utilise un port loopback aléatoire et les secrets sont éphémères.
+Un court WAV vocal non sensible est généré dans le conteneur : aucun audio local
+n'est lu. Le mode CPU est le défaut ; un overlay distinct réserve le GPU et la
+fixture vérifie le périphérique réellement vu par PyTorch. Cette suite ne doit
+pas être parallélisée.
 
 La suite `glpi` construit une image strictement réservée aux tests à partir de
 GLPI 11.0.8, épinglé par digest, et utilise une image MySQL 8.4.11 également
@@ -241,21 +258,24 @@ GLPI 11.0.8, épinglé par digest, et utilise une image MySQL 8.4.11 également
 `127.0.0.1`, attend sa disponibilité HTTP, puis crée avec les classes métier
 GLPI un utilisateur et un client OAuth Password limités au scope `api`. Tous
 les identifiants sont éphémères et transmis par variables d'environnement. La
-suite ne doit pas être parallélisée ; son teardown supprime les conteneurs, le
-réseau, les volumes Compose et l'image custom construite pour la session.
+suite récupère le token par `GlpiClient`, crée réellement un ticket et vérifie
+sa corrélation par `external_id`. Elle ne doit pas être parallélisée ; son
+teardown supprime les conteneurs, le réseau, les volumes Compose et l'image
+custom construite pour la session.
 
 ## Commandes de validation depuis la racine
 
 Suite locale sans service externe :
 
 ```bash
-uv run --all-packages pytest -m "not glpi and not live_transcribe and not e2e"
+uv run --all-packages pytest -m "not glpi and not transcribe_ai and not e2e"
 ```
 
 Intégration GLPI jetable, à exécuter séparément et sans parallélisation :
 
 ```bash
-uv run pytest -m glpi tests/integration/glpi -vv --maxfail=1
+uv run pytest -m glpi \
+apps/worker-automation/tests/integration/glpi -vv --maxfail=1
 ```
 
 Tests ciblés par membre :
@@ -279,21 +299,21 @@ Formatage du code après modification :
 uv run ruff format .
 ```
 
-Test réel de Transcribe AI, uniquement lorsque le service est disponible :
+Intégration Transcribe AI jetable sur CPU :
 
 ```bash
-./scripts/run-live-transcription-test.sh /chemin/absolu/vers/audio.m4a
+TRANSCRIBE_AI_TEST_DEVICE=cpu \
+uv run --all-packages pytest -m transcribe_ai -vv --maxfail=1
 ```
 
-Sans argument, le script cherche `audio.m4a` à la racine et utilise
-`http://localhost:5000`. Ce fichier audio local doit rester non suivi. L'URL et
-le chemin peuvent être surchargés sans exposer la clé :
+Le CPU est sélectionné lorsque la variable est absente. Pour utiliser le GPU :
 
 ```bash
-LIVE_TRANSCRIBE_BASE_URL=http://localhost:5000 \
-LIVE_TRANSCRIBE_AUDIO_PATH=/chemin/absolu/vers/audio.m4a \
-./scripts/run-live-transcription-test.sh
+TRANSCRIBE_AI_TEST_DEVICE=gpu \
+uv run --all-packages pytest -m transcribe_ai -vv --maxfail=1
 ```
 
-Le script demande alors la clé API de manière interactive et lance uniquement
-le test marqué `live_transcribe`.
+Chaque session télécharge le modèle Whisper `tiny` ; le premier lancement
+télécharge aussi les images, dont l'image STT volumineuse. Les détails du flux,
+des prérequis GPU et du teardown sont documentés dans
+[`apps/worker-automation/tests/integration/transcribe-ai/README.md`](apps/worker-automation/tests/integration/transcribe-ai/README.md).

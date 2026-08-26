@@ -1,14 +1,15 @@
 # Worker d'automatisation
 
-Ce workspace contient l'application chargée de consommer les fichiers audio et
-de demander leur transcription. Le POC fonctionne avec **un seul worker** : il
-scrute des répertoires partagés, traite un audio à la fois et s'appuie sur le
-package commun pour publier les changements de volume de manière sûre.
+Ce workspace contient l'application chargée de consommer les fichiers audio,
+de demander leur transcription et d'adapter l'API GLPI V2. Le POC fonctionne
+avec **un seul worker** : il scrute des répertoires partagés, traite un audio à
+la fois et s'appuie sur le package commun pour publier les changements de
+volume de manière sûre.
 
-Le worker ne crée pas encore de ticket GLPI et ne possède pas encore de point
-d'entrée exécutable. Les fonctions d'orchestration, le client HTTP et leurs
-tests sont implémentés ; leur assemblage dans un processus déployable relève
-d'une étape ultérieure.
+Le client GLPI permet de retrouver ou créer un ticket, mais il n'est pas encore
+branché à la sortie de transcription. Le worker ne possède pas non plus de
+point d'entrée exécutable. L'assemblage de ces composants dans un processus
+déployable relève d'une étape ultérieure.
 
 ## Entrées et sorties
 
@@ -19,6 +20,10 @@ d'une étape ultérieure.
 - un objet respectant `TranscriptionClientProtocol` ;
 - les intervalles et délais de transcription ;
 - pour le client réel, l'URL de base et la clé de l'API de transcription.
+
+Le client GLPI reçoit séparément la transcription réussie, l'UUID stable de
+l'audio et son URL publique. Ses identifiants OAuth Password et les valeurs
+fixes du ticket proviennent de `WorkerSettings`.
 
 Un nom de fichier audio doit suivre la convention
 `{uuid}.{extension}` avec un UUID canonique et une extension parmi `.wav`,
@@ -173,16 +178,50 @@ Le sidecar contient exactement les informations opérationnelles suivantes :
 Il ne contient ni transcription, ni clé API, ni réponse HTTP brute, ni message
 fourni par le service distant.
 
+## GLPI
+
+La couche `glpi` adapte explicitement l'API GLPI V2.3.0. Elle n'utilise pas
+l'alias mobile `/api.php/v2` : l'authentification et les tickets passent par
+les routes épinglées sous `/api.php/v2.3.0`.
+
+`GlpiClientProtocol` expose uniquement l'opération métier
+`ensure_ticket(...)`, qui recherche d'abord le ticket par `external_id`, puis
+le crée uniquement s'il n'existe pas.
+
+Le client concret expose également `authenticate()` afin de permettre un test
+de santé explicite du grant OAuth Password. Ce détail d'infrastructure ne fait
+pas partie du protocole injecté dans l'orchestrateur.
+
+Le titre du ticket est une valeur fixe de configuration. Son `external_id`
+reçoit actuellement l'UUID local de l'audio, tandis que sa description HTML
+contient la transcription échappée et l'URL publique de l'audio. Un même UUID
+permet ainsi de retrouver le ticket lors d'une reprise. GLPI ne garantit
+toutefois pas l'unicité de ce champ : cette stratégie limite les doublons avec
+le worker unique du POC, sans fournir une exclusion atomique entre plusieurs
+workers.
+
+À terme, l'UUID de l'audio, l'UUID du job Transcribe AI et l'`external_id` GLPI
+devront représenter le même identifiant. Cette convergence deviendra possible
+lorsque Transcribe AI acceptera un UUID fourni par son appelant à la création
+du job. En attendant, l'UUID local reste la clé stable de corrélation du
+pipeline.
+
+Le client n'effectue jamais un second `POST` aveugle après une réponse de
+création ambiguë. Il recherche à nouveau l'`external_id` ; s'il ne trouve rien,
+il expose un résultat inconnu à l'orchestrateur. Les tokens, identifiants
+secrets, transcriptions et réponses HTTP brutes sont exclus des logs et des
+exceptions.
+
 ## Configuration
 
 `WorkerSettings` charge les variables d'environnement et, en développement, le
 fichier `.env` situé dans le répertoire courant. Les secrets utilisent
 `pydantic.SecretStr` et sont masqués dans leur représentation Python.
 
-Important : aucun bootstrap n'instancie encore `WorkerSettings`,
-`TranscriptionClient` et `run_forever()` ensemble. Ces variables définissent le
-contrat de configuration validé, mais les exporter ne suffit pas encore à
-configurer ou démarrer un daemon.
+Important : aucun bootstrap n'instancie encore `WorkerSettings`, les deux
+clients HTTP et `run_forever()` ensemble. Ces variables définissent le contrat
+de configuration validé, mais les exporter ne suffit pas encore à configurer
+ou démarrer un daemon.
 
 | Variable | Obligatoire | Défaut | Rôle prévu lors de la composition |
 | --- | --- | --- | --- |
@@ -196,12 +235,27 @@ configurer ou démarrer un daemon.
 | `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | non | `10` | Timeout à transmettre au client pour chaque appel HTTP. |
 | `TRANSCRIPTION_POLL_INTERVAL_SECONDS` | non | `2` | Attente entre deux polls et avant une nouvelle tentative du worker. |
 | `TRANSCRIPTION_JOB_TIMEOUT_SECONDS` | non | `900` | Durée maximale d'une tentative de job avant une nouvelle soumission. |
-| `GLPI_PASSWORD` | non | — | Réservé à l'intégration GLPI, non utilisée actuellement. |
-| `GLPI_CLIENT_SECRET` | non | — | Réservé à l'intégration GLPI, non utilisé actuellement. |
+| `GLPI_BASE_URL` | oui | — | URL de l'instance GLPI ; le client ajoute les routes V2.3.0 épinglées. |
+| `GLPI_USERNAME` | oui | — | Utilisateur du grant OAuth Password. |
+| `GLPI_PASSWORD` | oui | — | Mot de passe OAuth conservé comme secret. |
+| `GLPI_CLIENT_ID` | oui | — | Identifiant du client OAuth autorisé pour le scope `api`. |
+| `GLPI_CLIENT_SECRET` | oui | — | Secret du client OAuth conservé comme secret. |
+| `GLPI_HTTP_TIMEOUT_SECONDS` | non | `10` | Timeout de chaque requête HTTP vers GLPI. |
+| `GLPI_TICKET_TITLE` | oui | — | Titre fixe des tickets, imprimable et limité à 255 caractères. |
+| `GLPI_TICKET_TYPE` | oui | — | Type GLPI : `1` pour un incident, `2` pour une demande. |
+| `GLPI_TICKET_URGENCY` | oui | — | Urgence fixe comprise entre `1` et `5`. |
+| `GLPI_TICKET_IMPACT` | oui | — | Impact fixe compris entre `1` et `5`. |
 
-Les quatre répertoires audio doivent être distincts après normalisation. Les URL
-refusent les identifiants intégrés, query strings et fragments. La clé API doit
-être non vide, sans espaces périphériques ni caractère de contrôle.
+GLPI calcule lui-même la priorité du ticket à partir de l'urgence et de
+l'impact. Le client ne transmet donc pas de priorité configurable : le test
+réel a confirmé qu'une valeur envoyée serait recalculée par GLPI.
+
+Les quatre répertoires audio doivent être distincts après normalisation. Les
+URL de base refusent les identifiants intégrés, query strings et fragments. Les
+identifiants, clés, secrets et valeurs textuelles doivent être non vides, sans
+espaces périphériques ni caractère de contrôle. Les types et niveaux de ticket
+sont validés par des énumérations même si GLPI accepte lui-même des valeurs
+hors contrat.
 
 Un modèle sans secret est disponible à la racine dans `.env.example`. Il ne
 faut jamais versionner le `.env` local.
@@ -216,6 +270,11 @@ apps/worker-automation/
 │   ├── __init__.py
 │   ├── settings.py
 │   ├── worker.py
+│   ├── glpi/
+│   │   ├── __init__.py
+│   │   ├── client.py
+│   │   ├── contracts.py
+│   │   └── models.py
 │   └── transcription/
 │       ├── __init__.py
 │       ├── client.py
@@ -224,7 +283,21 @@ apps/worker-automation/
 │       └── poller.py
 └── tests/
     ├── unit/
+    │   └── test_glpi_client.py
     └── integration/
+        ├── glpi/
+        │   ├── compose.yml
+        │   ├── conftest.py
+        │   ├── image/
+        │   ├── test_compose.py
+        │   └── test_glpi_client.py
+        └── transcribe-ai/
+            ├── conftest.py
+            ├── compose.yml
+            ├── compose.cpu.yml
+            ├── compose.gpu.yml
+            ├── test_compose.py
+            └── test_transcription_client.py
 ```
 
 Conventions à préserver :
@@ -233,12 +306,13 @@ Conventions à préserver :
 - laisser les primitives de cycle de vie des fichiers dans
   `glpi-ticketing-common.audio_files` ;
 - laisser la sélection et l'orchestration globale dans `worker.py` ;
-- isoler tout détail HTTP propre au fournisseur dans `transcription/client.py` ;
+- isoler les détails HTTP dans les adaptateurs `transcription/client.py` et
+  `glpi/client.py` ;
 - faire dépendre le poller du protocole, pas du client concret, afin de pouvoir
   injecter un faux client en test ou remplacer l'adaptateur HTTP ;
 - exprimer les contrats avec des modèles typés et les valeurs fermées avec des
-  énumérations (`JobStatus`, `TranscriptionOperation`) plutôt qu'avec des chaînes
-  dispersées ;
+  énumérations (`JobStatus`, `TranscriptionOperation`, `TicketType`,
+  `TicketLevel`) plutôt qu'avec des valeurs primitives dispersées ;
 - injecter le sommeil et l'horloge dans les composants qui attendent, pour
   conserver des tests rapides et déterministes ;
 - placer les tests unitaires au même niveau fonctionnel que le module testé et
@@ -253,9 +327,11 @@ journalise jamais le contenu de la transcription.
 Les règles suivantes font partie du contrat de sécurité :
 
 - ne pas journaliser ou sérialiser `LEGACY_TRANSCRIPTION_API_KEY` ;
+- ne pas journaliser `GLPI_PASSWORD`, `GLPI_CLIENT_SECRET` ou les tokens OAuth ;
 - ne pas inclure le corps brut des réponses distantes dans les exceptions ou
   sidecars ;
-- ne pas placer la transcription dans un sidecar d'erreur ;
+- ne pas placer la transcription dans un sidecar d'erreur, une exception ou un
+  log ;
 - ne pas accepter de lien symbolique comme audio ;
 - conserver les fichiers `.part` invisibles au scanner ;
 - ne jamais reprendre automatiquement un fichier de `failed`.
@@ -287,7 +363,7 @@ uv run --all-packages pytest apps/worker-automation/tests/unit/test_worker_trans
 Exécuter la suite locale du dépôt sans service externe :
 
 ```bash
-uv run --all-packages pytest -m "not glpi and not live_transcribe and not e2e"
+uv run --all-packages pytest -m "not glpi and not transcribe_ai and not e2e"
 ```
 
 Vérifier le formatage et le lint de ce workspace :
@@ -297,26 +373,53 @@ uv run ruff format --check apps/worker-automation
 uv run ruff check apps/worker-automation
 ```
 
-### Test réel de l'API de transcription
+### Intégration conteneurisée de l'API de transcription
 
-Le test marqué `live_transcribe` crée réellement un job distant. Il est donc
-désactivé par défaut. Le script racine valide le fichier, demande la clé sans
-l'afficher si elle n'est pas déjà exportée, positionne les variables nécessaires
-et lance le test :
+Le test marqué `transcribe_ai` démarre avec Testcontainers une stack v1
+complète : PostgreSQL, Redis, API, worker batch et service Whisper STT. La
+fixture génère une clé éphémère et un court WAV vocal non sensible, puis le vrai
+`TranscriptionClient` exécute le `POST` et le polling `GET`. Aucune instance,
+clé ou donnée audio locale n'est attendue.
+
+Exécution CPU, utilisée par défaut :
 
 ```bash
-scripts/run-live-transcription-test.sh /chemin/vers/audio.m4a
+TRANSCRIBE_AI_TEST_DEVICE=cpu \
+uv run --all-packages pytest -m transcribe_ai -vv --maxfail=1
 ```
 
-Variables comprises par ce test :
+Exécution GPU, avec NVIDIA Container Toolkit :
 
-- `LIVE_TRANSCRIBE_BASE_URL` (défaut : `http://localhost:5000`) ;
-- `LIVE_TRANSCRIBE_API_KEY` (demandée interactivement si absente) ;
-- `LIVE_TRANSCRIBE_AUDIO_PATH` (ou argument du script) ;
-- `RUN_LIVE_TRANSCRIBE=1` (positionnée par le script).
+```bash
+TRANSCRIBE_AI_TEST_DEVICE=gpu \
+uv run --all-packages pytest -m transcribe_ai -vv --maxfail=1
+```
 
-Ce test valide uniquement le contrat réel du client (`POST` puis polling
-`GET`) ; ce n'est pas un test de bout en bout de `run_forever()`.
+La fixture vérifie que PyTorch utilise réellement le périphérique demandé et
+supprime ensuite les conteneurs, le réseau et les volumes. Cette suite ne doit
+pas être parallélisée. Elle valide le contrat réel du client, pas la boucle
+`run_forever()` du worker de ce dépôt.
+
+### Intégration conteneurisée de GLPI
+
+La suite `glpi` et son image de test sont également rattachées au worker, seul
+consommateur prévu de l'API GLPI. Elle se lance séparément et sans
+parallélisation :
+
+```bash
+uv run pytest -m glpi \
+apps/worker-automation/tests/integration/glpi -vv --maxfail=1
+```
+
+Cette suite vérifie le document OpenAPI V2.3.0 épinglé, obtient un token OAuth
+Password par l'intermédiaire de `GlpiClient`, crée un ticket réel et confirme
+qu'un second appel avec le même `external_id` retrouve ce ticket.
+
+Dans chaque sous-répertoire d'intégration, le `conftest.py` possède la fixture
+de session de son service. Chaque fichier `test_compose.py` contrôle l'image,
+le bootstrap et la stack ; les fichiers
+`test_glpi_client.py` et `test_transcription_client.py` vérifient séparément le
+contrat du client Python contre cette même stack.
 
 ## Politique de test
 
@@ -324,6 +427,7 @@ Les tests unitaires couvrent séparément :
 
 - la validation des paramètres ;
 - le format des requêtes et la normalisation des réponses du client ;
+- la recherche et la création idempotente au mieux d'un ticket GLPI ;
 - le polling, les délais, les reprises et la classification des erreurs ;
 - l'ordre de sélection `processing` puis `pending` ;
 - la publication sûre dans `failed` et l'expurgation du sidecar ;
@@ -334,17 +438,24 @@ Le sommeil, l'horloge et le client sont injectés dans les tests : la suite
 unitaire ne dort pas et ne contacte aucun service. Les marqueurs globaux du
 dépôt sont :
 
-- `live_transcribe` : serveur de transcription réel ;
+- `transcribe_ai` : stack Transcribe AI jetable via Testcontainers ;
 - `glpi` : instance GLPI jetable via Testcontainers ;
 - `e2e` : flux complet avec services externes.
 
 ## Limites actuelles
 
 - L'application n'a pas encore de CLI, de fonction `main` ni de composition qui
-  transforme `WorkerSettings` en client HTTP et lance `run_forever()`.
+  transforme `WorkerSettings` en clients HTTP et lance `run_forever()`.
 - Le callback aval qui consomme `TranscriptionResult` et déplace le succès vers
-  `completed` n'est pas encore implémenté.
+  `completed` n'est pas encore implémenté ; il n'appelle donc pas encore le
+  client GLPI.
 - La transcription et l'UUID du job distant ne sont pas persistés par le worker.
+- L'UUID local de l'audio sert actuellement d'`external_id` GLPI sans être
+  aligné sur l'UUID du job Transcribe AI. Cet alignement dépend d'une évolution
+  future de l'API de transcription.
+- `external_id` n'est pas une contrainte d'unicité dans GLPI. La recherche avant
+  création est adaptée au worker unique du POC, mais ne fournit pas
+  d'idempotence atomique en présence de plusieurs auteurs concurrents.
 - L'API ne fournit pas de clé d'idempotence. Après une réponse ambiguë, un délai
   dépassé ou un redémarrage, un fichier conservé dans `processing` est resoumis
   et peut créer plusieurs jobs distants pour le même audio.
