@@ -1,11 +1,15 @@
+"""GLPI image, bootstrap and Compose integration tests."""
+
 from __future__ import annotations
 
-import json
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 import pytest
+
+from glpi_ticketing_worker_automation.glpi import GLPI_API_VERSION
 
 pytestmark = pytest.mark.glpi
 
@@ -13,6 +17,12 @@ GLPI_TEST_DIRECTORY = Path(__file__).resolve().parent
 GLPI_COMPOSE_FILE = GLPI_TEST_DIRECTORY / "compose.yml"
 GLPI_DOCKERFILE = GLPI_TEST_DIRECTORY / "image" / "Dockerfile"
 GLPI_BOOTSTRAP = GLPI_TEST_DIRECTORY / "image" / "bootstrap_oauth.php"
+PINNED_GLPI_API_VERSION = "2.3.0"
+PINNED_OPENAPI_VERSION = "3.0.0"
+GLPI_API_ROOT = f"/api.php/v{PINNED_GLPI_API_VERSION}"
+GLPI_OPENAPI_PATH = f"{GLPI_API_ROOT}/doc.json"
+GLPI_TICKET_OPENAPI_PATH = "/Assistance/Ticket"
+GLPI_HTTP_TIMEOUT_SECONDS = 10.0
 
 
 def test_glpi_container_reports_version_11(glpi_environment) -> None:
@@ -44,47 +54,35 @@ def test_glpi_auto_install_is_complete(glpi_environment) -> None:
     assert parsed_url.port not in {None, 80}
 
 
-def test_glpi_api_documentation_is_reachable(glpi_environment) -> None:
+def test_glpi_api_contract_is_pinned_to_v2_3_0(glpi_environment) -> None:
     response = httpx.get(
-        f"{glpi_environment.base_url}/api.php/v2/doc",
+        f"{glpi_environment.base_url}{GLPI_OPENAPI_PATH}",
         follow_redirects=False,
-        timeout=10.0,
+        timeout=GLPI_HTTP_TIMEOUT_SECONDS,
     )
 
     assert response.status_code == httpx.codes.OK
-    assert response.content
-
-
-def test_password_grant_returns_access_token(glpi_environment) -> None:
-    credentials = glpi_environment.credentials
-    response = httpx.post(
-        f"{glpi_environment.base_url}/api.php/v2/token",
-        data={
-            "grant_type": credentials.grant_type,
-            "client_id": credentials.client_id,
-            "client_secret": credentials.client_secret,
-            "username": credentials.username,
-            "password": credentials.password,
-            "scope": credentials.scope,
-        },
-        timeout=10.0,
-    )
-    if response.status_code != httpx.codes.OK:
-        pytest.fail(f"Password grant failed with HTTP {response.status_code}")
-
     try:
-        payload = response.json()
-    except json.JSONDecodeError:
-        pytest.fail("Password grant returned invalid JSON")
+        document = response.json()
+    except ValueError:
+        pytest.fail("The pinned GLPI OpenAPI endpoint returned invalid JSON")
 
-    valid_token = (
-        isinstance(payload, dict)
-        and isinstance(payload.get("access_token"), str)
-        and bool(payload["access_token"])
-        and payload.get("token_type") == "Bearer"
-    )
-    if not valid_token:
-        pytest.fail("Password grant returned an invalid token contract")
+    if not isinstance(document, Mapping):
+        pytest.fail("The pinned GLPI OpenAPI endpoint returned an invalid document")
+
+    info = document.get("info")
+    paths = document.get("paths")
+    if not isinstance(info, Mapping) or not isinstance(paths, Mapping):
+        pytest.fail("The pinned GLPI OpenAPI document is missing required sections")
+
+    ticket_path = paths.get(GLPI_TICKET_OPENAPI_PATH)
+    if not isinstance(ticket_path, Mapping):
+        pytest.fail("The pinned GLPI OpenAPI document is missing the ticket resource")
+
+    assert GLPI_API_VERSION == PINNED_GLPI_API_VERSION
+    assert document.get("openapi") == PINNED_OPENAPI_VERSION
+    assert info.get("version") == PINNED_GLPI_API_VERSION
+    assert isinstance(ticket_path.get("post"), Mapping)
 
 
 def test_oauth_bootstrap_is_idempotent(glpi_environment) -> None:

@@ -352,7 +352,7 @@ def glpi_environment() -> Iterator[GlpiTestEnvironment]:
             _assert_expected_credentials(second_bootstrap, environment)
 
             _wait_for_http(
-                f"{base_url}/api.php/v2/doc",
+                f"{base_url}/api.php/v2.3.0/doc.json",
                 timeout_seconds=GLPI_API_READY_TIMEOUT_SECONDS,
             )
 

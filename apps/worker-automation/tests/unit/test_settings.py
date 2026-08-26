@@ -3,19 +3,37 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from glpi_ticketing_worker_automation.glpi.models import TicketLevel, TicketType
 from glpi_ticketing_worker_automation.settings import WorkerSettings
 
 TRANSCRIPTION_BASE_URL = "https://transcription.example.test"
 TRANSCRIPTION_API_KEY = "synthetic-api-key"
+GLPI_BASE_URL = "https://glpi.example.test"
+GLPI_USERNAME = "synthetic-worker"
+GLPI_PASSWORD = "synthetic-password"
+GLPI_CLIENT_ID = "synthetic-client-id"
+GLPI_CLIENT_SECRET = "synthetic-client-secret"
+GLPI_TICKET_TITLE = "Demande issue d'un message audio"
+GLPI_TICKET_TYPE = "2"
+GLPI_TICKET_LEVEL = "3"
 
 
 @pytest.fixture(autouse=True)
-def configure_required_transcription_settings(
+def configure_required_worker_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Provide the mandatory transcription settings unless a test removes one."""
+    """Provide mandatory settings unless a test explicitly removes one."""
     monkeypatch.setenv("LEGACY_TRANSCRIPTION_BASE_URL", TRANSCRIPTION_BASE_URL)
     monkeypatch.setenv("LEGACY_TRANSCRIPTION_API_KEY", TRANSCRIPTION_API_KEY)
+    monkeypatch.setenv("GLPI_BASE_URL", GLPI_BASE_URL)
+    monkeypatch.setenv("GLPI_USERNAME", GLPI_USERNAME)
+    monkeypatch.setenv("GLPI_PASSWORD", GLPI_PASSWORD)
+    monkeypatch.setenv("GLPI_CLIENT_ID", GLPI_CLIENT_ID)
+    monkeypatch.setenv("GLPI_CLIENT_SECRET", GLPI_CLIENT_SECRET)
+    monkeypatch.setenv("GLPI_TICKET_TITLE", GLPI_TICKET_TITLE)
+    monkeypatch.setenv("GLPI_TICKET_TYPE", GLPI_TICKET_TYPE)
+    monkeypatch.setenv("GLPI_TICKET_URGENCY", GLPI_TICKET_LEVEL)
+    monkeypatch.setenv("GLPI_TICKET_IMPACT", GLPI_TICKET_LEVEL)
 
 
 def test_default_audio_directories_are_distinct(
@@ -130,6 +148,175 @@ def test_secrets_are_not_in_worker_settings_repr() -> None:
     assert password not in settings_repr
     assert client_secret not in settings_repr
     assert transcription_api_key not in settings_repr
+
+
+def test_glpi_settings_are_typed() -> None:
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        glpi_base_url="https://glpi.example.test/subdirectory",
+        glpi_username="worker-user",
+        glpi_password="worker-password",
+        glpi_client_id="worker-client",
+        glpi_client_secret="worker-client-secret",
+        glpi_http_timeout_seconds=4.5,
+        glpi_ticket_title="Demande audio",
+        glpi_ticket_type=2,
+        glpi_ticket_urgency=4,
+        glpi_ticket_impact=3,
+        _env_file=None,
+    )
+
+    assert settings.glpi_base_url.path == "/subdirectory"
+    assert settings.glpi_username == "worker-user"
+    assert settings.glpi_password.get_secret_value() == "worker-password"
+    assert settings.glpi_client_id == "worker-client"
+    assert settings.glpi_client_secret.get_secret_value() == "worker-client-secret"
+    assert settings.glpi_http_timeout_seconds == 4.5
+    assert settings.glpi_ticket_title == "Demande audio"
+    assert isinstance(settings.glpi_ticket_type, TicketType)
+    assert int(settings.glpi_ticket_type) == 2
+    assert isinstance(settings.glpi_ticket_urgency, TicketLevel)
+    assert int(settings.glpi_ticket_urgency) == 4
+    assert int(settings.glpi_ticket_impact) == 3
+
+
+@pytest.mark.parametrize(
+    ("missing_environment_variable", "missing_field"),
+    [
+        ("GLPI_BASE_URL", "glpi_base_url"),
+        ("GLPI_USERNAME", "glpi_username"),
+        ("GLPI_PASSWORD", "glpi_password"),
+        ("GLPI_CLIENT_ID", "glpi_client_id"),
+        ("GLPI_CLIENT_SECRET", "glpi_client_secret"),
+        ("GLPI_TICKET_TITLE", "glpi_ticket_title"),
+        ("GLPI_TICKET_TYPE", "glpi_ticket_type"),
+        ("GLPI_TICKET_URGENCY", "glpi_ticket_urgency"),
+        ("GLPI_TICKET_IMPACT", "glpi_ticket_impact"),
+    ],
+)
+def test_glpi_settings_are_required(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_environment_variable: str,
+    missing_field: str,
+) -> None:
+    monkeypatch.delenv(missing_environment_variable)
+
+    with pytest.raises(ValidationError) as error_info:
+        WorkerSettings(public_base_url="http://localhost:8000", _env_file=None)
+
+    assert missing_field in {
+        str(error["loc"][0]) for error in error_info.value.errors()
+    }
+
+
+@pytest.mark.parametrize(
+    "invalid_base_url",
+    [
+        "not-an-http-url",
+        "ftp://glpi.example.test",
+        "https://user:password@glpi.example.test",
+        "https://glpi.example.test?source=worker",
+        "https://glpi.example.test#fragment",
+    ],
+)
+def test_glpi_base_url_rejects_ambiguous_or_unsafe_values(
+    invalid_base_url: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            glpi_base_url=invalid_base_url,
+            _env_file=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("glpi_username", ""),
+        ("glpi_username", " padded"),
+        ("glpi_username", "control\ncharacter"),
+        ("glpi_client_id", ""),
+        ("glpi_client_id", "padded "),
+        ("glpi_client_id", "control\tcharacter"),
+        ("glpi_ticket_title", ""),
+        ("glpi_ticket_title", " padded"),
+        ("glpi_ticket_title", "control\rcharacter"),
+        ("glpi_ticket_title", "x" * 256),
+    ],
+)
+def test_glpi_text_values_are_safe(field_name: str, invalid_value: str) -> None:
+    with pytest.raises(ValidationError):
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            **{field_name: invalid_value},
+            _env_file=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("glpi_password", ""),
+        ("glpi_password", " padded"),
+        ("glpi_password", "control\ncharacter"),
+        ("glpi_client_secret", ""),
+        ("glpi_client_secret", "padded "),
+        ("glpi_client_secret", "control\tcharacter"),
+    ],
+)
+def test_glpi_secrets_are_safe(field_name: str, invalid_value: str) -> None:
+    with pytest.raises(ValidationError):
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            **{field_name: invalid_value},
+            _env_file=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_values"),
+    [
+        ("glpi_ticket_type", (0, 3)),
+        ("glpi_ticket_urgency", (0, 6)),
+        ("glpi_ticket_impact", (0, 6)),
+    ],
+)
+def test_glpi_ticket_enums_reject_values_outside_the_contract(
+    field_name: str,
+    invalid_values: tuple[int, int],
+) -> None:
+    for invalid_value in invalid_values:
+        with pytest.raises(ValidationError):
+            WorkerSettings(
+                public_base_url="http://localhost:8000",
+                **{field_name: invalid_value},
+                _env_file=None,
+            )
+
+
+def test_glpi_http_timeout_must_be_positive_and_finite() -> None:
+    for invalid_value in (0, -1, float("inf"), float("nan")):
+        with pytest.raises(ValidationError):
+            WorkerSettings(
+                public_base_url="http://localhost:8000",
+                glpi_http_timeout_seconds=invalid_value,
+                _env_file=None,
+            )
+
+
+def test_glpi_http_timeout_defaults_to_ten_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GLPI_HTTP_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("glpi_http_timeout_seconds", raising=False)
+
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        _env_file=None,
+    )
+
+    assert settings.glpi_http_timeout_seconds == 10.0
 
 
 def test_worker_audio_directories_must_be_distinct(tmp_path: Path) -> None:

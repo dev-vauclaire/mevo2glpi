@@ -6,6 +6,8 @@ from typing import Self
 from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .glpi.models import TicketLevel, TicketType
+
 
 class WorkerSettings(BaseSettings):
     """Configuration owned by the automation worker process."""
@@ -45,8 +47,20 @@ class WorkerSettings(BaseSettings):
         allow_inf_nan=False,
     )
 
-    glpi_password: SecretStr | None = Field(default=None, repr=False)
-    glpi_client_secret: SecretStr | None = Field(default=None, repr=False)
+    glpi_base_url: HttpUrl
+    glpi_username: str
+    glpi_password: SecretStr = Field(repr=False)
+    glpi_client_id: str
+    glpi_client_secret: SecretStr = Field(repr=False)
+    glpi_http_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
+    glpi_ticket_title: str = Field(min_length=1, max_length=255)
+    glpi_ticket_type: TicketType
+    glpi_ticket_urgency: TicketLevel
+    glpi_ticket_impact: TicketLevel
 
     @field_validator("public_base_url")
     @classmethod
@@ -99,6 +113,44 @@ class WorkerSettings(BaseSettings):
             )
             raise ValueError(msg)
         return api_key
+
+    @field_validator("glpi_base_url")
+    @classmethod
+    def validate_glpi_base_url(cls, base_url: HttpUrl) -> HttpUrl:
+        """Reject URL components that would make GLPI endpoints ambiguous."""
+        has_credentials = bool(base_url.username or base_url.password)
+        has_suffix = base_url.query is not None or base_url.fragment is not None
+        if has_credentials or has_suffix:
+            msg = "GLPI_BASE_URL must not contain credentials, a query, or a fragment"
+            raise ValueError(msg)
+        return base_url
+
+    @field_validator("glpi_username", "glpi_client_id", "glpi_ticket_title")
+    @classmethod
+    def validate_glpi_printable_text(cls, value: str) -> str:
+        """Reject empty, padded or control-character-bearing GLPI values."""
+        if (
+            not value
+            or value != value.strip()
+            or any(not character.isprintable() for character in value)
+        ):
+            msg = "GLPI text values must be non-empty, trimmed, and printable"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("glpi_password", "glpi_client_secret")
+    @classmethod
+    def validate_glpi_secret(cls, secret: SecretStr) -> SecretStr:
+        """Reject empty, padded or control-character-bearing GLPI secrets."""
+        secret_value = secret.get_secret_value()
+        if (
+            not secret_value
+            or secret_value != secret_value.strip()
+            or any(not character.isprintable() for character in secret_value)
+        ):
+            msg = "GLPI secrets must be non-empty, trimmed, and printable"
+            raise ValueError(msg)
+        return secret
 
     @model_validator(mode="after")
     def validate_audio_directories_are_distinct(self) -> Self:
