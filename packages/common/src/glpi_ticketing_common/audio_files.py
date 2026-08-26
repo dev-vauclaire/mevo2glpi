@@ -314,3 +314,4 @@ def _replace_file(source: Path, destination: Path) -> None:
 
 def _unlink_source(source: Path) -> None:
     source.unlink()
+    _fsync_directory(source.parent)

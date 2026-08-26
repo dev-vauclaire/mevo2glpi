@@ -96,6 +96,30 @@ def test_cross_volume_copy_deletes_source_after_success(tmp_path: Path) -> None:
     assert not source.exists()
 
 
+def test_cross_volume_copy_synchronizes_source_directory_after_deletion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_directory = tmp_path / "pending"
+    destination_directory = tmp_path / "processing"
+    source_directory.mkdir()
+    destination_directory.mkdir()
+    source = source_directory / AUDIO_FILENAME
+    source.write_bytes(SYNTHETIC_AUDIO)
+    synchronized_directories: list[Path] = []
+    real_fsync_directory = audio_files._fsync_directory
+
+    def tracked_fsync_directory(directory: Path) -> None:
+        synchronized_directories.append(directory)
+        real_fsync_directory(directory)
+
+    monkeypatch.setattr(audio_files, "_fsync_directory", tracked_fsync_directory)
+
+    move_audio(source, destination_directory)
+
+    assert synchronized_directories == [destination_directory, source_directory]
+
+
 def test_cross_volume_copy_preserves_source_on_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
