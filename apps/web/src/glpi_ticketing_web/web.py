@@ -129,7 +129,10 @@ def create_app(
         return _TEMPLATES.TemplateResponse(
             request=request,
             name="uploaded.html",
-            context={"audio_uuid": audio_uuid_text},
+            context={
+                "audio_uuid": audio_uuid_text,
+                "upload_again_path": request.app.url_path_for("index"),
+            },
             status_code=status.HTTP_202_ACCEPTED,
             headers={"Location": f"/audios/{audio_uuid_text}"},
         )

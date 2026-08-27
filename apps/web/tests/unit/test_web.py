@@ -72,6 +72,37 @@ def test_upload_returns_202_and_uuid(web_context: WebTestContext) -> None:
     assert response.status_code == 202
     assert response.headers["location"] == f"/audios/{audio_uuid}"
     assert str(audio_uuid) in response.text
+    assert 'href="/"' in response.text
+    assert "Déposer un autre audio" in response.text
+
+
+def test_upload_confirmation_allows_another_upload(
+    web_context: WebTestContext,
+) -> None:
+    first_response = _upload_audio(
+        web_context.client,
+        "first.wav",
+        SYNTHETIC_AUDIO,
+    )
+    first_audio_uuid = _extract_audio_uuid(first_response)
+
+    form_response = web_context.client.get("/")
+    second_response = _upload_audio(
+        web_context.client,
+        "second.mp3",
+        SYNTHETIC_AUDIO,
+    )
+    second_audio_uuid = _extract_audio_uuid(second_response)
+
+    assert first_response.status_code == 202
+    assert form_response.status_code == 200
+    assert 'name="audio_file"' in form_response.text
+    assert second_response.status_code == 202
+    assert first_audio_uuid != second_audio_uuid
+    assert set(web_context.pending_directory.iterdir()) == {
+        web_context.pending_directory / f"{first_audio_uuid}.wav",
+        web_context.pending_directory / f"{second_audio_uuid}.mp3",
+    }
 
 
 def test_upload_publishes_only_completed_pending_file(
