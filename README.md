@@ -38,18 +38,25 @@ travail. Il n'utilise actuellement ni base de données, ni broker de messages.
   GLPI, puis publication du fichier dans `completed` après confirmation du
   ticket ;
 - point d'entrée exécutable du worker, composition des clients HTTP et arrêt
-  coopératif sur `SIGINT` ou `SIGTERM`.
+  coopératif sur `SIGINT` ou `SIGTERM` ;
+- point d'entrée exécutable de l'application web, composition FastAPI/Uvicorn
+  et écoute configurable avec loopback par défaut ;
+- images runtime séparées, Docker Compose mono-serveur durci et runbook de
+  déploiement du POC sur un serveur de test.
 
-### Fonctionnalités restant à intégrer
+### Limites restant à traiter avant un MVP
 
-- point d'entrée exécutable pour assembler et démarrer l'application web ;
-- déploiement, supervision et mécanisme opérateur pour les traitements
-  bloqués ou classés dans `failed`.
+- authentification et autorisation applicatives ;
+- gestion des secrets par fichiers ou coffre externe ;
+- supervision et mécanisme opérateur pour les traitements bloqués ou classés
+  dans `failed` ;
+- sauvegarde, rétention et chiffrement au repos des audios.
 
-Le module web expose encore seulement une fabrique `create_app(...)`. Le worker
-possède désormais sa racine de composition dans `application.py`, une commande
-console et une exécution équivalente avec `python -m`. Cette séparation permet
-de tester `AudioProcessor` avec les vrais adaptateurs sans démarrer la boucle.
+Chaque application possède désormais une racine de composition dans
+`application.py`, une commande console et une exécution équivalente avec
+`python -m`. Les fabriques FastAPI et les composants du pipeline restent
+séparés de ces points d'entrée afin d'être testés sans démarrer leur boucle
+d'exécution.
 
 ## Architecture du workspace
 
@@ -68,6 +75,10 @@ explicitement ses dépendances d'exécution.
 Les deux applications dépendent du package commun par la source workspace
 déclarée à la racine. Une application ne doit pas importer directement les
 modules internes de l'autre application.
+
+Les artefacts sous [`infra/docker/`](infra/docker/README.md) ne constituent pas
+un membre Python supplémentaire. Ils empaquettent ces trois distributions sans
+déplacer leurs responsabilités ni réutiliser les stacks Testcontainers.
 
 La convention générale est un layout `src` : le code de chaque membre se
 trouve dans `<membre>/src/<package_python>` et ses tests dans
@@ -89,6 +100,7 @@ flowchart LR
     Q -->|indisponibilité| B[Attente puis nouvelle soumission]
     B --> R
     Q -->|erreur terminale| F[(failed + error.json)]
+    Q -->|authentification ou contrat incohérent| K[blocked : arrêt du runner]
     Q -->|COMPLETED| M[Transcription privée en mémoire]
     M --> G[Recherche ou création du ticket GLPI]
     G -->|indisponibilité| GR[Attente puis nouvelle tentative GLPI]
@@ -115,18 +127,22 @@ flowchart LR
    de polling produit un résultat `retry`. La boucle attend puis relance une
    transcription du même audio. L'API ne fournissant pas de clé d'idempotence,
    un nouveau job distant peut alors être créé.
-5. Une transcription réussie est conservée dans l'état privé du processeur.
+5. Seul un rejet explicite de la soumission sous HTTP 200 ou un job au statut
+   exact `FAILED` est terminal pour l'audio. Une erreur d'authentification,
+   d'autorisation, un autre `4xx`, une réponse malformée ou un statut distant
+   inconnu produit `blocked` et conserve l'audio dans `processing`.
+6. Une transcription réussie est conservée dans l'état privé du processeur.
    Elle n'est exposée dans aucun résultat public et elle est réutilisée sans
    retranscription tant que les tentatives GLPI restent dans le même processus.
-6. Le client GLPI épinglé en V2.3.0 recherche le ticket par `external_id`, le
+7. Le client GLPI épinglé en V2.3.0 recherche le ticket par `external_id`, le
    crée si nécessaire, puis retourne son identifiant. Une indisponibilité ou un
    résultat de création incertain produit `retry` sans déplacer l'audio.
-7. Une erreur terminale propre à l'audio publie d'abord l'audio et un sidecar
+8. Une erreur terminale propre à l'audio publie d'abord l'audio et un sidecar
    expurgé dans `failed`, puis supprime `processing`. Une erreur systémique,
    une incohérence ou une publication impossible produit `blocked` et arrête
    la boucle afin que l'opérateur inspecte le résultat et les artefacts
    éventuellement déjà publiés.
-8. Après confirmation du ticket, l'audio est publié dans `completed`. Le
+9. Après confirmation du ticket, l'audio est publié dans `completed`. Le
    résultat `completed` contient l'UUID, le chemin final et l'identifiant GLPI,
    mais jamais la transcription.
 
@@ -150,6 +166,21 @@ Un sidecar terminal porte le nom `{uuid}.error.json` et contient uniquement :
 - un horodatage UTC.
 
 Il ne contient ni transcription, ni clé API, ni réponse HTTP brute.
+
+La politique Transcribe AI suit une allowlist terminale : une enveloppe
+`status=error` ne représente un rejet propre à l'audio que sur la réponse HTTP
+200 de soumission, et seul le statut de job exact `FAILED` est terminal pendant
+le polling. Les erreurs HTTP non réessayables, y compris `401`, `403` et les
+autres `4xx`, ainsi que les réponses incompatibles avec le contrat, produisent
+`blocked`. Cette prudence empêche une clé invalide ou une évolution distante de
+classer toute la file dans `failed`.
+
+La version Transcribe AI `1.0.0` épinglée pour les tests représente encore un
+job distant en échec par une enveloppe HTTP `500`, sans code métier stable.
+Cette réponse reste donc volontairement réessayable : le client ne peut pas la
+distinguer sûrement d'une panne serveur. Le contrat distant devra exposer
+`data.status=FAILED` ou un code d'erreur métier stable avant le MVP pour rendre
+ce cas terminal sans fragiliser les erreurs systémiques.
 
 La politique GLPI est conservatrice : un statut HTTP ne suffit jamais à rendre
 une création terminale. Seuls un `external_id` dupliqué et une réponse `400`
@@ -202,7 +233,7 @@ vérité ; `uv.lock` fixe les versions exactes installées pour le dépôt.
 | Python | `>=3.12` | Langage commun aux trois membres |
 | uv | workspace et lock partagé | Résolution, environnement, exécution et build |
 | FastAPI | `>=0.116,<1` | Routes HTTP et validation de l'application web |
-| Uvicorn | `>=0.35,<1` | Serveur ASGI prévu pour le futur bootstrap web |
+| Uvicorn | `>=0.35,<1` | Serveur ASGI composé par le point d'entrée web |
 | Jinja2 | `>=3.1,<4` | Pages HTML de dépôt et de confirmation |
 | Pydantic Settings | `>=2.10,<3` | Configuration typée depuis l'environnement |
 | HTTPX | `>=0.28,<1` | Clients HTTP de Transcribe AI et GLPI |
@@ -210,6 +241,8 @@ vérité ; `uv.lock` fixe les versions exactes installées pour le dépôt.
 | Pytest | `>=8.4,<10` | Tests unitaires et tests d'intégration opt-in |
 | Ruff | `>=0.12,<1` | Formatage et analyse statique |
 | Testcontainers | `>=4.12,<5`, groupe de développement | Stacks GLPI/MySQL et Transcribe AI jetables pour les tests d'intégration |
+| Nginx | `1.30.4-alpine3.24`, image épinglée par digest | Terminaison TLS, authentification Basic et reverse proxy du POC |
+| Docker Engine / Compose | `28.3.3+` / `2.24+`, hors workspace Python | Images Nginx/web/worker et déploiement mono-serveur du POC |
 
 Les trois distributions du projet utilisent `uv_build` comme backend de
 construction et portent actuellement la version `0.1.0`.
@@ -222,6 +255,9 @@ construction et portent actuellement la version `0.1.0`.
   worker ;
 - uniquement pour les tests marqués `glpi`, `transcribe_ai` ou `e2e` : Docker
   avec le plugin Compose ;
+- uniquement pour construire ou déployer le POC : Docker Engine 28.3.3 ou
+  supérieur, Docker Compose 2.24 ou supérieur, un certificat TLS avec sa clé
+  privée et l'utilitaire `htpasswd` ;
 - uniquement pour `transcribe_ai` ou `e2e` : un hôte et un daemon Docker
   `linux/amd64`, ainsi qu'un accès réseau à chaque session pour le modèle
   Whisper ; le premier lancement télécharge aussi les images. Le mode GPU
@@ -254,8 +290,8 @@ ne doivent jamais être ajoutés au dépôt.
 
 `WebSettings` et `WorkerSettings` valident ce contrat. Le point d'entrée du
 worker transforme `WorkerSettings` en `TranscriptionClient`, `GlpiClient`,
-`AudioProcessor` et `run_forever(...)`. La composition de l'application web
-reste à ajouter.
+`AudioProcessor` et `run_forever(...)`. Celui du web transforme `WebSettings`
+en application FastAPI puis en serveur Uvicorn.
 
 | Variables | Propriétaire | Rôle défini par la configuration |
 | --- | --- | --- |
@@ -263,6 +299,8 @@ reste à ajouter.
 | `AUDIO_PROCESSING_DIR` | worker | Audio réclamé et traitement en cours |
 | `AUDIO_COMPLETED_DIR` | web et worker | Publication des succès par le worker et lecture par le web |
 | `AUDIO_FAILED_DIR` | worker | Audio terminal et sidecar expurgé |
+| `WEB_HOST`, `WEB_PORT` | web | Adresse IP et port d'écoute Uvicorn ; `127.0.0.1:8000` par défaut |
+| `WEB_TRUST_PROXY_HEADERS` | web | Confiance explicite dans les en-têtes du proxy ; désactivée par défaut |
 | `MAX_UPLOAD_BYTES` | web | Taille maximale d'un upload |
 | `WORKER_SCAN_INTERVAL_SECONDS` | worker | Attente d'un résultat `idle`, `1` seconde par défaut |
 | `PUBLIC_BASE_URL` | worker | Base utilisée par la composition pour construire l'URL audio du ticket |
@@ -282,6 +320,52 @@ reste à ajouter.
 Sa valeur est `cpu` par défaut ou `gpu` pour demander explicitement CUDA. Les
 identifiants de la stack sont générés en mémoire à chaque session pytest :
 aucune clé Transcribe AI ne doit être fournie par le développeur.
+
+## Déploiement mono-serveur du POC
+
+Le mode validé pour un serveur de test construit trois images : Nginx, `web` et
+`worker`. GLPI et Transcribe AI restent des services externes. Quatre bind
+mounts persistants conservent le cycle de vie des audios ; le web ne voit que
+`pending` en écriture et `completed` en lecture seule.
+
+Nginx est le seul service publié. Il termine TLS, exige une authentification
+Basic et relaie vers `web:8000` sur un réseau Docker interne. Par défaut, son
+port HTTPS est lié au loopback de l'hôte ; l'ouverture sur l'adresse du serveur
+doit être explicite et protégée par le pare-feu. Les trois conteneurs utilisent
+un rootfs en lecture seule, aucune capability Linux et une rotation locale des
+logs ; les applications Python partagent l'UID `10001`, Nginx utilise l'UID
+non-root `101`.
+
+Le worker n'est volontairement pas redémarré automatiquement : son code de
+sortie `3` est un signal d'intervention, pas une panne à masquer. Le démarrage
+systemd fourni refuse également de reprendre un ancien worker sorti avec un
+code non nul ; la reprise reste une décision opérateur explicite.
+
+Le runbook complet, la préparation des volumes, les fichiers de configuration,
+l'overlay de CA interne, Nginx et la procédure de rollback se trouvent
+dans la [documentation de déploiement](infra/docker/README.md).
+
+### Démarrage de l'application web
+
+Après avoir créé les répertoires `pending` et `completed` configurés :
+
+```bash
+uv run glpi-ticketing-web
+```
+
+La forme module est équivalente :
+
+```bash
+uv run python -m glpi_ticketing_web
+```
+
+Le serveur écoute uniquement sur `127.0.0.1:8000` par défaut. L'image construite
+par `infra/docker/web/Dockerfile` définit explicitement `WEB_HOST=0.0.0.0` dans
+le conteneur, mais Compose expose ce port uniquement à Nginx sur le réseau
+`web-private` et ne le publie jamais sur l'hôte. Le processus retourne `0`
+après l'arrêt normal, `1` pour une erreur inattendue, `2` pour une
+configuration invalide et `130` pour un `KeyboardInterrupt` non pris en charge
+par Uvicorn.
 
 ### Démarrage du worker
 
@@ -316,11 +400,17 @@ Les anciens tests unitaires plats du scanner et du worker ont été répartis so
 du processeur, ticketing du processeur et runner. Les contrats HTTP restent
 testés séparément au niveau de leurs adaptateurs.
 
+L'application web possède en plus un test d'intégration local : il démarre le
+vrai serveur Uvicorn sur un socket loopback et un port aléatoire, interroge
+`GET /health` par polling borné puis vérifie son arrêt. Il ne requiert aucun
+service externe.
+
 Pytest est configuré avec `--strict-config`, `--strict-markers` et le mode
 d'import `importlib`. Les marqueurs enregistrés sont :
 
 | Marqueur | Politique |
 | --- | --- |
+| `deployment` | Construit les trois images runtime et vérifie TLS, Nginx et le Compose durci sans appeler les API externes |
 | `transcribe_ai` | Démarre une stack Transcribe AI v1 jetable et exécute le contrat POST/polling réel |
 | `glpi` | Démarre une seule stack GLPI 11/MySQL jetable et teste le client V2.3.0 réel |
 | `e2e` | Assemble le worker réel avec les stacks Transcribe AI et GLPI jetables |
@@ -356,7 +446,15 @@ suite ne doit pas être parallélisée.
 Suite locale sans service externe :
 
 ```bash
-uv run --all-packages pytest -m "not glpi and not transcribe_ai and not e2e"
+uv run --all-packages pytest \
+  -m "not deployment and not glpi and not transcribe_ai and not e2e"
+```
+
+Smoke test du packaging de déploiement, à exécuter séparément et sans
+parallélisation :
+
+```bash
+uv run pytest -m deployment tests/deployment -vv --maxfail=1
 ```
 
 Intégration GLPI jetable, à exécuter séparément et sans parallélisation :

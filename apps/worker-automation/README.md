@@ -181,14 +181,38 @@ crée un nouveau job distant. La composition alimente cet intervalle depuis
 `TRANSCRIPTION_POLL_INTERVAL_SECONDS`. Il n'y a actuellement ni nombre
 maximal de tentatives, ni backoff progressif, ni jitter.
 
-### Erreurs terminales
+### Erreurs terminales et blocages
 
-Une soumission explicitement refusée, une erreur HTTP non réessayable, un
-contrat de réponse invalide, un UUID distant incohérent, un job distant en
-échec ou une transcription absente à l'état `COMPLETED` sont terminaux.
+Une erreur n'est terminale pour l'audio que lorsque le contrat Transcribe AI
+la désigne sans ambiguïté : une soumission refusée par une enveloppe
+`{"status": "error"}` reçue avec HTTP 200, ou un job dont
+`data.status == "FAILED"`. Ces deux situations sont allowlistées ; elles seules
+produisent une `TranscriptionTerminalError`.
 
-Le poller traduit ces situations en `TranscriptionTerminalError` sans déplacer
-l'audio. `AudioProcessor` est l'unique responsable de publier ensuite dans
+Les erreurs systémiques ne doivent pas classer un audio dans `failed` :
+
+- HTTP `401` et `403` : configuration d'authentification ou d'autorisation ;
+- autres HTTP `4xx`, y compris une enveloppe `status=error` ;
+- contrat malformé, statut de premier niveau inattendu, statut de job inconnu
+  (`CANCELLED`, valeur nouvelle, etc.) ;
+- UUID distant incohérent ou transcription absente à l'état `COMPLETED`.
+
+Le poller les traduit en `TranscriptionBlockedError` avec une catégorie et un
+code technique expurgés. `AudioProcessor` retourne alors `BlockedOutcome` et
+conserve l'audio dans `processing`, afin qu'une correction de configuration ou
+une adaptation du contrat puisse être appliquée sans perdre ni condamner
+l'entrée.
+
+L'image Transcribe AI `1.0.0` épinglée dans la fixture retourne actuellement
+une enveloppe HTTP `500` lorsqu'un job distant passe en échec, sans code métier
+permettant de distinguer ce cas d'une indisponibilité serveur. Le POC traite
+donc cette réponse comme réessayable. Avant le MVP, l'API devra exposer le
+statut contractuel `FAILED` dans une réponse exploitable, ou fournir un code
+métier stable que le client pourra allowlister comme terminal.
+
+Pour les deux erreurs terminales allowlistées, le poller lève
+`TranscriptionTerminalError` sans déplacer l'audio. `AudioProcessor` est
+l'unique responsable de publier ensuite dans
 `failed` :
 
 1. l'audio complet ;
@@ -339,6 +363,13 @@ hors contrat.
 Un modèle sans secret est disponible à la racine dans `.env.example`. Il ne
 faut jamais versionner le `.env` local.
 
+En déploiement, `infra/docker/docker-compose.prod.yaml` fixe les quatre chemins
+sous `/data` et charge les autres valeurs depuis un fichier worker externe au
+dépôt, en mode `0600`. Cette solution garde les secrets hors de l'image mais
+les laisse visibles aux administrateurs Docker ; le passage à des secrets
+fichiers ou à un coffre externe est réservé au MVP. Le contrat complet est
+décrit dans [`infra/docker/README.md`](../../infra/docker/README.md).
+
 ## Point d'entrée, composition et arrêt
 
 La racine de composition reste séparée du métier :
@@ -377,6 +408,11 @@ boucle et du poller deviennent interruptibles et aucune nouvelle itération ne
 démarre. Un appel HTTP synchrone déjà engagé peut aller jusqu'à son timeout.
 Lorsqu'un polling est interrompu, l'audio reste dans `processing` et sera
 resoumis après le prochain démarrage conformément à la politique du POC.
+
+Le Compose runtime applique `restart: "no"` au worker. Le code `3` demande une
+inspection et ne doit pas déclencher une boucle de redémarrage. Le démarrage au
+boot peut être confié à l'unité systemd fournie ; la reprise après un blocage
+reste une action opérateur explicite.
 
 ## Architecture du workspace
 

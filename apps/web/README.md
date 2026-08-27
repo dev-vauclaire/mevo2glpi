@@ -17,7 +17,8 @@ appartiennent au pipeline d'automatisation, en dehors de cette application.
 - Jinja2 pour les deux pages HTML ;
 - `python-multipart` pour la réception du formulaire d'upload ;
 - Pydantic Settings pour la configuration typée ;
-- Uvicorn comme serveur ASGI déclaré dans les dépendances ;
+- Uvicorn comme serveur ASGI, composé et démarré par le point d'entrée de
+  l'application ;
 - `glpi-ticketing-common` pour les extensions audio autorisées et l'écriture
   atomique des fichiers.
 
@@ -82,32 +83,47 @@ La classe `WebSettings` reconnaît les variables suivantes :
 | --- | --- | --- |
 | `AUDIO_PENDING_DIR` | `/data/audio-pending` | Répertoire de publication des nouveaux audios |
 | `AUDIO_COMPLETED_DIR` | `/data/audio-completed` | Répertoire depuis lequel les audios terminés sont servis |
+| `WEB_HOST` | `127.0.0.1` | Adresse IP IPv4 ou IPv6 d'écoute Uvicorn |
+| `WEB_PORT` | `8000` | Port TCP d'écoute, entre 1 et 65535 |
+| `WEB_TRUST_PROXY_HEADERS` | `false` | Autorise explicitement Uvicorn à interpréter les en-têtes du proxy |
 | `MAX_UPLOAD_BYTES` | `26214400` (25 MiB) | Taille maximale acceptée par upload |
 
 Les deux répertoires doivent être distincts. Lors de la création de
 l'application, ils doivent également exister et être des répertoires. Le
 fichier `.env` situé dans le répertoire courant peut fournir ces valeurs ; les
-valeurs locales et les secrets ne doivent pas être versionnés.
+valeurs locales et les secrets ne doivent pas être versionnés. L'adresse
+loopback est le défaut prudent pour une exécution locale. L'image du
+[Dockerfile web](../../infra/docker/web/Dockerfile) surcharge
+explicitement `WEB_HOST=0.0.0.0` dans le conteneur ; Compose ne publie pas ce
+port sur l'hôte. Seul le service Nginx peut joindre `web:8000` sur le réseau
+interne `web-private`.
 
-### Limite actuelle du démarrage
+`WEB_TRUST_PROXY_HEADERS=true` ne doit être utilisé que lorsque ce réseau
+reste une frontière de confiance et que Nginx est le seul pair du web. La stack
+de déploiement respecte et teste cet invariant. Une exécution locale ou une
+publication directe conserve la valeur `false`.
 
-`web.py` expose la fabrique `create_app(...)` et `settings.py` expose
-`WebSettings`, mais aucun point d'entrée ne les relie encore. Il n'existe donc
-pas, à ce stade, d'objet ASGI global ni de commande Uvicorn opérationnelle
-supportée par le dépôt.
+## Démarrage et cycle de vie
 
-Le futur point de composition devra effectuer explicitement l'équivalent de :
+Depuis la racine, créer d'abord les deux répertoires configurés, puis lancer :
 
-```python
-settings = WebSettings()
-app = create_app(
-    pending_directory=settings.audio_pending_dir,
-    completed_directory=settings.audio_completed_dir,
-    max_upload_bytes=settings.max_upload_bytes,
-)
+```bash
+uv run glpi-ticketing-web
 ```
 
-Ce bloc décrit le câblage attendu ; il n'est pas encore présent dans le code.
+Le lancement sous forme de module est équivalent :
+
+```bash
+uv run python -m glpi_ticketing_web
+```
+
+La racine de composition charge `WebSettings`, vérifie immédiatement les
+répertoires, construit FastAPI puis démarre un unique processus Uvicorn. Les
+signaux `SIGINT` et `SIGTERM` suivent l'arrêt gracieux standard d'Uvicorn. Une
+configuration Pydantic invalide ou un répertoire absent produit le code de
+sortie `2`. Une erreur inattendue produit le code `1` et une interruption non
+gérée le code `130`. Les diagnostics applicatifs n'affichent ni les valeurs de
+configuration ni le message brut d'une exception inattendue.
 
 ## Organisation des fichiers
 
@@ -117,14 +133,20 @@ apps/web/
 ├── README.md
 ├── src/glpi_ticketing_web/
 │   ├── __init__.py          # version du package
+│   ├── __main__.py          # lancement avec python -m
+│   ├── application.py       # composition, Uvicorn et frontière CLI
 │   ├── settings.py          # configuration typée propre à l'application
 │   ├── web.py               # fabrique FastAPI, routes et helpers HTTP
 │   └── templates/
 │       ├── index.html       # formulaire d'upload
 │       └── uploaded.html    # confirmation avec UUID
-└── tests/unit/
-    ├── test_settings.py     # contrat des variables d'environnement
-    └── test_web.py          # contrats HTTP et frontières de stockage
+└── tests/
+    ├── integration/
+    │   └── test_server_startup.py  # vrai serveur HTTP sur loopback
+    └── unit/
+        ├── test_application.py     # composition et diagnostics CLI
+        ├── test_settings.py        # contrat des variables d'environnement
+        └── test_web.py             # contrats HTTP et stockage
 ```
 
 ## Conventions d'architecture
@@ -133,6 +155,13 @@ apps/web/
   package installé et non un module trouvé accidentellement dans le dépôt.
 - `create_app(...)` est une fabrique : les chemins autorisés sont injectés,
   ce qui rend les tests indépendants du stockage réel.
+- Les actions et liens internes rendus pour le navigateur restent relatifs. Le
+  web n'a ainsi pas à faire confiance à des en-têtes de proxy pour reconstruire
+  le schéma ou un port public, et le même HTML fonctionne derrière le frontal
+  HTTPS du POC.
+- `application.py` est la seule racine de composition exécutable. Les routes
+  ne chargent pas directement l'environnement et restent testables sans
+  démarrer de serveur.
 - `settings.py` ne contient que la configuration appartenant à l'application
   web. Les chemins `processing` et `failed` restent sous la responsabilité du
   worker.
@@ -166,6 +195,13 @@ uv run --package glpi-ticketing-web pytest apps/web/tests/unit/test_web.py
 uv run --package glpi-ticketing-web pytest apps/web/tests/unit/test_settings.py
 ```
 
+Exécuter le test de démarrage du vrai serveur Uvicorn :
+
+```bash
+uv run --package glpi-ticketing-web pytest \
+  apps/web/tests/integration/test_server_startup.py
+```
+
 Vérifier le formatage et les règles statiques de ce workspace :
 
 ```bash
@@ -175,9 +211,9 @@ uv run ruff check apps/web
 
 ## Politique de test
 
-Les tests actuels sont des tests unitaires rapides et déterministes. FastAPI
-est appelé avec `TestClient` et chaque test utilise des répertoires temporaires
-isolés. Aucun serveur HTTP, service de transcription ou GLPI réel n'est
+Les contrats de routes sont des tests unitaires rapides et déterministes.
+FastAPI est appelé avec `TestClient` et chaque test utilise des répertoires
+temporaires isolés. Aucun service de transcription ou GLPI réel n'est
 contacté.
 
 Ils couvrent notamment :
@@ -190,21 +226,29 @@ Ils couvrent notamment :
 - l'absence d'accès aux répertoires `processing` et `failed` ;
 - les valeurs par défaut, les surcharges et les invariants de configuration.
 
-La suite ne constitue pas encore un test d'intégration d'un serveur ASGI lancé
-avec sa configuration réelle, puisque le point d'entrée de démarrage reste à
-implémenter.
+Le test d'intégration réserve un port aléatoire fourni par le système, démarre
+le vrai `uvicorn.Server` issu de la racine de composition, puis interroge
+`GET /health` sur loopback par polling borné. Il demande ensuite l'arrêt et
+vérifie que le thread serveur se termine. Il n'utilise ni Docker, ni service
+externe, ni attente fixe supposant une durée de démarrage.
+
+Le smoke test Docker transversal reste à la racine sous `tests/deployment` : il
+vérifie l'installation des templates dans l'image, un upload réel, le montage
+`completed` en lecture seule et l'absence de `processing`/`failed` dans le
+conteneur web. Le runbook est documenté dans
+[`infra/docker/README.md`](../../infra/docker/README.md).
 
 ## Limites et évolutions futures
 
 Les éléments suivants ne sont pas implémentés dans l'application web actuelle :
 
-- le point d'entrée ASGI qui charge `WebSettings` ;
 - l'authentification et l'autorisation des dépôts ou des téléchargements ;
 - l'inspection du contenu audio au-delà de l'extension ;
 - un endpoint de statut du traitement ;
 - l'affichage d'une transcription ou d'un ticket GLPI ;
 - la liste, la suppression ou la nouvelle tentative d'un audio ;
-- un test d'intégration couvrant le démarrage réel du serveur.
+- un healthcheck vérifiant réellement l'accès aux volumes de stockage ;
+- plusieurs processus web coordonnés ou une politique de montée en charge.
 
 Ces points décrivent des capacités absentes, pas des engagements
 d'implémentation. Leur contrat devra être défini avant de les ajouter.
