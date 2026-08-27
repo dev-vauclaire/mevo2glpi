@@ -80,12 +80,6 @@ class TranscriptionClient:
         except httpx.RequestError:
             raise TranscriptionTransportError(self.provider, operation) from None
 
-        rejected_log = _non_success_error_log(response, operation)
-        if rejected_log is not None:
-            raise TranscriptionSubmissionRejectedError(
-                self.provider,
-                response_log=rejected_log,
-            )
         _require_successful_http_status(response, self.provider, operation)
         payload = _decode_object(response, self.provider, operation)
         provider_status = _require_string_field(
@@ -147,14 +141,6 @@ class TranscriptionClient:
         except httpx.RequestError:
             raise TranscriptionTransportError(self.provider, operation) from None
 
-        rejected_log = _non_success_error_log(response, operation)
-        if rejected_log is not None:
-            return JobSnapshot(
-                job_uuid=job_uuid,
-                status=JobStatus.FAILED,
-                transcription=None,
-                response_log=rejected_log,
-            )
         _require_successful_http_status(response, self.provider, operation)
         payload = _decode_object(response, self.provider, operation)
         provider_status = _require_string_field(
@@ -164,41 +150,26 @@ class TranscriptionClient:
             operation,
         )
         normalized_provider_status = provider_status.strip().casefold()
-        persisted_provider_status = (
-            normalized_provider_status
-            if normalized_provider_status in {"success", "error"}
-            else "other"
-        )
-
         if normalized_provider_status != "success":
-            response_log = ResponseLogEntry(
-                operation=operation,
-                http_status=response.status_code,
-                provider_status=persisted_provider_status,
-                job_status=None,
-            )
-            return JobSnapshot(
-                job_uuid=job_uuid,
-                status=JobStatus.FAILED,
-                transcription=None,
-                response_log=response_log,
+            raise TranscriptionProtocolError(
+                self.provider,
+                operation,
+                "unsupported top-level status",
             )
 
         data = _require_object_field(payload, "data", self.provider, operation)
-        # The historical API calls this UUID ``job_id`` in result payloads.
-        response_job_uuid = data.get("job_id")
-        if response_job_uuid is not None:
-            validated_response_job_uuid = _validate_job_uuid(
-                response_job_uuid,
+        # The pinned API calls this UUID ``job_id`` in result payloads.
+        response_job_uuid = _validate_job_uuid(
+            _require_string_field(data, "job_id", self.provider, operation),
+            self.provider,
+            operation,
+        )
+        if response_job_uuid != job_uuid:
+            raise TranscriptionProtocolError(
                 self.provider,
                 operation,
+                "response job identifier does not match the requested job",
             )
-            if validated_response_job_uuid != job_uuid:
-                raise TranscriptionProtocolError(
-                    self.provider,
-                    operation,
-                    "response job identifier does not match the requested job",
-                )
 
         raw_job_status = _require_string_field(
             data,
@@ -211,12 +182,14 @@ class TranscriptionClient:
             "PENDING": JobStatus.PENDING,
             "PROCESSING": JobStatus.PROCESSING,
             "COMPLETED": JobStatus.COMPLETED,
-        }.get(normalized_job_status, JobStatus.FAILED)
-        persisted_job_status = (
-            normalized_job_status
-            if normalized_job_status in {"PENDING", "PROCESSING", "COMPLETED", "FAILED"}
-            else "OTHER"
-        )
+            "FAILED": JobStatus.FAILED,
+        }.get(normalized_job_status)
+        if status is None:
+            raise TranscriptionProtocolError(
+                self.provider,
+                operation,
+                "unsupported job status",
+            )
 
         transcription: str | None = None
         if status is JobStatus.COMPLETED:
@@ -236,8 +209,8 @@ class TranscriptionClient:
         response_log = ResponseLogEntry(
             operation=operation,
             http_status=response.status_code,
-            provider_status=persisted_provider_status,
-            job_status=persisted_job_status,
+            provider_status="success",
+            job_status=normalized_job_status,
         )
         return JobSnapshot(
             job_uuid=job_uuid,
@@ -360,34 +333,6 @@ def _require_successful_http_status(
         operation,
         status_code,
         retryable=retryable,
-    )
-
-
-def _non_success_error_log(
-    response: httpx.Response,
-    operation: TranscriptionOperation,
-) -> ResponseLogEntry | None:
-    if (
-        not 400 <= response.status_code < 500
-        or response.status_code in RETRYABLE_HTTP_STATUSES
-    ):
-        return None
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
-    if not isinstance(payload, Mapping):
-        return None
-    provider_status = payload.get("status")
-    if not isinstance(provider_status, str):
-        return None
-    if provider_status.strip().casefold() != "error":
-        return None
-    return ResponseLogEntry(
-        operation=operation,
-        http_status=response.status_code,
-        provider_status="error",
-        job_status=None,
     )
 
 

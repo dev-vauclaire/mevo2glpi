@@ -9,6 +9,7 @@ from glpi_ticketing_worker_automation.transcription import (
     JobStatus,
     JobUuid,
     TranscriptionClient,
+    TranscriptionErrorCategory,
     TranscriptionHttpError,
     TranscriptionOperation,
     TranscriptionProtocolError,
@@ -139,10 +140,12 @@ def test_transcription_client_submit_recognizes_error_envelope_on_4xx(
         )
 
     client, http_client = make_transcription_client(handler)
-    with http_client, pytest.raises(TranscriptionSubmissionRejectedError) as error_info:
+    with http_client, pytest.raises(TranscriptionHttpError) as error_info:
         client.submit(audio_path)
 
-    assert error_info.value.response_log.http_status == status_code
+    assert error_info.value.status_code == status_code
+    assert error_info.value.category is TranscriptionErrorCategory.INVALID_REQUEST
+    assert error_info.value.technical_code == f"http_{status_code}"
     assert "Provider rejection" not in str(error_info.value)
 
 
@@ -210,8 +213,27 @@ def test_transcription_client_get_job_returns_completed_transcription() -> None:
     assert "Coucou" not in repr(snapshot.response_log)
 
 
-@pytest.mark.parametrize("provider_job_status", ["FAILED", "CANCELLED", "UNKNOWN"])
-def test_transcription_client_get_job_maps_other_job_statuses_to_failed(
+def test_transcription_client_get_job_maps_explicit_failed_status() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": {"job_id": str(JOB_UUID), "status": "FAILED"},
+            },
+        )
+
+    client, http_client = make_transcription_client(handler)
+    with http_client:
+        snapshot = client.get_job(JOB_UUID)
+
+    assert snapshot.status is JobStatus.FAILED
+    assert snapshot.transcription is None
+    assert snapshot.response_log.job_status == "FAILED"
+
+
+@pytest.mark.parametrize("provider_job_status", ["CANCELLED", "UNKNOWN"])
+def test_transcription_client_get_job_rejects_unknown_job_status(
     provider_job_status: str,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -224,16 +246,14 @@ def test_transcription_client_get_job_maps_other_job_statuses_to_failed(
         )
 
     client, http_client = make_transcription_client(handler)
-    with http_client:
-        snapshot = client.get_job(JOB_UUID)
+    with http_client, pytest.raises(TranscriptionProtocolError) as error_info:
+        client.get_job(JOB_UUID)
 
-    assert snapshot.status is JobStatus.FAILED
-    assert snapshot.transcription is None
-    expected_log_status = "FAILED" if provider_job_status == "FAILED" else "OTHER"
-    assert snapshot.response_log.job_status == expected_log_status
+    assert error_info.value.technical_code == "protocol_error"
+    assert provider_job_status not in str(error_info.value)
 
 
-def test_transcription_client_get_job_maps_top_level_error_to_failed() -> None:
+def test_transcription_client_get_job_rejects_top_level_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -241,15 +261,14 @@ def test_transcription_client_get_job_maps_top_level_error_to_failed() -> None:
         )
 
     client, http_client = make_transcription_client(handler)
-    with http_client:
-        snapshot = client.get_job(JOB_UUID)
+    with http_client, pytest.raises(TranscriptionProtocolError) as error_info:
+        client.get_job(JOB_UUID)
 
-    assert snapshot.status is JobStatus.FAILED
-    assert snapshot.response_log.provider_status == "error"
-    assert "Job introuvable" not in repr(snapshot.response_log)
+    assert error_info.value.category is TranscriptionErrorCategory.PROTOCOL
+    assert "Job introuvable" not in str(error_info.value)
 
 
-def test_transcription_client_get_job_maps_4xx_error_envelope_to_failed() -> None:
+def test_transcription_client_get_job_keeps_4xx_error_envelope_systemic() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             404,
@@ -257,12 +276,12 @@ def test_transcription_client_get_job_maps_4xx_error_envelope_to_failed() -> Non
         )
 
     client, http_client = make_transcription_client(handler)
-    with http_client:
-        snapshot = client.get_job(JOB_UUID)
+    with http_client, pytest.raises(TranscriptionHttpError) as error_info:
+        client.get_job(JOB_UUID)
 
-    assert snapshot.status is JobStatus.FAILED
-    assert snapshot.response_log.http_status == 404
-    assert snapshot.response_log.provider_status == "error"
+    assert error_info.value.status_code == 404
+    assert error_info.value.category is TranscriptionErrorCategory.INVALID_REQUEST
+    assert "Job introuvable" not in str(error_info.value)
 
 
 def test_transcription_client_get_job_keeps_429_error_envelope_retryable() -> None:
@@ -284,6 +303,8 @@ def test_transcription_client_get_job_keeps_429_error_envelope_retryable() -> No
     ("status_code", "retryable"),
     [
         (400, False),
+        (401, False),
+        (403, False),
         (404, False),
         (422, False),
         (429, True),
@@ -311,6 +332,36 @@ def test_transcription_client_http_errors_are_classified(
 
     assert error_info.value.status_code == status_code
     assert error_info.value.retryable is retryable
+    assert API_KEY not in str(error_info.value)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "category"),
+    [
+        (401, TranscriptionErrorCategory.AUTHENTICATION),
+        (403, TranscriptionErrorCategory.AUTHORIZATION),
+        (422, TranscriptionErrorCategory.INVALID_REQUEST),
+    ],
+)
+def test_transcription_client_non_retryable_http_categories_are_typed(
+    tmp_path: Path,
+    status_code: int,
+    category: TranscriptionErrorCategory,
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(SYNTHETIC_AUDIO)
+
+    client, http_client = make_transcription_client(
+        lambda request: httpx.Response(
+            status_code,
+            text=f"remote secret {API_KEY}",
+        )
+    )
+    with http_client, pytest.raises(TranscriptionHttpError) as error_info:
+        client.submit(audio_path)
+
+    assert error_info.value.category is category
+    assert error_info.value.technical_code == f"http_{status_code}"
     assert API_KEY not in str(error_info.value)
 
 
@@ -405,3 +456,21 @@ def test_transcription_client_rejects_a_mismatched_response_job_uuid() -> None:
         ),
     ):
         client.get_job(JOB_UUID)
+
+
+def test_transcription_client_requires_response_job_identifier() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": {"status": "PENDING"},
+            },
+        )
+
+    client, http_client = make_transcription_client(handler)
+    with http_client, pytest.raises(TranscriptionProtocolError) as error_info:
+        client.get_job(JOB_UUID)
+
+    assert error_info.value.category is TranscriptionErrorCategory.PROTOCOL
+    assert error_info.value.technical_code == "protocol_error"

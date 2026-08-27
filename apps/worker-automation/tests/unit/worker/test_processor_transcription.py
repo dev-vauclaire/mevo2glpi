@@ -11,6 +11,8 @@ from glpi_ticketing_common import audio_files
 from glpi_ticketing_worker_automation.glpi import GlpiTicketInput, TicketId
 from glpi_ticketing_worker_automation.transcription import (
     TranscriberProtocol,
+    TranscriptionBlockedError,
+    TranscriptionErrorCategory,
     TranscriptionResult,
     TranscriptionRetryRequired,
     TranscriptionTerminalError,
@@ -109,6 +111,45 @@ def test_transcription_unavailable_returns_retry_and_keeps_processing(
 
     assert isinstance(second_outcome, CompletedOutcome)
     assert transcriber.audio_paths == [audio_path, audio_path]
+    assert not list(audio_directories.failed.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("category", "technical_code"),
+    [
+        (TranscriptionErrorCategory.AUTHENTICATION, "http_401"),
+        (TranscriptionErrorCategory.AUTHORIZATION, "http_403"),
+        (TranscriptionErrorCategory.INVALID_REQUEST, "http_422"),
+        (TranscriptionErrorCategory.PROTOCOL, "polling_protocol_error"),
+    ],
+)
+def test_systemic_transcription_error_returns_blocked_and_keeps_processing(
+    audio_directories: WorkerDirectories,
+    category: TranscriptionErrorCategory,
+    technical_code: str,
+) -> None:
+    audio_path = _write_processing_audio(audio_directories)
+    processor = _processor(
+        audio_directories,
+        ScriptedTranscriber(
+            [
+                TranscriptionBlockedError(
+                    category=category,
+                    code=technical_code,
+                    audio_path=audio_path,
+                )
+            ]
+        ),
+    )
+
+    outcome = processor.run_once()
+
+    assert isinstance(outcome, BlockedOutcome)
+    assert outcome.stage is ProcessingStage.TRANSCRIPTION
+    assert outcome.failure.category == category.value
+    assert outcome.failure.technical_code == technical_code
+    assert outcome.processing_path == audio_path
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
     assert not list(audio_directories.failed.iterdir())
 
 

@@ -23,6 +23,7 @@ from ..glpi import (
 )
 from ..transcription import (
     TranscriberProtocol,
+    TranscriptionBlockedError,
     TranscriptionResult,
     TranscriptionRetryRequired,
     TranscriptionTerminalError,
@@ -179,6 +180,20 @@ class AudioProcessor:
                 category="unavailable",
                 technical_code=error.code,
                 retry_after_seconds=self._transcription_retry_interval_seconds,
+            )
+        except TranscriptionBlockedError as error:
+            if error.audio_path != active_work.audio_path:
+                return self._blocked(
+                    active_work,
+                    stage=ProcessingStage.TRANSCRIPTION,
+                    category="protocol",
+                    technical_code="blocked_audio_mismatch",
+                )
+            return self._blocked(
+                active_work,
+                stage=ProcessingStage.TRANSCRIPTION,
+                category=error.category.value,
+                technical_code=error.code,
             )
         except TranscriptionTerminalError as error:
             if error.audio_path != active_work.audio_path:

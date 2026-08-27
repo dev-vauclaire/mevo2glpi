@@ -3,6 +3,7 @@
 from .client import TranscriptionClient
 from .contracts import (
     TranscriberProtocol,
+    TranscriptionBlockedError,
     TranscriptionClientError,
     TranscriptionClientProtocol,
     TranscriptionHttpError,
@@ -18,6 +19,7 @@ from .models import (
     JobUuid,
     ResponseLogEntry,
     Submission,
+    TranscriptionErrorCategory,
     TranscriptionOperation,
     TranscriptionProvider,
     TranscriptionResult,
@@ -31,9 +33,11 @@ __all__ = [
     "ResponseLogEntry",
     "Submission",
     "TranscriptionClient",
+    "TranscriptionBlockedError",
     "TranscriptionClientError",
     "TranscriptionClientProtocol",
     "TranscriptionHttpError",
+    "TranscriptionErrorCategory",
     "TranscriptionOperation",
     "TranscriptionPoller",
     "TranscriptionProtocolError",

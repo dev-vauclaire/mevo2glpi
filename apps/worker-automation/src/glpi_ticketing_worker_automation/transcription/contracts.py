@@ -8,6 +8,7 @@ from .models import (
     JobUuid,
     ResponseLogEntry,
     Submission,
+    TranscriptionErrorCategory,
     TranscriptionOperation,
     TranscriptionProvider,
     TranscriptionResult,
@@ -35,7 +36,7 @@ class TranscriberProtocol(Protocol):
     """Complete one asynchronous transcription attempt for an audio."""
 
     def transcribe(self, audio_path: Path) -> TranscriptionResult:
-        """Return a result or raise a sanitized retry/terminal error."""
+        """Return a result or raise a sanitized retry, terminal or blocked error."""
         ...
 
 
@@ -57,8 +58,43 @@ class TranscriptionRetryRequired(Exception):
         super().__init__(f"transcription retry required with code {code}")
 
 
+class TranscriptionBlockedError(Exception):
+    """Report a systemic failure for which failing one audio would be unsafe."""
+
+    def __init__(
+        self,
+        *,
+        category: TranscriptionErrorCategory,
+        code: str,
+        audio_path: Path,
+    ) -> None:
+        self.category = category
+        self.code = code
+        self.audio_path = audio_path
+        super().__init__(
+            f"transcription blocked with category {category.value} and code {code}"
+        )
+
+
 class TranscriptionClientError(Exception):
     """Base class for safe, provider-independent client failures."""
+
+    def __init__(
+        self,
+        *,
+        provider: TranscriptionProvider,
+        operation: TranscriptionOperation,
+        category: TranscriptionErrorCategory,
+        technical_code: str,
+        retryable: bool,
+        message: str,
+    ) -> None:
+        self.provider = provider
+        self.operation = operation
+        self.category = category
+        self.technical_code = technical_code
+        self.retryable = retryable
+        super().__init__(message)
 
 
 class TranscriptionTransportError(TranscriptionClientError):
@@ -69,10 +105,15 @@ class TranscriptionTransportError(TranscriptionClientError):
         provider: TranscriptionProvider,
         operation: TranscriptionOperation,
     ) -> None:
-        self.provider = provider
-        self.operation = operation
         super().__init__(
-            f"{provider.value} transcription {operation.value} request failed"
+            provider=provider,
+            operation=operation,
+            category=TranscriptionErrorCategory.UNAVAILABLE,
+            technical_code="transport_error",
+            retryable=True,
+            message=(
+                f"{provider.value} transcription {operation.value} request failed"
+            ),
         )
 
 
@@ -87,13 +128,17 @@ class TranscriptionHttpError(TranscriptionClientError):
         *,
         retryable: bool,
     ) -> None:
-        self.provider = provider
-        self.operation = operation
         self.status_code = status_code
-        self.retryable = retryable
         super().__init__(
-            f"{provider.value} transcription {operation.value} "
-            f"returned HTTP {status_code}"
+            provider=provider,
+            operation=operation,
+            category=_http_error_category(status_code, retryable=retryable),
+            technical_code=f"http_{status_code}",
+            retryable=retryable,
+            message=(
+                f"{provider.value} transcription {operation.value} "
+                f"returned HTTP {status_code}"
+            ),
         )
 
 
@@ -106,12 +151,17 @@ class TranscriptionProtocolError(TranscriptionClientError):
         operation: TranscriptionOperation,
         reason: str,
     ) -> None:
-        self.provider = provider
-        self.operation = operation
         self.reason = reason
         super().__init__(
-            f"{provider.value} transcription {operation.value} "
-            f"response is invalid: {reason}"
+            provider=provider,
+            operation=operation,
+            category=TranscriptionErrorCategory.PROTOCOL,
+            technical_code="protocol_error",
+            retryable=False,
+            message=(
+                f"{provider.value} transcription {operation.value} "
+                f"response is invalid: {reason}"
+            ),
         )
 
 
@@ -124,6 +174,26 @@ class TranscriptionSubmissionRejectedError(TranscriptionClientError):
         *,
         response_log: ResponseLogEntry,
     ) -> None:
-        self.provider = provider
         self.response_log = response_log
-        super().__init__(f"{provider.value} transcription submission rejected")
+        super().__init__(
+            provider=provider,
+            operation=TranscriptionOperation.SUBMIT,
+            category=TranscriptionErrorCategory.INVALID_REQUEST,
+            technical_code="submission_rejected",
+            retryable=False,
+            message=f"{provider.value} transcription submission rejected",
+        )
+
+
+def _http_error_category(
+    status_code: int,
+    *,
+    retryable: bool,
+) -> TranscriptionErrorCategory:
+    if retryable:
+        return TranscriptionErrorCategory.UNAVAILABLE
+    if status_code == 401:
+        return TranscriptionErrorCategory.AUTHENTICATION
+    if status_code == 403:
+        return TranscriptionErrorCategory.AUTHORIZATION
+    return TranscriptionErrorCategory.INVALID_REQUEST

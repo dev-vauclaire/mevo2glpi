@@ -10,11 +10,16 @@ from glpi_ticketing_worker_automation.transcription import (
     JobUuid,
     ResponseLogEntry,
     Submission,
+    TranscriptionBlockedError,
+    TranscriptionClientError,
+    TranscriptionErrorCategory,
     TranscriptionHttpError,
     TranscriptionOperation,
     TranscriptionPoller,
+    TranscriptionProtocolError,
     TranscriptionProvider,
     TranscriptionRetryRequired,
+    TranscriptionSubmissionRejectedError,
     TranscriptionTerminalError,
     TranscriptionTransportError,
 )
@@ -245,6 +250,33 @@ def test_post_transport_error_leaves_audio_in_processing_for_retry(
     assert not list(failed_directory.iterdir())
 
 
+def test_future_retryable_submission_error_uses_retry_fallback(
+    audio_directories: tuple[Path, Path],
+) -> None:
+    processing_directory, failed_directory = audio_directories
+    audio_path = _write_audio(processing_directory)
+    client = FakeTranscriptionClient(
+        events=[],
+        submit_error=TranscriptionClientError(
+            provider=TranscriptionProvider.LEGACY,
+            operation=TranscriptionOperation.SUBMIT,
+            category=TranscriptionErrorCategory.UNAVAILABLE,
+            technical_code="future_retryable_error",
+            retryable=True,
+            message="sanitized synthetic error",
+        ),
+    )
+
+    with pytest.raises(
+        TranscriptionRetryRequired,
+        match="submission_unavailable",
+    ):
+        _make_poller(client, FakeClock()).transcribe(audio_path)
+
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
+
+
 def test_post_500_leaves_audio_in_processing_even_if_client_flag_is_false(
     audio_directories: tuple[Path, Path],
 ) -> None:
@@ -267,6 +299,84 @@ def test_post_500_leaves_audio_in_processing_even_if_client_flag_is_false(
     ):
         poller.transcribe(audio_path)
 
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("status_code", "category"),
+    [
+        (401, TranscriptionErrorCategory.AUTHENTICATION),
+        (403, TranscriptionErrorCategory.AUTHORIZATION),
+        (422, TranscriptionErrorCategory.INVALID_REQUEST),
+    ],
+)
+def test_non_retryable_submission_http_error_blocks_without_moving_audio(
+    audio_directories: tuple[Path, Path],
+    status_code: int,
+    category: TranscriptionErrorCategory,
+) -> None:
+    processing_directory, failed_directory = audio_directories
+    audio_path = _write_audio(processing_directory)
+    client = FakeTranscriptionClient(
+        events=[],
+        submit_error=TranscriptionHttpError(
+            TranscriptionProvider.LEGACY,
+            TranscriptionOperation.SUBMIT,
+            status_code,
+            retryable=False,
+        ),
+    )
+
+    with pytest.raises(TranscriptionBlockedError) as error_info:
+        _make_poller(client, FakeClock()).transcribe(audio_path)
+
+    assert error_info.value.category is category
+    assert error_info.value.code == f"http_{status_code}"
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
+
+
+def test_explicit_submission_rejection_remains_terminal(
+    audio_directories: tuple[Path, Path],
+) -> None:
+    processing_directory, failed_directory = audio_directories
+    audio_path = _write_audio(processing_directory)
+    client = FakeTranscriptionClient(
+        events=[],
+        submit_error=TranscriptionSubmissionRejectedError(
+            TranscriptionProvider.LEGACY,
+            response_log=_response_log(TranscriptionOperation.SUBMIT, job_status=None),
+        ),
+    )
+
+    with pytest.raises(TranscriptionTerminalError, match="submission_rejected"):
+        _make_poller(client, FakeClock()).transcribe(audio_path)
+
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
+
+
+def test_submission_protocol_error_blocks_without_moving_audio(
+    audio_directories: tuple[Path, Path],
+) -> None:
+    processing_directory, failed_directory = audio_directories
+    audio_path = _write_audio(processing_directory)
+    client = FakeTranscriptionClient(
+        events=[],
+        submit_error=TranscriptionProtocolError(
+            TranscriptionProvider.LEGACY,
+            TranscriptionOperation.SUBMIT,
+            "synthetic remote contract detail",
+        ),
+    )
+
+    with pytest.raises(TranscriptionBlockedError) as error_info:
+        _make_poller(client, FakeClock()).transcribe(audio_path)
+
+    assert error_info.value.category is TranscriptionErrorCategory.PROTOCOL
+    assert error_info.value.code == "submission_protocol_error"
+    assert "synthetic remote contract detail" not in str(error_info.value)
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
     assert not list(failed_directory.iterdir())
 
@@ -334,6 +444,95 @@ def test_get_unavailable_http_error_leaves_audio_in_processing(
     with pytest.raises(TranscriptionRetryRequired, match="polling_unavailable"):
         poller.transcribe(audio_path)
 
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
+
+
+def test_future_retryable_polling_error_uses_retry_fallback(
+    audio_directories: tuple[Path, Path],
+) -> None:
+    processing_directory, failed_directory = audio_directories
+    audio_path = _write_audio(processing_directory)
+    client = FakeTranscriptionClient(
+        events=[
+            TranscriptionClientError(
+                provider=TranscriptionProvider.LEGACY,
+                operation=TranscriptionOperation.GET_JOB,
+                category=TranscriptionErrorCategory.UNAVAILABLE,
+                technical_code="future_retryable_error",
+                retryable=True,
+                message="sanitized synthetic error",
+            )
+        ]
+    )
+
+    with pytest.raises(
+        TranscriptionRetryRequired,
+        match="polling_unavailable",
+    ):
+        _make_poller(client, FakeClock()).transcribe(audio_path)
+
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("status_code", "category"),
+    [
+        (401, TranscriptionErrorCategory.AUTHENTICATION),
+        (403, TranscriptionErrorCategory.AUTHORIZATION),
+        (404, TranscriptionErrorCategory.INVALID_REQUEST),
+        (422, TranscriptionErrorCategory.INVALID_REQUEST),
+    ],
+)
+def test_non_retryable_polling_http_error_blocks_without_moving_audio(
+    audio_directories: tuple[Path, Path],
+    status_code: int,
+    category: TranscriptionErrorCategory,
+) -> None:
+    processing_directory, failed_directory = audio_directories
+    audio_path = _write_audio(processing_directory)
+    client = FakeTranscriptionClient(
+        events=[
+            TranscriptionHttpError(
+                TranscriptionProvider.LEGACY,
+                TranscriptionOperation.GET_JOB,
+                status_code,
+                retryable=False,
+            )
+        ]
+    )
+
+    with pytest.raises(TranscriptionBlockedError) as error_info:
+        _make_poller(client, FakeClock()).transcribe(audio_path)
+
+    assert error_info.value.category is category
+    assert error_info.value.code == f"http_{status_code}"
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
+
+
+def test_polling_protocol_error_blocks_without_moving_audio(
+    audio_directories: tuple[Path, Path],
+) -> None:
+    processing_directory, failed_directory = audio_directories
+    audio_path = _write_audio(processing_directory)
+    client = FakeTranscriptionClient(
+        events=[
+            TranscriptionProtocolError(
+                TranscriptionProvider.LEGACY,
+                TranscriptionOperation.GET_JOB,
+                "synthetic remote contract detail",
+            )
+        ]
+    )
+
+    with pytest.raises(TranscriptionBlockedError) as error_info:
+        _make_poller(client, FakeClock()).transcribe(audio_path)
+
+    assert error_info.value.category is TranscriptionErrorCategory.PROTOCOL
+    assert error_info.value.code == "polling_protocol_error"
+    assert "synthetic remote contract detail" not in str(error_info.value)
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
     assert not list(failed_directory.iterdir())
 

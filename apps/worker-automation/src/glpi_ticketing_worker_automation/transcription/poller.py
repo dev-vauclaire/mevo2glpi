@@ -12,6 +12,7 @@ from uuid import UUID
 from glpi_ticketing_common import audio_files
 
 from .contracts import (
+    TranscriptionBlockedError,
     TranscriptionClientError,
     TranscriptionClientProtocol,
     TranscriptionHttpError,
@@ -24,6 +25,7 @@ from .contracts import (
 from .models import (
     JobStatus,
     JobUuid,
+    TranscriptionErrorCategory,
     TranscriptionResult,
 )
 
@@ -108,19 +110,27 @@ class TranscriptionPoller:
                     "submission_unavailable",
                     audio_path,
                 ) from None
-            self._raise_terminal(
+            self._raise_blocked(
                 audio_path,
-                code="submission_http_error",
+                category=error.category,
+                code=error.technical_code,
             )
         except TranscriptionProtocolError:
-            self._raise_terminal(
+            self._raise_blocked(
                 audio_path,
+                category=TranscriptionErrorCategory.PROTOCOL,
                 code="submission_protocol_error",
             )
-        except TranscriptionClientError:
-            self._raise_terminal(
+        except TranscriptionClientError as error:
+            if error.retryable:
+                raise TranscriptionRetryRequired(
+                    "submission_unavailable",
+                    audio_path,
+                ) from None
+            self._raise_blocked(
                 audio_path,
-                code="submission_failed",
+                category=error.category,
+                code=error.technical_code,
             )
 
         attempt.job_uuid = submission.job_uuid
@@ -131,7 +141,11 @@ class TranscriptionPoller:
         attempt: _TranscriptionAttempt,
     ) -> TranscriptionResult:
         if attempt.job_uuid is None:
-            raise RuntimeError("transcription attempt does not contain a job_uuid")
+            raise TranscriptionBlockedError(
+                category=TranscriptionErrorCategory.PROTOCOL,
+                code="missing_job_uuid",
+                audio_path=audio_path,
+            )
         job_uuid = attempt.job_uuid
 
         while True:
@@ -155,33 +169,43 @@ class TranscriptionPoller:
                         "polling_unavailable",
                         audio_path,
                     ) from None
-                self._raise_terminal(
+                self._raise_blocked(
                     audio_path,
-                    code="polling_http_error",
+                    category=error.category,
+                    code=error.technical_code,
                 )
             except TranscriptionProtocolError:
-                self._raise_terminal(
+                self._raise_blocked(
                     audio_path,
+                    category=TranscriptionErrorCategory.PROTOCOL,
                     code="polling_protocol_error",
                 )
-            except TranscriptionClientError:
-                self._raise_terminal(
+            except TranscriptionClientError as error:
+                if error.retryable:
+                    raise TranscriptionRetryRequired(
+                        "polling_unavailable",
+                        audio_path,
+                    ) from None
+                self._raise_blocked(
                     audio_path,
-                    code="polling_failed",
+                    category=error.category,
+                    code=error.technical_code,
                 )
 
             self._raise_if_shutdown_requested(audio_path)
 
             if snapshot.job_uuid != job_uuid:
-                self._raise_terminal(
+                self._raise_blocked(
                     audio_path,
+                    category=TranscriptionErrorCategory.PROTOCOL,
                     code="polling_job_mismatch",
                 )
 
             if snapshot.status is JobStatus.COMPLETED:
                 if snapshot.transcription is None:
-                    self._raise_terminal(
+                    self._raise_blocked(
                         audio_path,
+                        category=TranscriptionErrorCategory.PROTOCOL,
                         code="missing_transcription",
                     )
                 return TranscriptionResult(
@@ -215,6 +239,19 @@ class TranscriptionPoller:
         code: str,
     ) -> Never:
         raise TranscriptionTerminalError(code, audio_path)
+
+    def _raise_blocked(
+        self,
+        audio_path: Path,
+        *,
+        category: TranscriptionErrorCategory,
+        code: str,
+    ) -> Never:
+        raise TranscriptionBlockedError(
+            category=category,
+            code=code,
+            audio_path=audio_path,
+        )
 
     def _current_time(self) -> datetime:
         current_time = self._now()

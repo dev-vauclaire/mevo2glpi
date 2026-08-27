@@ -32,6 +32,16 @@ class TranscriptionOperation(StrEnum):
     UNKNOWN = "unknown"
 
 
+class TranscriptionErrorCategory(StrEnum):
+    """Sanitized classification shared by client and orchestration errors."""
+
+    UNAVAILABLE = "unavailable"
+    AUTHENTICATION = "authentication"
+    AUTHORIZATION = "authorization"
+    INVALID_REQUEST = "invalid_request"
+    PROTOCOL = "protocol"
+
+
 @dataclass(frozen=True, slots=True)
 class ResponseLogEntry:
     """Small sanitized summary of one provider response."""
