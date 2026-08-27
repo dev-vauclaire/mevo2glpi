@@ -17,6 +17,7 @@ from glpi_ticketing_worker_automation.glpi import (
     GlpiOperation,
     GlpiProtocolError,
     GlpiTicketInput,
+    GlpiTicketRejectedError,
     GlpiTransportError,
     TicketId,
 )
@@ -227,16 +228,11 @@ def test_unknown_creation_outcome_retries_without_moving_to_failed(
     assert isinstance(processor.run_once(), CompletedOutcome)
 
 
-def test_terminal_ticket_error_returns_failed_with_sanitized_sidecar(
+def test_explicit_ticket_rejection_returns_failed_with_sanitized_sidecar(
     audio_directories: WorkerDirectories,
 ) -> None:
     audio_path = _write_processing_audio(audio_directories)
-    terminal_error = GlpiHttpError(
-        operation=GlpiOperation.CREATE_TICKET,
-        category=GlpiErrorCategory.INVALID_REQUEST,
-        status_code=400,
-        retryable=False,
-    )
+    terminal_error = GlpiTicketRejectedError()
     processor = _processor(
         audio_directories,
         SingleResultTranscriber(),
@@ -253,7 +249,7 @@ def test_terminal_ticket_error_returns_failed_with_sanitized_sidecar(
         "uuid": str(AUDIO_UUID),
         "step": "ticketing",
         "category": "invalid_request",
-        "code": "http_400",
+        "code": "ticket_input_rejected",
         "timestamp": "2026-08-27T10:15:30Z",
     }
     assert SYNTHETIC_TRANSCRIPTION not in serialized_sidecar
@@ -306,7 +302,7 @@ def test_contract_or_route_http_errors_block_and_keep_processing(
         (422, GlpiErrorCategory.INVALID_REQUEST),
     ],
 )
-def test_terminal_create_http_errors_move_audio_to_failed(
+def test_generic_create_http_errors_block_and_keep_processing(
     audio_directories: WorkerDirectories,
     status_code: int,
     category: GlpiErrorCategory,
@@ -329,13 +325,12 @@ def test_terminal_create_http_errors_move_audio_to_failed(
 
     outcome = processor.run_once()
 
-    assert isinstance(outcome, FailedOutcome)
+    assert isinstance(outcome, BlockedOutcome)
     assert outcome.stage is ProcessingStage.TICKETING
     assert outcome.failure.category == category.value
     assert outcome.failure.technical_code == f"http_{status_code}"
-    assert not audio_path.exists()
-    assert outcome.failed_path.read_bytes() == SYNTHETIC_AUDIO
-    assert outcome.error_sidecar_path.is_file()
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(audio_directories.failed.iterdir())
 
 
 def test_duplicate_external_id_moves_audio_to_failed(

@@ -8,6 +8,7 @@ from .contracts import (
     GlpiDuplicateExternalIdError,
     GlpiHttpError,
     GlpiProtocolError,
+    GlpiTicketRejectedError,
     GlpiTransportError,
 )
 from .models import (
@@ -34,6 +35,7 @@ __all__ = [
     "GlpiProtocolError",
     "GlpiTicketDefaults",
     "GlpiTicketInput",
+    "GlpiTicketRejectedError",
     "GlpiTransportError",
     "OAuthToken",
     "TicketId",

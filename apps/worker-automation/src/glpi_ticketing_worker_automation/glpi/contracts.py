@@ -109,6 +109,24 @@ class GlpiDuplicateExternalIdError(GlpiClientError):
         )
 
 
+class GlpiTicketRejectedError(GlpiClientError):
+    """Raised when GLPI explicitly rejects dynamic data for one ticket.
+
+    The adapter only raises this error after matching an allowlisted status and
+    validation shape from the pinned GLPI API contract. Remote error bodies are
+    deliberately not retained on the exception.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            operation=GlpiOperation.CREATE_TICKET,
+            category=GlpiErrorCategory.INVALID_REQUEST,
+            technical_code="ticket_input_rejected",
+            retryable=False,
+            outcome_unknown=False,
+        )
+
+
 class GlpiCreateOutcomeUnknownError(GlpiClientError):
     """Raised when ticket creation may have succeeded without a usable response."""
 

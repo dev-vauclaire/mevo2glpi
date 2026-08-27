@@ -18,6 +18,7 @@ from glpi_ticketing_worker_automation.glpi import (
     GlpiProtocolError,
     GlpiTicketDefaults,
     GlpiTicketInput,
+    GlpiTicketRejectedError,
     GlpiTransportError,
     OAuthToken,
     TicketLevel,
@@ -692,10 +693,11 @@ def test_reconciliation_401_refreshes_once_without_reposting() -> None:
     [
         (400, GlpiErrorCategory.INVALID_REQUEST, False),
         (403, GlpiErrorCategory.AUTHORIZATION, False),
+        (409, GlpiErrorCategory.INVALID_REQUEST, False),
         (422, GlpiErrorCategory.INVALID_REQUEST, False),
     ],
 )
-def test_terminal_create_http_errors_are_classified_without_reconciliation(
+def test_generic_create_http_errors_are_classified_without_reconciliation(
     status_code: int,
     category: GlpiErrorCategory,
     retryable: bool,
@@ -730,6 +732,121 @@ def test_terminal_create_http_errors_are_classified_without_reconciliation(
     assert post_count == 1
     assert TRANSCRIPTION not in str(error)
     assert CLIENT_SECRET not in str(error)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "violation_code"),
+    [
+        ("content", "maxLength"),
+        ("content", "pattern"),
+        ("external_id", "maxLength"),
+        ("external_id", "pattern"),
+    ],
+)
+def test_create_raises_explicit_rejection_for_allowlisted_dynamic_validation(
+    field_name: str,
+    violation_code: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(
+            400,
+            json={
+                "status": "ERROR_INVALID_PARAMETER",
+                "title": f"sensitive {TRANSCRIPTION}",
+                "detail": {
+                    field_name: [
+                        {
+                            "error": violation_code,
+                            "message": f"sensitive {CLIENT_SECRET}",
+                        }
+                    ]
+                },
+            },
+        )
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(GlpiTicketRejectedError) as error_info:
+        client.ensure_ticket(make_ticket_input())
+
+    error = error_info.value
+    assert error.operation is GlpiOperation.CREATE_TICKET
+    assert error.category is GlpiErrorCategory.INVALID_REQUEST
+    assert error.technical_code == "ticket_input_rejected"
+    assert error.retryable is False
+    assert error.outcome_unknown is False
+    rendered_error = f"{error!s} {error!r}"
+    assert TRANSCRIPTION not in rendered_error
+    assert CLIENT_SECRET not in rendered_error
+
+
+@pytest.mark.parametrize(
+    ("status_code", "payload"),
+    [
+        (
+            400,
+            {
+                "status": "ERROR_INVALID_PARAMETER",
+                "detail": {"name": [{"error": "maxLength"}]},
+            },
+        ),
+        (
+            400,
+            {
+                "status": "ERROR_INVALID_PARAMETER",
+                "detail": {"content": [{"error": "required"}]},
+            },
+        ),
+        (
+            400,
+            {"status": "ERROR_INVALID_PARAMETER", "detail": None},
+        ),
+        (
+            400,
+            {
+                "status": "ERROR",
+                "detail": {"content": [{"error": "maxLength"}]},
+            },
+        ),
+        (
+            409,
+            {
+                "status": "ERROR_INVALID_PARAMETER",
+                "detail": {"content": [{"error": "maxLength"}]},
+            },
+        ),
+        (
+            422,
+            {
+                "status": "ERROR_INVALID_PARAMETER",
+                "detail": {"content": [{"error": "maxLength"}]},
+            },
+        ),
+    ],
+)
+def test_create_keeps_unallowlisted_error_responses_generic(
+    status_code: int,
+    payload: object,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(status_code, json=payload)
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(GlpiHttpError) as error_info:
+        client.ensure_ticket(make_ticket_input())
+
+    error = error_info.value
+    assert error.operation is GlpiOperation.CREATE_TICKET
+    assert error.status_code == status_code
+    assert error.retryable is False
+    assert error.outcome_unknown is False
 
 
 def test_client_errors_and_logs_never_expose_sensitive_values(

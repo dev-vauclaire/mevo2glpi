@@ -17,10 +17,8 @@ from ..glpi import (
     GlpiClientError,
     GlpiClientProtocol,
     GlpiDuplicateExternalIdError,
-    GlpiErrorCategory,
-    GlpiHttpError,
-    GlpiOperation,
     GlpiTicketInput,
+    GlpiTicketRejectedError,
     TicketId,
 )
 from ..transcription import (
@@ -589,14 +587,9 @@ def _is_valid_transcription(value: object) -> bool:
 
 def _is_terminal_ticket_error(error: GlpiClientError) -> bool:
     """Return whether a GLPI failure is explicitly scoped to one ticket input."""
-    if isinstance(error, GlpiDuplicateExternalIdError):
-        return True
-    return (
-        isinstance(error, GlpiHttpError)
-        and error.operation is GlpiOperation.CREATE_TICKET
-        and error.category
-        in {GlpiErrorCategory.INVALID_REQUEST, GlpiErrorCategory.CONFLICT}
-        and error.status_code in {400, 409, 422}
+    return isinstance(
+        error,
+        GlpiTicketRejectedError | GlpiDuplicateExternalIdError,
     )
 
 

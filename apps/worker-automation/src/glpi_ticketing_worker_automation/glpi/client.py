@@ -17,6 +17,7 @@ from .contracts import (
     GlpiDuplicateExternalIdError,
     GlpiHttpError,
     GlpiProtocolError,
+    GlpiTicketRejectedError,
     GlpiTransportError,
 )
 from .models import (
@@ -35,6 +36,11 @@ TICKET_PATH = f"{GLPI_API_ROOT}/Assistance/Ticket"
 OAUTH_SCOPE = "api"
 TOKEN_RENEWAL_MAX_SKEW_SECONDS = 30.0
 RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429})
+GLPI_INVALID_PARAMETER_STATUS = "ERROR_INVALID_PARAMETER"
+TICKET_REJECTION_VIOLATIONS = {
+    "content": frozenset({"maxLength", "pattern"}),
+    "external_id": frozenset({"maxLength", "pattern"}),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,6 +265,8 @@ class GlpiClient:
                     technical_code="unexpected_create_status",
                     status_code=response.status_code,
                 )
+            if _is_allowlisted_ticket_rejection(response):
+                raise GlpiTicketRejectedError
             raise _http_error(operation, response.status_code)
 
         try:
@@ -407,6 +415,48 @@ def _http_error(operation: GlpiOperation, status_code: int) -> GlpiHttpError:
         status_code=status_code,
         retryable=retryable,
     )
+
+
+def _is_allowlisted_ticket_rejection(response: httpx.Response) -> bool:
+    """Recognize only per-audio validation failures from GLPI V2.3.0.
+
+    ``ERROR_INVALID_PARAMETER`` alone is insufficient: it can also identify a
+    systemic configuration or contract problem. A terminal rejection therefore
+    requires an HTTP 400 response whose validation details exclusively target
+    dynamic ticket fields and contain only validation reasons observed in the
+    pinned GLPI contract. Titles, messages and other response fields are ignored.
+    """
+    if response.status_code != httpx.codes.BAD_REQUEST:
+        return False
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+    if payload.get("status") != GLPI_INVALID_PARAMETER_STATUS:
+        return False
+
+    details = payload.get("detail")
+    if not isinstance(details, Mapping) or not details:
+        return False
+
+    for field_name, violations in details.items():
+        allowed_violations = TICKET_REJECTION_VIOLATIONS.get(field_name)
+        if (
+            allowed_violations is None
+            or not isinstance(violations, list)
+            or not violations
+        ):
+            return False
+        for violation in violations:
+            if (
+                not isinstance(violation, Mapping)
+                or violation.get("error") not in allowed_violations
+            ):
+                return False
+    return True
 
 
 def _is_retryable_http_status(status_code: int) -> bool:
