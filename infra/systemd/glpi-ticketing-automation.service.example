@@ -1,0 +1,17 @@
+[Unit]
+Description=GLPI Ticketing Automation POC
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/glpi-ticketing-automation
+ExecStart=/opt/glpi-ticketing-automation/infra/docker/worker/start-runtime.sh /etc/glpi-ticketing-automation/compose.env
+ExecStop=/usr/bin/docker compose --env-file /etc/glpi-ticketing-automation/compose.env stop
+TimeoutStartSec=120
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

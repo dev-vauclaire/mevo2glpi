@@ -22,6 +22,20 @@ dist/
 .env
 .env.*
 !.env.example
+/infra/docker/.env
+/infra/docker/.env.*
+!/infra/docker/.env.example
+/infra/docker/web/*.env*
+!/infra/docker/web/*.env.example
+/infra/docker/worker/*.env*
+!/infra/docker/worker/*.env.example
+/infra/docker/nginx/*.crt
+/infra/docker/nginx/*.pem
+/infra/docker/nginx/*.key
+/infra/docker/nginx/*.htpasswd
+/infra/docker/nginx/*.credentials.env
+/infra/docker/docker-compose.local.yaml
+/infra/docker/runtime/
 
 # Editors and operating systems
 .idea/

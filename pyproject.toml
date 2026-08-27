@@ -34,8 +34,9 @@ dev = [
 [tool.pytest.ini_options]
 minversion = "8.4"
 addopts = "--strict-config --strict-markers --import-mode=importlib"
-testpaths = ["apps", "packages"]
+testpaths = ["apps", "packages", "tests"]
 markers = [
+    "deployment: construit et démarre les images runtime et le reverse proxy Docker du POC",
     "glpi: démarre une instance GLPI jetable avec Testcontainers",
     "transcribe_ai: démarre une stack Transcribe AI jetable avec Testcontainers",
     "e2e: exécute le flux complet avec services externes",
