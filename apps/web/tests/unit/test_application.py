@@ -1,0 +1,173 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import pytest
+
+from glpi_ticketing_web.application import (
+    WebExitCode,
+    build_application,
+    build_server,
+    run_application,
+    run_cli,
+)
+from glpi_ticketing_web.settings import WebSettings
+
+
+def _settings(tmp_path: Path, **overrides: object) -> WebSettings:
+    values: dict[str, object] = {
+        "audio_pending_dir": tmp_path / "pending",
+        "audio_completed_dir": tmp_path / "completed",
+        "web_host": "127.0.0.1",
+        "web_port": 8765,
+        "max_upload_bytes": 4096,
+    }
+    values.update(overrides)
+    for field_name in ("audio_pending_dir", "audio_completed_dir"):
+        directory = values[field_name]
+        if isinstance(directory, Path):
+            directory.mkdir(parents=True, exist_ok=True)
+    return WebSettings(**values, _env_file=None)
+
+
+def test_build_application_wires_settings_into_fastapi(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    application = build_application(settings)
+
+    config = application.state.web_config
+    assert config.pending_directory == settings.audio_pending_dir.resolve()
+    assert config.completed_directory == settings.audio_completed_dir.resolve()
+    assert config.max_upload_bytes == 4096
+
+
+def test_build_server_uses_configured_bind_address(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, web_host="0.0.0.0", web_port=9876)
+
+    server = build_server(settings)
+
+    assert server.config.host == "0.0.0.0"
+    assert server.config.port == 9876
+    assert server.config.proxy_headers is False
+    assert server.config.forwarded_allow_ips == []
+    assert server.config.app.state.web_config.pending_directory == (
+        settings.audio_pending_dir.resolve()
+    )
+
+
+def test_build_server_only_trusts_proxy_headers_when_configured(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path, web_trust_proxy_headers=True)
+
+    server = build_server(settings)
+
+    assert server.config.proxy_headers is True
+    assert server.config.forwarded_allow_ips == "*"
+
+
+def test_run_application_starts_composed_server(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    observed_settings: list[WebSettings] = []
+
+    class FakeServer:
+        started = False
+
+        def run(self) -> None:
+            self.started = True
+
+    server = FakeServer()
+
+    def server_factory(factory_settings: WebSettings) -> FakeServer:
+        observed_settings.append(factory_settings)
+        return server
+
+    run_application(settings, server_factory=server_factory)
+
+    assert observed_settings == [settings]
+    assert server.started
+
+
+def test_run_cli_returns_success_after_server_stops(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    observed_settings: list[WebSettings] = []
+
+    exit_code = run_cli(
+        settings_factory=lambda: settings,
+        application_runner=observed_settings.append,
+    )
+
+    assert exit_code is WebExitCode.SUCCESS
+    assert observed_settings == [settings]
+
+
+def test_run_cli_does_not_log_invalid_configuration_values(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    private_path = "/private/never-log-this-directory"
+
+    def invalid_settings() -> WebSettings:
+        return WebSettings(
+            audio_pending_dir=private_path,
+            audio_completed_dir=private_path,
+            _env_file=None,
+        )
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_cli(settings_factory=invalid_settings)
+
+    assert exit_code is WebExitCode.CONFIGURATION_ERROR
+    assert private_path not in caplog.text
+    assert "web configuration is invalid" in caplog.text
+
+
+def test_run_cli_rejects_missing_directory_without_logging_its_path(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _settings(tmp_path)
+    missing_directory = settings.audio_pending_dir
+    missing_directory.rmdir()
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_cli(settings_factory=lambda: settings)
+
+    assert exit_code is WebExitCode.CONFIGURATION_ERROR
+    assert str(missing_directory) not in caplog.text
+    assert "web runtime configuration is invalid" in caplog.text
+
+
+def test_run_cli_does_not_log_unexpected_exception_message(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _settings(tmp_path)
+    secret = "never-log-this-runtime-value"
+
+    def fail(_settings: WebSettings) -> None:
+        raise RuntimeError(secret)
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_cli(
+            settings_factory=lambda: settings,
+            application_runner=fail,
+        )
+
+    assert exit_code is WebExitCode.UNEXPECTED_ERROR
+    assert secret not in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
+
+
+def test_run_cli_returns_130_for_unhandled_keyboard_interrupt(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    def interrupt(_settings: WebSettings) -> None:
+        raise KeyboardInterrupt
+
+    exit_code = run_cli(
+        settings_factory=lambda: settings,
+        application_runner=interrupt,
+    )
+
+    assert exit_code is WebExitCode.INTERRUPTED

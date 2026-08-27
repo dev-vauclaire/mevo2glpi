@@ -1,5 +1,6 @@
 """Typed configuration owned by the web application."""
 
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Self
 
@@ -24,15 +25,27 @@ class WebSettings(BaseSettings):
 
     audio_pending_dir: Path = Path("/data/audio-pending")
     audio_completed_dir: Path = Path("/data/audio-completed")
+    web_host: str = Field(default="127.0.0.1", min_length=1)
+    web_port: int = Field(default=8000, ge=1, le=65535)
+    web_trust_proxy_headers: bool = False
     max_upload_bytes: int = Field(default=DEFAULT_MAX_UPLOAD_BYTES, gt=0)
 
-    @field_validator("max_upload_bytes", mode="before")
+    @field_validator("web_port", "max_upload_bytes", mode="before")
     @classmethod
-    def reject_boolean_upload_limit(cls, max_upload_bytes: object) -> object:
+    def reject_boolean_integers(cls, value: object) -> object:
         """Reject booleans instead of silently treating them as integers."""
-        if isinstance(max_upload_bytes, bool):
-            raise ValueError("MAX_UPLOAD_BYTES must be a positive integer")
-        return max_upload_bytes
+        if isinstance(value, bool):
+            raise ValueError("Integer settings cannot be booleans")
+        return value
+
+    @field_validator("web_host")
+    @classmethod
+    def validate_web_host(cls, web_host: str) -> str:
+        """Require an explicit IPv4 or IPv6 bind address."""
+        try:
+            return str(ip_address(web_host))
+        except ValueError:
+            raise ValueError("WEB_HOST must be an IPv4 or IPv6 address") from None
 
     @model_validator(mode="after")
     def validate_audio_directories_are_distinct(self) -> Self:
