@@ -9,6 +9,9 @@ dependencies = [
     "pydantic-settings>=2.10,<3",
 ]
 
+[project.scripts]
+glpi-ticketing-worker = "glpi_ticketing_worker_automation.application:main"
+
 [build-system]
 requires = ["uv_build>=0.10.11,<0.11.0"]
 build-backend = "uv_build"

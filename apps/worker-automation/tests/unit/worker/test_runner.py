@@ -130,3 +130,20 @@ def test_run_forever_continues_immediately_after_terminal_outcomes() -> None:
     assert error_info.value.outcome is blocked
     assert processor.calls == 3
     assert sleep_calls == []
+
+
+def test_run_forever_returns_when_cooperative_stop_is_requested() -> None:
+    processor = ScriptedProcessor([IdleOutcome(wait_seconds=10.0)])
+    stop_requested = False
+
+    def request_stop(_seconds: float) -> None:
+        nonlocal stop_requested
+        stop_requested = True
+
+    run_forever(
+        processor,
+        sleep=request_stop,
+        should_stop=lambda: stop_requested,
+    )
+
+    assert processor.calls == 1

@@ -31,6 +31,10 @@ DEFAULT_POLL_INTERVAL_SECONDS = 2.0
 DEFAULT_JOB_TIMEOUT_SECONDS = 15 * 60.0
 
 
+def _never_stop() -> bool:
+    return False
+
+
 @dataclass(slots=True)
 class _TranscriptionAttempt:
     """Ephemeral state for one submission and its polling loop."""
@@ -51,6 +55,7 @@ class TranscriptionPoller:
         job_timeout_seconds: float = DEFAULT_JOB_TIMEOUT_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], datetime] | None = None,
+        should_stop: Callable[[], bool] = _never_stop,
     ) -> None:
         self._client = client
         self._poll_interval_seconds = _validate_positive_seconds(
@@ -63,6 +68,9 @@ class TranscriptionPoller:
         )
         self._sleep = sleep
         self._now = now or _utc_now
+        if not callable(should_stop):
+            raise TypeError("should_stop must be callable")
+        self._should_stop = should_stop
 
     def transcribe(self, audio_path: Path) -> TranscriptionResult:
         """Submit one audio, leaving it in processing when a retry is required."""
@@ -73,6 +81,7 @@ class TranscriptionPoller:
             audio_uuid=audio_name.audio_uuid,
             deadline_at=started_at + timedelta(seconds=self._job_timeout_seconds),
         )
+        self._raise_if_shutdown_requested(audio_path)
         self._submit_once(audio_path, attempt)
         return self._poll(audio_path, attempt)
 
@@ -126,6 +135,7 @@ class TranscriptionPoller:
         job_uuid = attempt.job_uuid
 
         while True:
+            self._raise_if_shutdown_requested(audio_path)
             if self._current_time() >= attempt.deadline_at:
                 raise TranscriptionRetryRequired(
                     "polling_deadline_exceeded",
@@ -160,6 +170,8 @@ class TranscriptionPoller:
                     code="polling_failed",
                 )
 
+            self._raise_if_shutdown_requested(audio_path)
+
             if snapshot.job_uuid != job_uuid:
                 self._raise_terminal(
                     audio_path,
@@ -183,13 +195,18 @@ class TranscriptionPoller:
                     code="remote_job_failed",
                 )
 
-            self._wait_before_retry(attempt.deadline_at)
+            self._wait_before_retry(audio_path, attempt.deadline_at)
 
-    def _wait_before_retry(self, deadline_at: datetime) -> None:
+    def _wait_before_retry(self, audio_path: Path, deadline_at: datetime) -> None:
         remaining_seconds = (deadline_at - self._current_time()).total_seconds()
         if remaining_seconds <= 0:
             return
         self._sleep(min(self._poll_interval_seconds, remaining_seconds))
+        self._raise_if_shutdown_requested(audio_path)
+
+    def _raise_if_shutdown_requested(self, audio_path: Path) -> None:
+        if self._should_stop():
+            raise TranscriptionRetryRequired("shutdown_requested", audio_path)
 
     def _raise_terminal(
         self,

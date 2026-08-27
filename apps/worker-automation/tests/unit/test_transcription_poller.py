@@ -183,6 +183,39 @@ def test_pending_and_processing_are_polled_with_injected_sleep(
     assert clock.sleep_calls == [1.0, 1.0]
 
 
+def test_shutdown_interrupts_polling_without_moving_audio(
+    audio_directories: tuple[Path, Path],
+) -> None:
+    processing_directory, failed_directory = audio_directories
+    audio_path = _write_audio(processing_directory)
+    client = FakeTranscriptionClient(events=[_snapshot(JobStatus.PENDING)])
+    clock = FakeClock()
+    shutdown_requested = False
+
+    def interruptible_sleep(seconds: float) -> None:
+        nonlocal shutdown_requested
+        clock.sleep(seconds)
+        shutdown_requested = True
+
+    poller = TranscriptionPoller(
+        client=client,
+        poll_interval_seconds=1.0,
+        job_timeout_seconds=15.0,
+        sleep=interruptible_sleep,
+        now=clock.now,
+        should_stop=lambda: shutdown_requested,
+    )
+
+    with pytest.raises(TranscriptionRetryRequired, match="shutdown_requested"):
+        poller.transcribe(audio_path)
+
+    assert client.submit_calls == 1
+    assert client.get_job_calls == 1
+    assert clock.sleep_calls == [1.0]
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert not list(failed_directory.iterdir())
+
+
 def test_post_transport_error_leaves_audio_in_processing_for_retry(
     audio_directories: tuple[Path, Path],
 ) -> None:

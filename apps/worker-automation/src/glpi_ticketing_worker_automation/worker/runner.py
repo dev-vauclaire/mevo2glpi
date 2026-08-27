@@ -2,7 +2,7 @@
 
 import time
 from collections.abc import Callable
-from typing import Never, Protocol, assert_never
+from typing import Protocol, assert_never
 
 from .models import (
     BlockedOutcome,
@@ -12,6 +12,10 @@ from .models import (
     RetryOutcome,
     RunOutcome,
 )
+
+
+def _never_stop() -> bool:
+    return False
 
 
 class _RunOnceProtocol(Protocol):
@@ -37,9 +41,10 @@ def run_forever(
     processor: _RunOnceProtocol,
     *,
     sleep: Callable[[float], None] = time.sleep,
-) -> Never:
-    """Run until an unexpected exception or an explicit blocked outcome."""
-    while True:
+    should_stop: Callable[[], bool] = _never_stop,
+) -> None:
+    """Run until shutdown, an unexpected exception or an explicit block."""
+    while not should_stop():
         outcome = processor.run_once()
         if isinstance(outcome, IdleOutcome):
             sleep(outcome.wait_seconds)
