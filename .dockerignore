@@ -5,6 +5,8 @@
 !README.md
 
 !apps/
+!apps/database-migrations/
+!apps/database-migrations/pyproject.toml
 !apps/web/
 !apps/web/pyproject.toml
 !apps/web/src/
@@ -19,6 +21,8 @@
 !packages/common/pyproject.toml
 !packages/common/src/
 !packages/common/src/**
+!packages/database/
+!packages/database/pyproject.toml
 
 **/__pycache__/
 **/*.py[cod]

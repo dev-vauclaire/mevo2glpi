@@ -51,6 +51,14 @@ automatiquement les répertoires de travail du POC.
   et écoute configurable avec loopback par défaut ;
 - images runtime séparées, Docker Compose mono-serveur durci et runbook de
   déploiement du POC sur un serveur de test.
+- package SQLAlchemy partagé décrivant les jobs, la rétention audio, leur
+  historique expurgé et le heartbeat des workers du MVP ;
+- application one-shot Alembic capable d'attendre PostgreSQL puis de migrer
+  une base neuve jusqu'à la révision courante.
+
+Ces deux derniers composants constituent la fondation persistante du MVP. Ils
+ne sont pas encore consommés par le web ou le worker du POC : leur bascule est
+réalisée progressivement dans les itérations suivantes.
 
 ### Limites du POC ciblées par le MVP
 
@@ -83,17 +91,22 @@ explicitement ses dépendances d'exécution.
 
 | Membre | Distribution Python | Responsabilité actuelle | Documentation |
 | --- | --- | --- | --- |
+| `apps/database-migrations` | `glpi-ticketing-database-migrations` | Application one-shot Alembic et historique versionné du schéma MVP | [Migrations de la base](apps/database-migrations/README.md) |
 | `apps/web` | `glpi-ticketing-web` | Interface FastAPI de dépôt dans `pending` et de lecture depuis `completed` | [Application web](apps/web/README.md) |
 | `apps/worker-automation` | `glpi-ticketing-worker-automation` | Pipeline avec état privé : réclamation, transcription, ticket GLPI et finalisation | [Worker d'automatisation](apps/worker-automation/README.md) |
 | `packages/common` | `glpi-ticketing-common` | Nommage UUID, découverte des audios et transitions robustes entre volumes | [Package commun](packages/common/README.md) |
+| `packages/database` | `glpi-ticketing-database` | Modèles, moteur et sessions SQLAlchemy partagés du cycle de vie MVP | [Package database](packages/database/README.md) |
 
-Les deux applications dépendent du package commun par la source workspace
-déclarée à la racine. Une application ne doit pas importer directement les
-modules internes de l'autre application.
+Le web et le worker dépendent du package commun. L'application de migration
+dépend du package database pour importer `Base.metadata`. Ces dépendances sont
+déclarées comme sources workspace à la racine. Une application ne doit pas
+importer directement les modules internes d'une autre application.
 
 Les artefacts sous [`infra/docker/`](infra/docker/README.md) ne constituent pas
-un membre Python supplémentaire. Ils empaquettent ces trois distributions sans
-déplacer leurs responsabilités ni réutiliser les stacks Testcontainers.
+un membre Python supplémentaire. Les images POC existantes continuent
+d'empaqueter uniquement le web, le worker et le package commun ; l'image et le
+service de migration du déploiement MVP seront ajoutés dans une itération
+ultérieure.
 
 La convention générale est un layout `src` : le code de chaque membre se
 trouve dans `<membre>/src/<package_python>` et ses tests dans
@@ -245,21 +258,24 @@ vérité ; `uv.lock` fixe les versions exactes installées pour le dépôt.
 
 | Technologie | Contrainte déclarée | Utilisation |
 | --- | --- | --- |
-| Python | `>=3.12` | Langage commun aux trois membres |
+| Python | `>=3.12` | Langage commun aux cinq membres |
 | uv | workspace et lock partagé | Résolution, environnement, exécution et build |
 | FastAPI | `>=0.116,<1` | Routes HTTP et validation de l'application web |
 | Uvicorn | `>=0.35,<1` | Serveur ASGI composé par le point d'entrée web |
 | Jinja2 | `>=3.1,<4` | Pages HTML de dépôt et de confirmation |
 | Pydantic Settings | `>=2.10,<3` | Configuration typée depuis l'environnement |
+| SQLAlchemy | `>=2.0,<3` | Modèles, moteur et sessions synchrones partagés |
+| Psycopg 3 | `>=3.2,<4` | Pilote PostgreSQL synchrone |
+| Alembic | `>=1.16,<2` | Historique et application one-shot de migration |
 | HTTPX | `>=0.28,<1` | Clients HTTP de Transcribe AI et GLPI |
 | HTTPX 2 | `>=2,<3`, groupe de développement | Anticipation de migration et compatibilité des tests |
 | Pytest | `>=8.4,<10` | Tests unitaires et tests d'intégration opt-in |
 | Ruff | `>=0.12,<1` | Formatage et analyse statique |
-| Testcontainers | `>=4.12,<5`, groupe de développement | Stacks GLPI/MySQL et Transcribe AI jetables pour les tests d'intégration |
+| Testcontainers | `>=4.12,<5`, groupe de développement | Stacks PostgreSQL, GLPI/MySQL et Transcribe AI jetables pour les tests d'intégration |
 | Nginx | `1.30.4-alpine3.24`, image épinglée par digest | Terminaison TLS, authentification Basic et reverse proxy du POC |
 | Docker Engine / Compose | `28.3.3+` / `2.24+`, hors workspace Python | Images Nginx/web/worker et déploiement mono-serveur du POC |
 
-Les trois distributions du projet utilisent `uv_build` comme backend de
+Les cinq distributions du projet utilisent `uv_build` comme backend de
 construction et portent actuellement la version `0.1.0`.
 
 ## Prérequis
@@ -268,8 +284,8 @@ construction et portent actuellement la version `0.1.0`.
 - [`uv`](https://docs.astral.sh/uv/) ;
 - quatre répertoires audio distincts, existants et accessibles pour démarrer le
   worker ;
-- uniquement pour les tests marqués `glpi`, `transcribe_ai` ou `e2e` : Docker
-  avec le plugin Compose ;
+- uniquement pour les tests marqués `database`, `glpi`, `transcribe_ai` ou
+  `e2e` : Docker avec le plugin Compose ;
 - uniquement pour construire ou déployer le POC : Docker Engine 28.3.3 ou
   supérieur, Docker Compose 2.24 ou supérieur, un certificat TLS avec sa clé
   privée et l'utilitaire `htpasswd` ;
@@ -310,6 +326,10 @@ en application FastAPI puis en serveur Uvicorn.
 
 | Variables | Propriétaire | Rôle défini par la configuration |
 | --- | --- | --- |
+| `DATABASE_URL` | application de migration, puis web et workers MVP | URL SQLAlchemy obligatoire utilisant `postgresql+psycopg` |
+| `DATABASE_READY_TIMEOUT_SECONDS` | application de migration | Durée maximale d'attente de PostgreSQL |
+| `DATABASE_READY_INTERVAL_SECONDS` | application de migration | Intervalle entre deux sondes de disponibilité |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | application de migration | Timeout borné de chaque tentative de connexion |
 | `AUDIO_PENDING_DIR` | web et worker | Dépôt des uploads et entrée de la file |
 | `AUDIO_PROCESSING_DIR` | worker | Audio réclamé et traitement en cours |
 | `AUDIO_COMPLETED_DIR` | web et worker | Publication des succès par le worker et lecture par le web |
@@ -425,10 +445,18 @@ d'import `importlib`. Les marqueurs enregistrés sont :
 
 | Marqueur | Politique |
 | --- | --- |
+| `database` | Démarre un PostgreSQL 16 jetable, migre une base vide et vérifie le schéma réel |
 | `deployment` | Construit les trois images runtime et vérifie TLS, Nginx et le Compose durci sans appeler les API externes |
 | `transcribe_ai` | Démarre une stack Transcribe AI v1 jetable et exécute le contrat POST/polling réel |
 | `glpi` | Démarre une seule stack GLPI 11/MySQL jetable et teste le client V2.3.0 réel |
 | `e2e` | Assemble le worker réel avec les stacks Transcribe AI et GLPI jetables |
+
+La suite `database` lance une seule image PostgreSQL épinglée par digest sur un
+réseau privé et un port loopback aléatoire. Chaque test reçoit une base isolée,
+puis la fixture détruit les bases, le conteneur et le réseau. Elle vérifie le
+passage Alembic jusqu'à `head`, sa seconde exécution, la concordance avec
+`Base.metadata` et les invariants réellement appliqués par PostgreSQL. Cette
+suite ne doit pas être parallélisée.
 
 La suite `transcribe_ai` lance PostgreSQL, Redis, l'API, le worker batch et le
 service Whisper STT une seule fois par session. Les images sont épinglées par
@@ -462,7 +490,15 @@ Suite locale sans service externe :
 
 ```bash
 uv run --all-packages pytest \
-  -m "not deployment and not glpi and not transcribe_ai and not e2e"
+  -m "not database and not deployment and not glpi and not transcribe_ai and not e2e"
+```
+
+Intégration PostgreSQL jetable, à exécuter séparément et sans
+parallélisation :
+
+```bash
+uv run pytest -m database \
+  apps/database-migrations/tests/integration -vv --maxfail=1
 ```
 
 Smoke test du packaging de déploiement, à exécuter séparément et sans
@@ -485,6 +521,8 @@ Tests ciblés par membre :
 uv run --all-packages pytest apps/web/tests
 uv run --all-packages pytest apps/worker-automation/tests/unit
 uv run --all-packages pytest packages/common/tests
+uv run --all-packages pytest packages/database/tests/unit
+uv run --all-packages pytest apps/database-migrations/tests/unit
 ```
 
 Tests ciblés du pipeline et de sa boucle :

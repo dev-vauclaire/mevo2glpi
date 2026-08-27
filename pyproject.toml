@@ -11,13 +11,16 @@ package = false
 
 [tool.uv.workspace]
 members = [
+    "apps/database-migrations",
     "apps/web",
     "apps/worker-automation",
     "packages/common",
+    "packages/database",
 ]
 
 [tool.uv.sources]
 glpi-ticketing-common = { workspace = true }
+glpi-ticketing-database = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -36,6 +39,7 @@ minversion = "8.4"
 addopts = "--strict-config --strict-markers --import-mode=importlib"
 testpaths = ["apps", "packages", "tests"]
 markers = [
+    "database: démarre une instance PostgreSQL jetable pour valider le schéma et les migrations",
     "deployment: construit et démarre les images runtime et le reverse proxy Docker du POC",
     "glpi: démarre une instance GLPI jetable avec Testcontainers",
     "transcribe_ai: démarre une stack Transcribe AI jetable avec Testcontainers",
@@ -46,9 +50,11 @@ markers = [
 target-version = "py312"
 line-length = 88
 src = [
+    "apps/database-migrations/src",
     "apps/web/src",
     "apps/worker-automation/src",
     "packages/common/src",
+    "packages/database/src",
 ]
 
 [tool.ruff.lint]

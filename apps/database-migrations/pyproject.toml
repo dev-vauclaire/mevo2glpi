@@ -1,0 +1,18 @@
+[project]
+name = "glpi-ticketing-database-migrations"
+version = "0.1.0"
+description = "Application one-shot de migration de la base du cycle de vie"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.16,<2",
+    "glpi-ticketing-database>=0.1,<0.2",
+    "pydantic-settings>=2.10,<3",
+    "sqlalchemy>=2.0,<3",
+]
+
+[project.scripts]
+glpi-ticketing-database-migrations = "glpi_ticketing_database_migrations.application:main"
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"

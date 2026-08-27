@@ -64,16 +64,18 @@ pour le MVP.
 ```text
 .
 ├── apps/
-│   ├── database-migrations/                           ⬜ nouvelle application one-shot
+│   ├── database-migrations/                           🟦 application one-shot
 │   │   ├── pyproject.toml
-│   │   ├── alembic.ini
-│   │   ├── migrations/
-│   │   │   ├── env.py
-│   │   │   ├── script.py.mako
-│   │   │   └── versions/
 │   │   ├── src/glpi_ticketing_database_migrations/
 │   │   │   ├── __init__.py
-│   │   │   └── __main__.py
+│   │   │   ├── __main__.py
+│   │   │   ├── application.py
+│   │   │   ├── settings.py
+│   │   │   ├── alembic.ini
+│   │   │   └── migrations/
+│   │   │       ├── env.py
+│   │   │       ├── script.py.mako
+│   │   │       └── versions/
 │   │   └── tests/
 │   │       ├── unit/
 │   │       └── integration/
@@ -125,14 +127,21 @@ pour le MVP.
 │   │   └── src/glpi_ticketing_common/
 │   │       └── audio_files.py                         ⬜ stockage unique
 │   │
-│   ├── database/                                      ⬜ nouveau package
+│   ├── database/                                      🟦 fondation persistante
 │   │   ├── pyproject.toml
 │   │   ├── src/glpi_ticketing_database/
 │   │   │   ├── __init__.py
-│   │   │   ├── engine.py
-│   │   │   ├── models.py
-│   │   │   ├── repositories.py
-│   │   │   └── advisory_locks.py
+│   │   │   ├── engine.py                              🟦
+│   │   │   ├── models/                                🟦
+│   │   │   │   ├── __init__.py                        🟦 façade publique
+│   │   │   │   ├── base.py                            🟦 metadata partagée
+│   │   │   │   ├── enums.py                           🟦 valeurs persistées
+│   │   │   │   ├── ticket_creation_job.py             🟦
+│   │   │   │   ├── audio_retention.py                 🟦
+│   │   │   │   ├── ticket_creation_job_event.py       🟦
+│   │   │   │   └── worker_runtime_status.py           🟦
+│   │   │   ├── repositories.py                        ⬜ ajouté avec ses consommateurs
+│   │   │   └── advisory_locks.py                      ⬜ ajouté avec les workers
 │   │   └── tests/
 │   │
 │   └── glpi-client/                                   ⬜ extraction du client
@@ -157,9 +166,14 @@ pour le MVP.
 └── tests/deployment/                                  🟦 à adapter
 ```
 
-Les fichiers `models.py` et `repositories.py` restent volontairement uniques
-au début. Ils seront segmentés seulement lorsque des responsabilités distinctes
-et une taille réelle le justifieront.
+Les modèles sont séparés par table afin que chaque module porte ses colonnes,
+contraintes et index. `models/__init__.py` reste leur façade publique et importe
+les quatre classes : un import de `glpi_ticketing_database.models` enregistre
+donc toujours le schéma complet dans l'unique `Base.metadata`. Les enums restent
+centralisés car plusieurs tables partagent leurs valeurs persistées.
+
+Le futur fichier `repositories.py` restera unique tant que ses responsabilités
+réelles ne justifieront pas une nouvelle segmentation.
 
 Aucune classe `UnitOfWork` personnalisée n'est ajoutée. La session SQLAlchemy
 porte déjà cette responsabilité ; les applications ouvrent explicitement une
@@ -193,7 +207,7 @@ flowchart LR
     Retention --> Database
     Retention --> Glpi
 
-    Migration[Application database-migrations<br/>Alembic one-shot]:::future --> Database
+    Migration[Application database-migrations<br/>Alembic one-shot]:::implemented --> Database
 
     classDef implemented fill:#dbeafe,stroke:#2563eb,color:#111827;
     classDef future fill:#fff,stroke:#64748b,color:#111827,stroke-dasharray:5 4;
@@ -290,7 +304,7 @@ jamais avoir de ticket GLPI.
 | `policy` | `ticket_or_deadline` ou `deadline_only` |
 | `status` | `inactive`, `scheduled`, `checking`, `retry_scheduled`, `deleting`, `deleted` ou `blocked` |
 | `hard_delete_at` | Échéance absolue, nullable uniquement lorsque la rétention est `inactive` |
-| `next_check_at` | Prochain contrôle éligible |
+| `next_check_at` | Prochain contrôle GLPI ou prochain retry de rétention éligible |
 | `last_checked_at` | Dernier contrôle tenté, nullable |
 | `last_glpi_status` | Statut GLPI typé observé, nullable |
 | `check_attempt_count` | Nombre total et monotone de contrôles |
@@ -573,6 +587,13 @@ nom comme une clé canonique, vérifie son absence en base, puis supprime ce
 chemin exact ; le glob de découverte n'est jamais utilisé directement comme
 cible de suppression.
 
+Si une suppression déjà engagée doit être réessayée ou bloquée, la rétention
+conserve ensemble `deletion_reason` et `deletion_started_at`. Le prochain
+passage reprend ainsi le même fichier `.purge` au lieu de perdre le contexte.
+Ces deux champs restent obligatoirement vides pour `inactive`, `scheduled` et
+`checking`. Un `retry_scheduled`, quelle que soit sa politique, possède un
+`next_check_at` afin d'éviter une boucle de retry immédiate.
+
 Une rétention `blocked` reste exclue des contrôles GLPI ordinaires, mais sa
 deadline absolue reste prioritaire. Dès `hard_delete_at`, elle est donc
 sélectionnée par la branche `Expired` et purgée sans dépendre de GLPI.
@@ -692,6 +713,9 @@ Périmètre : application de migration distincte, stockage canonique, machine à
 
 Périmètre : `packages/database`, `apps/database-migrations`, SQLAlchemy,
 PostgreSQL, schéma initial et exécution one-shot d'Alembic.
+
+État : 🟦 implémenté sur la branche ; l'intégration dans les applications
+métier et dans le Compose de production appartient aux itérations suivantes.
 
 - Tests unitaires : invariants des modèles, valeurs d'états, construction de
   configuration et contrat du point d'entrée de migration.

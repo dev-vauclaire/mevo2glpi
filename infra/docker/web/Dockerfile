@@ -17,9 +17,11 @@ WORKDIR /app
 
 COPY --from=uv-binary /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock README.md ./
+COPY apps/database-migrations/pyproject.toml apps/database-migrations/pyproject.toml
 COPY apps/web/pyproject.toml apps/web/pyproject.toml
 COPY apps/worker-automation/pyproject.toml apps/worker-automation/pyproject.toml
 COPY packages/common/pyproject.toml packages/common/pyproject.toml
+COPY packages/database/pyproject.toml packages/database/pyproject.toml
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \

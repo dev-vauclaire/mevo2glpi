@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+    command:
+      - postgres
+      - -c
+      - timezone=UTC
+    environment:
+      POSTGRES_USER: ${DB_ADMIN_USER:?DB_ADMIN_USER is required}
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD:?DB_ADMIN_PASSWORD is required}
+      POSTGRES_DB: ${DB_ADMIN_NAME:?DB_ADMIN_NAME is required}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready --host=127.0.0.1 --username=$$POSTGRES_USER --dbname=$$POSTGRES_DB
+      interval: 1s
+      timeout: 5s
+      retries: 60
+      start_period: 2s
+    ports:
+      - target: 5432
+        published: 0
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      - database_test
+    tmpfs:
+      - /var/lib/postgresql/data
+
+networks:
+  database_test:
+    driver: bridge
