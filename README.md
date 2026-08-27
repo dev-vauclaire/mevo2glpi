@@ -36,22 +36,20 @@ travail. Il n'utilise actuellement ni base de données, ni broker de messages.
   typés `idle`, `retry`, `completed`, `failed` et `blocked` ;
 - conservation privée de la transcription en mémoire pendant les reprises
   GLPI, puis publication du fichier dans `completed` après confirmation du
-  ticket.
+  ticket ;
+- point d'entrée exécutable du worker, composition des clients HTTP et arrêt
+  coopératif sur `SIGINT` ou `SIGTERM`.
 
 ### Fonctionnalités restant à intégrer
 
 - point d'entrée exécutable pour assembler et démarrer l'application web ;
-- point d'entrée exécutable pour construire le client HTTP et démarrer le
-  worker ;
 - déploiement, supervision et mécanisme opérateur pour les traitements
   bloqués ou classés dans `failed`.
 
-Le dépôt ne fournit donc pas encore de commande de démarrage applicatif. Le
-module web expose une fabrique `create_app(...)`. Le worker expose
-`AudioProcessor.run_once()` et la boucle injectable `run_forever(...)`, mais
-aucune composition ne construit encore les clients HTTP à partir de
-`WorkerSettings`. Documenter une commande `uvicorn` ou une CLI worker à ce
-stade masquerait l'absence de ces bootstraps.
+Le module web expose encore seulement une fabrique `create_app(...)`. Le worker
+possède désormais sa racine de composition dans `application.py`, une commande
+console et une exécution équivalente avec `python -m`. Cette séparation permet
+de tester `AudioProcessor` avec les vrais adaptateurs sans démarrer la boucle.
 
 ## Architecture du workspace
 
@@ -153,11 +151,13 @@ Un sidecar terminal porte le nom `{uuid}.error.json` et contient uniquement :
 
 Il ne contient ni transcription, ni clé API, ni réponse HTTP brute.
 
-La politique GLPI actuelle est explicite : seuls un `external_id` dupliqué et
-les statuts HTTP `400`, `409` ou `422` de l'opération `CREATE_TICKET` conduisent
-à `failed`. Une erreur invalide issue d'une autre opération, ou un `404`/`405`
-pendant la création, conduit à `blocked`, car elle peut signaler un défaut de
-route, de version ou de configuration plutôt qu'un problème propre à l'audio.
+La politique GLPI est conservatrice : un statut HTTP ne suffit jamais à rendre
+une création terminale. Seuls un `external_id` dupliqué et une réponse `400`
+reconnue par le client comme rejet sémantique des champs dynamiques
+`content`/`external_id` conduisent à `failed`. Les autres `400`, ainsi que les
+`409`, `422` et erreurs de contrat non reconnues, conduisent à `blocked` afin
+de ne pas isoler tous les audios à cause d'une configuration ou d'une évolution
+de l'API.
 
 ### État et résultats du worker
 
@@ -218,14 +218,14 @@ construction et portent actuellement la version `0.1.0`.
 
 - Python 3.12 ou supérieur ;
 - [`uv`](https://docs.astral.sh/uv/) ;
-- des répertoires audio distincts et accessibles au processus lors de la
-  future exécution des applications ;
-- uniquement pour les tests marqués `glpi` ou `transcribe_ai` : Docker avec le
-  plugin Compose ;
-- uniquement pour `transcribe_ai` : un hôte et un daemon Docker `linux/amd64`,
-  ainsi qu'un accès réseau à chaque session pour le modèle Whisper ; le premier
-  lancement télécharge aussi les images. Le mode GPU requiert en plus un GPU
-  NVIDIA et NVIDIA Container Toolkit.
+- quatre répertoires audio distincts, existants et accessibles pour démarrer le
+  worker ;
+- uniquement pour les tests marqués `glpi`, `transcribe_ai` ou `e2e` : Docker
+  avec le plugin Compose ;
+- uniquement pour `transcribe_ai` ou `e2e` : un hôte et un daemon Docker
+  `linux/amd64`, ainsi qu'un accès réseau à chaque session pour le modèle
+  Whisper ; le premier lancement télécharge aussi les images. Le mode GPU
+  requiert en plus un GPU NVIDIA et NVIDIA Container Toolkit.
 
 Docker, GLPI et Transcribe AI ne sont pas nécessaires pour exécuter la suite
 unitaire par défaut. Les deux stacks d'intégration sont démarrées et détruites
@@ -252,9 +252,10 @@ Copiez-le vers `.env`, puis fournissez uniquement des valeurs adaptées à votre
 machine. `.env` et `.env.*` sont ignorés par Git, à l'exception du modèle ; ils
 ne doivent jamais être ajoutés au dépôt.
 
-`WebSettings` et `WorkerSettings` valident déjà ce contrat, mais les futurs
-points de démarrage devront encore injecter ces valeurs dans `create_app(...)`,
-`TranscriptionClient`, `GlpiClient`, `AudioProcessor` et `run_forever(...)`.
+`WebSettings` et `WorkerSettings` valident ce contrat. Le point d'entrée du
+worker transforme `WorkerSettings` en `TranscriptionClient`, `GlpiClient`,
+`AudioProcessor` et `run_forever(...)`. La composition de l'application web
+reste à ajouter.
 
 | Variables | Propriétaire | Rôle défini par la configuration |
 | --- | --- | --- |
@@ -282,6 +283,26 @@ Sa valeur est `cpu` par défaut ou `gpu` pour demander explicitement CUDA. Les
 identifiants de la stack sont générés en mémoire à chaque session pytest :
 aucune clé Transcribe AI ne doit être fournie par le développeur.
 
+### Démarrage du worker
+
+Après avoir renseigné `.env` et créé les quatre répertoires audio configurés :
+
+```bash
+uv run glpi-ticketing-worker
+```
+
+La forme module est équivalente :
+
+```bash
+uv run python -m glpi_ticketing_worker_automation
+```
+
+Le processus retourne `0` après un arrêt normal ou un `SIGINT`/`SIGTERM` géré,
+`1` pour une erreur inattendue, `2` pour une configuration invalide, `3` pour
+un pipeline bloqué et `130` si un `KeyboardInterrupt` échappe aux gestionnaires.
+Les attentes sont réveillées par le signal ; un appel HTTP synchrone déjà en
+cours peut toutefois aller jusqu'à son timeout configuré.
+
 ## Politique de tests
 
 La suite par défaut doit être déterministe, locale et sans appel externe. Les
@@ -302,7 +323,7 @@ d'import `importlib`. Les marqueurs enregistrés sont :
 | --- | --- |
 | `transcribe_ai` | Démarre une stack Transcribe AI v1 jetable et exécute le contrat POST/polling réel |
 | `glpi` | Démarre une seule stack GLPI 11/MySQL jetable et teste le client V2.3.0 réel |
-| `e2e` | Réservé au futur scénario complet avec services externes |
+| `e2e` | Assemble le worker réel avec les stacks Transcribe AI et GLPI jetables |
 
 La suite `transcribe_ai` lance PostgreSQL, Redis, l'API, le worker batch et le
 service Whisper STT une seule fois par session. Les images sont épinglées par
@@ -322,6 +343,13 @@ suite récupère le token par `GlpiClient`, crée réellement un ticket et véri
 sa corrélation par `external_id`. Elle ne doit pas être parallélisée ; son
 teardown supprime les conteneurs, le réseau, les volumes Compose et l'image
 custom construite pour la session.
+
+La suite `e2e` réutilise ces deux fixtures de session et la vraie racine de
+composition du worker. Elle génère un UUID, publie le WAV synthétique dans
+`pending`, vérifie une transcription non vide dans le ticket corrélé par
+`external_id`, puis contrôle l'audio dans `completed` et l'absence d'artefact
+dans `failed`. Les deux fixtures restent responsables de leur teardown. Cette
+suite ne doit pas être parallélisée.
 
 ## Commandes de validation depuis la racine
 
@@ -379,7 +407,24 @@ TRANSCRIBE_AI_TEST_DEVICE=gpu \
 uv run --all-packages pytest -m transcribe_ai -vv --maxfail=1
 ```
 
+Flux E2E complet sur CPU, utilisé par défaut :
+
+```bash
+uv run pytest -m e2e \
+apps/worker-automation/tests/integration/e2e -vv --maxfail=1
+```
+
+Le même flux sur GPU :
+
+```bash
+TRANSCRIBE_AI_TEST_DEVICE=gpu \
+uv run pytest -m e2e \
+apps/worker-automation/tests/integration/e2e -vv --maxfail=1
+```
+
 Chaque session télécharge le modèle Whisper `tiny` ; le premier lancement
 télécharge aussi les images, dont l'image STT volumineuse. Les détails du flux,
 des prérequis GPU et du teardown sont documentés dans
 [`apps/worker-automation/tests/integration/transcribe-ai/README.md`](apps/worker-automation/tests/integration/transcribe-ai/README.md).
+Le scénario combiné est détaillé dans
+[`apps/worker-automation/tests/integration/e2e/README.md`](apps/worker-automation/tests/integration/e2e/README.md).

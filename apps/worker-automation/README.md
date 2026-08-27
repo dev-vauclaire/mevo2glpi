@@ -6,10 +6,9 @@ puis de publier l'audio terminé. Le POC fonctionne avec **un seul worker** :
 `AudioProcessor` conserve l'avancement d'un seul audio en mémoire et
 `run_forever()` planifie ses reprises.
 
-Le pipeline applicatif est implémenté et testable par injection. Il ne possède
-pas encore de point d'entrée exécutable assemblant `WorkerSettings`, les deux
-clients HTTP et leurs ressources ; cette composition relève d'une étape
-ultérieure.
+Le module `application.py` assemble `WorkerSettings`, les deux clients HTTP,
+`AudioProcessor` et `run_forever()`. Il expose aussi une composition sans
+boucle pour les tests et possède un point d'entrée exécutable.
 
 ## Entrées et sorties
 
@@ -24,7 +23,7 @@ ultérieure.
 
 Le processeur transforme lui-même la transcription réussie en
 `GlpiTicketInput`. Les identifiants OAuth Password et les valeurs fixes du
-ticket proviennent de `WorkerSettings` lors de la future composition.
+ticket proviennent de `WorkerSettings` lors de la composition.
 
 Un nom de fichier audio doit suivre la convention
 `{uuid}.{extension}` avec un UUID canonique et une extension parmi `.wav`,
@@ -69,7 +68,7 @@ flowchart TD
     T -->|"ticket confirmé"| C["publication dans completed"]
     S -->|"erreur terminale audio"| F["failed<br/>audio + sidecar expurgé"]
     G -->|"erreur terminale audio"| F
-    T -->|"CREATE 400/409/422 ou external_id dupliqué"| F
+    T -->|"rejet sémantique reconnu<br/>ou external_id dupliqué"| F
     T -->|"erreur systémique"| B["blocked<br/>arrêt du runner"]
     C -->|"publication impossible"| B
     F --> O["décision opérateur"]
@@ -151,9 +150,10 @@ La couche `transcription` sépare le contrat stable de l'API HTTP historique :
 - les exceptions transportent des codes techniques sûrs, sans réponse HTTP
   brute.
 
-`TranscriptionClient` reçoit lui-même un `httpx.Client` injecté. Le code de
-composition qui sera ajouté ultérieurement devra donc créer et fermer cette
-ressource HTTP ; le client de domaine ne masque pas son cycle de vie.
+`TranscriptionClient` reçoit lui-même un `httpx.Client` injecté.
+`worker_runtime()` crée un client HTTP partagé par les deux adaptateurs et le
+ferme dans tous les cas ; les clients de domaine ne masquent pas son cycle de
+vie.
 
 Le client effectue actuellement :
 
@@ -177,8 +177,8 @@ Les situations suivantes sont considérées comme des indisponibilités :
 Dans ces cas, l'audio reste dans `processing`. Le poller lève une
 `TranscriptionRetryRequired`, le processeur retourne `RetryOutcome`, puis le
 runner attend l'intervalle de transcription avant une nouvelle tentative qui
-crée un nouveau job distant. Le futur bootstrap devra alimenter cet intervalle
-depuis `TRANSCRIPTION_POLL_INTERVAL_SECONDS`. Il n'y a actuellement ni nombre
+crée un nouveau job distant. La composition alimente cet intervalle depuis
+`TRANSCRIPTION_POLL_INTERVAL_SECONDS`. Il n'y a actuellement ni nombre
 maximal de tentatives, ni backoff progressif, ni jitter.
 
 ### Erreurs terminales
@@ -266,12 +266,16 @@ Le processeur applique la classification du client GLPI :
   `RetryOutcome` à l'étape `ticketing` ; la transcription privée est conservée
   et le prochain appel reprend directement GLPI ;
 - `FailedOutcome` est volontairement limité à un `external_id` dupliqué ou à
-  une erreur HTTP `400`, `409` ou `422` produite par l'opération
-  `CREATE_TICKET` ; dans la politique actuelle, ces cas sont traités comme
-  propres à l'entrée audio ;
-- une erreur déclarée invalide pendant une autre opération, ainsi qu'un `404`
-  ou `405` même pendant `CREATE_TICKET`, produit `BlockedOutcome` : elle peut
-  révéler une route, une version d'API ou un contrat mal configuré ;
+  `GlpiTicketRejectedError`, qui représente un rejet explicitement reconnu des
+  données dynamiques d'un seul ticket ;
+- le client ne produit ce rejet sémantique que pour un HTTP `400`, un statut
+  GLPI `ERROR_INVALID_PARAMETER` et une section `detail` non vide qui ne vise
+  que `content` ou `external_id`, avec une violation autorisée `maxLength` ou
+  `pattern` ;
+- tout autre `400`, ainsi que `409`, `422`, `404`, `405` ou une forme de détail
+  inconnue, produit `BlockedOutcome` : le statut seul ne permet pas de
+  distinguer une entrée audio invalide d'une dérive de configuration ou de
+  contrat ;
 - une erreur d'authentification, d'autorisation ou une autre erreur systémique
   non réessayable produit `BlockedOutcome` afin de ne pas classer à tort
   l'audio dans `failed` ;
@@ -291,12 +295,12 @@ toutefois dès le premier résultat `blocked`.
 fichier `.env` situé dans le répertoire courant. Les secrets utilisent
 `pydantic.SecretStr` et sont masqués dans leur représentation Python.
 
-Important : aucun bootstrap n'instancie encore `WorkerSettings`, les deux
-clients HTTP et `run_forever()` ensemble. Ces variables définissent le contrat
-de configuration validé, mais les exporter ne suffit pas encore à configurer
-ou démarrer un daemon.
+`application.py` charge cette configuration, vérifie les répertoires, construit
+les deux adaptateurs autour d'un `httpx.Client` partagé, puis lance
+`run_forever()`. Les quatre répertoires doivent exister : le worker les résout
+en chemins absolus mais ne les crée pas.
 
-| Variable | Obligatoire | Défaut | Rôle prévu lors de la composition |
+| Variable | Obligatoire | Défaut | Rôle lors de la composition |
 | --- | --- | --- | --- |
 | `PUBLIC_BASE_URL` | oui | — | Base destinée à la fonction `audio_url_for()` qui construit le lien placé dans le ticket. |
 | `AUDIO_PENDING_DIR` | non | `/data/audio-pending` | Volume d'entrée. |
@@ -335,6 +339,45 @@ hors contrat.
 Un modèle sans secret est disponible à la racine dans `.env.example`. Il ne
 faut jamais versionner le `.env` local.
 
+## Point d'entrée, composition et arrêt
+
+La racine de composition reste séparée du métier :
+
+- `build_processor(settings, http_client=...)` construit le processeur réel
+  sans lancer la boucle et laisse la propriété du client HTTP à l'appelant ;
+- `worker_runtime(settings)` possède le client HTTP partagé et garantit sa
+  fermeture ;
+- `run_application(...)` branche l'événement d'arrêt sur `run_forever()` et
+  sur les attentes du poller ;
+- `run_cli()` traduit les fins d'exécution en codes stables ;
+- `main()` configure uniquement les logs et délègue à `run_cli()`.
+
+Depuis la racine du dépôt, après création des quatre répertoires configurés :
+
+```bash
+uv run glpi-ticketing-worker
+```
+
+Le module Python fournit le même point d'entrée :
+
+```bash
+uv run python -m glpi_ticketing_worker_automation
+```
+
+| Code | Signification |
+| --- | --- |
+| `0` | Arrêt normal, y compris après un `SIGINT` ou `SIGTERM` géré. |
+| `1` | Erreur inattendue à la frontière applicative. |
+| `2` | Configuration Pydantic invalide, répertoire absent ou chemin audio incorrect. |
+| `3` | `BlockedOutcome` nécessitant une intervention opérateur. |
+| `130` | `KeyboardInterrupt` ayant échappé aux gestionnaires de signaux. |
+
+`SIGINT` et `SIGTERM` positionnent un événement partagé : les attentes de la
+boucle et du poller deviennent interruptibles et aucune nouvelle itération ne
+démarre. Un appel HTTP synchrone déjà engagé peut aller jusqu'à son timeout.
+Lorsqu'un polling est interrompu, l'audio reste dans `processing` et sera
+resoumis après le prochain démarrage conformément à la politique du POC.
+
 ## Architecture du workspace
 
 ```text
@@ -343,6 +386,8 @@ apps/worker-automation/
 ├── README.md
 ├── src/glpi_ticketing_worker_automation/
 │   ├── __init__.py
+│   ├── __main__.py
+│   ├── application.py
 │   ├── settings.py
 │   ├── glpi/
 │   │   ├── __init__.py
@@ -363,6 +408,7 @@ apps/worker-automation/
 └── tests/
     ├── unit/
     │   ├── test_glpi_client.py
+    │   ├── test_application.py
     │   ├── test_settings.py
     │   ├── test_transcription_clients.py
     │   ├── test_transcription_poller.py
@@ -373,6 +419,10 @@ apps/worker-automation/
     │       ├── test_runner.py
     │       └── test_scanner.py
     └── integration/
+        ├── e2e/
+        │   ├── conftest.py
+        │   ├── README.md
+        │   └── test_worker_pipeline.py
         ├── glpi/
         │   ├── compose.yml
         │   ├── conftest.py
@@ -395,6 +445,8 @@ Conventions à préserver :
   `glpi-ticketing-common.audio_files` ;
 - laisser les outcomes expurgés dans `worker/models.py`, le cas d'usage dans
   `worker/processor.py` et la planification dans `worker/runner.py` ;
+- conserver l'assemblage des adaptateurs, la propriété des ressources et les
+  codes de sortie dans `application.py` ;
 - isoler les détails HTTP dans les adaptateurs `transcription/client.py` et
   `glpi/client.py` ;
 - faire dépendre le poller et le processeur de protocoles, pas des clients
@@ -434,6 +486,12 @@ Installer et verrouiller les dépendances de tous les membres du workspace :
 
 ```bash
 uv sync --all-packages
+```
+
+Démarrer le worker avec la configuration de `.env` :
+
+```bash
+uv run glpi-ticketing-worker
 ```
 
 Exécuter tous les tests unitaires du worker :
@@ -519,6 +577,30 @@ le bootstrap et la stack ; les fichiers
 `test_glpi_client.py` et `test_transcription_client.py` vérifient séparément le
 contrat du client Python contre cette même stack.
 
+### Pipeline E2E conteneurisé
+
+Le marqueur `e2e` réutilise simultanément les deux fixtures précédentes. Le
+test passe par `worker_runtime()`, donc par la vraie composition, puis vérifie
+la transcription non vide dans GLPI, la corrélation `external_id`, le ticket
+retourné, la publication dans `completed` et l'absence d'artefact dans
+`failed`. Les secrets et l'audio vocal sont éphémères. La suite ne doit pas
+être parallélisée.
+
+CPU par défaut :
+
+```bash
+uv run pytest -m e2e \
+apps/worker-automation/tests/integration/e2e -vv --maxfail=1
+```
+
+GPU avec NVIDIA Container Toolkit :
+
+```bash
+TRANSCRIBE_AI_TEST_DEVICE=gpu \
+uv run pytest -m e2e \
+apps/worker-automation/tests/integration/e2e -vv --maxfail=1
+```
+
 ## Politique de test
 
 Les tests unitaires couvrent séparément :
@@ -526,6 +608,8 @@ Les tests unitaires couvrent séparément :
 - la validation des paramètres ;
 - le format des requêtes et la normalisation des réponses du client ;
 - la recherche et la création idempotente au mieux d'un ticket GLPI ;
+- la reconnaissance stricte d'un rejet GLPI propre au ticket et le blocage des
+  autres réponses `400`/`409`/`422` ;
 - le polling, les délais, les reprises et la classification des erreurs ;
 - l'ordre de sélection `processing` puis `pending` ;
 - les transitions sûres dans `failed` et `completed` ;
@@ -548,8 +632,6 @@ dépôt sont :
 
 ## Limites actuelles
 
-- L'application n'a pas encore de CLI, de fonction `main` ni de composition qui
-  transforme `WorkerSettings` en clients HTTP et lance `run_forever()`.
 - L'état privé du processeur, notamment la transcription, l'identifiant du
   ticket avant finalisation et une publication d'échec en attente, n'est pas
   persisté. Après redémarrage, le fichier de `processing` repart donc de la
@@ -560,10 +642,9 @@ dépôt sont :
 - `external_id` n'est pas une contrainte d'unicité dans GLPI. La recherche avant
   création est adaptée au worker unique du POC, mais ne fournit pas
   d'idempotence atomique en présence de plusieurs auteurs concurrents.
-- La classification terminale des réponses `CREATE_TICKET` `400`/`409`/`422`
-  est une convention du POC. Avant la production, elle devra s'appuyer sur un
-  code métier GLPI stable afin de distinguer un ticket réellement rejeté d'une
-  dérive de configuration ou de contrat.
+- La liste blanche des rejets de ticket dépend du contrat GLPI V2.3.0 épinglé.
+  Une évolution des champs ou des motifs de validation doit être étudiée et
+  testée explicitement ; une forme inconnue bloque volontairement le worker.
 - L'API ne fournit pas de clé d'idempotence. Après une réponse ambiguë, un délai
   dépassé ou un redémarrage, un fichier conservé dans `processing` est resoumis
   et peut créer plusieurs jobs distants pour le même audio.
