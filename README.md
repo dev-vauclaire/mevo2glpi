@@ -10,6 +10,14 @@ Le POC repose volontairement sur une architecture simple : une application
 web, un worker unique et des répertoires partagés utilisés comme file de
 travail. Il n'utilise actuellement ni base de données, ni broker de messages.
 
+L'état démonstratif du POC est figé par le tag `poc-v0.1.0`. La branche
+`mvp/job-lifecycle` prépare PostgreSQL, un stockage audio unique, le dashboard
+d'observabilité et le worker de rétention. Sa structure et ses pipelines cibles
+sont suivis dans le document vivant
+[`docs/mvp-architecture.md`](docs/mvp-architecture.md).
+Le MVP part d'une base PostgreSQL et d'un volume audio neufs ; il ne migre pas
+automatiquement les répertoires de travail du POC.
+
 ## État du périmètre
 
 ### Fonctionnalités implémentées
@@ -44,13 +52,20 @@ travail. Il n'utilise actuellement ni base de données, ni broker de messages.
 - images runtime séparées, Docker Compose mono-serveur durci et runbook de
   déploiement du POC sur un serveur de test.
 
-### Limites restant à traiter avant un MVP
+### Limites du POC ciblées par le MVP
+
+- persistance et observabilité du cycle de vie des jobs ;
+- alertes dashboard et mécanisme opérateur pour les traitements bloqués ou
+  classés dans `failed` ;
+- rétention contrôlée des audios et sauvegarde de PostgreSQL ;
+- reprise autonome des traitements et des suppressions après un crash.
+
+### Limites restant à traiter avant une production renforcée
 
 - authentification et autorisation applicatives ;
 - gestion des secrets par fichiers ou coffre externe ;
-- supervision et mécanisme opérateur pour les traitements bloqués ou classés
-  dans `failed` ;
-- sauvegarde, rétention et chiffrement au repos des audios.
+- chiffrement au repos des audios ;
+- haute disponibilité et parallélisation des workers.
 
 Chaque application possède désormais une racine de composition dans
 `application.py`, une commande console et une exécution équivalente avec
