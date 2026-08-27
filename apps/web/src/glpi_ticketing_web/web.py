@@ -91,7 +91,10 @@ def create_app(
         return _TEMPLATES.TemplateResponse(
             request=request,
             name="index.html",
-            context={"max_upload_bytes": config.max_upload_bytes},
+            context={
+                "max_upload_bytes": config.max_upload_bytes,
+                "upload_path": request.app.url_path_for("upload_audio"),
+            },
         )
 
     @app.post(

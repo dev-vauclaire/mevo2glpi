@@ -64,7 +64,7 @@ def test_upload_returns_202_and_uuid(web_context: WebTestContext) -> None:
     assert 'method="post"' in index_response.text
     assert 'enctype="multipart/form-data"' in index_response.text
     assert 'name="audio_file"' in index_response.text
-    assert "/audios" in index_response.text
+    assert 'action="/audios"' in index_response.text
 
     response = _upload_audio(web_context.client, "recording.wav", SYNTHETIC_AUDIO)
     audio_uuid = _extract_audio_uuid(response)
