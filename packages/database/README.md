@@ -51,10 +51,29 @@ et tous les timestamps sont des `TIMESTAMPTZ`.
 `audio_root / storage_key` et ne parcourt jamais le volume pour retrouver un
 job.
 
+`activate()` crée une politique absente ou réactive uniquement une ligne
+`inactive`. Il refuse tout état actif ou terminal afin de ne jamais écraser un
+contrôle, un backoff ou le contexte durable d'une purge déjà engagée.
+
 Une rétention `retry_scheduled` peut représenter aussi bien un nouvel appel
 GLPI qu'une reprise de purge locale. Elle possède donc toujours une date de
 reprise, y compris avec la politique `deadline_only`. Seul l'état `checking`
 est réservé à la politique `ticket_or_deadline`.
+
+`last_glpi_status_id` stocke uniquement l'identifiant numérique positif du
+statut GLPI. Le libellé n'est pas persisté car il peut être traduit. Cette
+observation n'est autorisée que pour `ticket_or_deadline` ; le package database
+reste indépendant du client GLPI et n'interprète pas lui-même cet entier.
+
+Les contraintes de rétention distinguent un retry d'appel GLPI d'un retry de
+purge. Une politique `deadline_only` en `retry_scheduled` ou `blocked` conserve
+obligatoirement `deletion_reason` et `deletion_started_at`. Les raisons
+`ticket_closed` et `deadline_expired` appartiennent à `ticket_or_deadline`,
+tandis que `failed_ttl` et `blocked_ttl` appartiennent à `deadline_only`. Avant
+le début d'une purge, `next_check_at` ne peut pas dépasser `hard_delete_at` ;
+après ce début, un backoff peut dépasser la deadline afin d'éviter une boucle
+active. Un statut `checking` porte toujours `last_checked_at`, et une
+suppression confirmée ne peut pas précéder `deletion_started_at`.
 
 ## Cycle de vie du worker d'automatisation
 
@@ -102,6 +121,11 @@ total de tentatives, création et premier démarrage. La rétention ne peut êtr
 désactivée que depuis `scheduled`, `retry_scheduled` ou `blocked`. Les lignes
 sont verrouillées dans l'ordre job puis rétention ; un repository ne modifie
 jamais le modèle du suivant.
+
+Même depuis `retry_scheduled` ou `blocked`, la désactivation est refusée si
+`deletion_started_at` est déjà renseigné. À ce stade, l'audio peut avoir quitté
+son emplacement canonique et seul le flux de purge sait reprendre l'opération
+sans perdre son contexte.
 
 ## Verrous advisory et runtime
 
@@ -202,7 +226,9 @@ packages/database/
 └── tests/
     ├── unit/
     │   ├── test_advisory_locks.py
+    │   ├── test_audio_retention_acquisition.py
     │   ├── test_audio_retention_repository.py
+    │   ├── test_audio_retention_transitions.py
     │   ├── test_engine.py
     │   ├── test_models.py
     │   ├── test_repository_boundaries.py
@@ -211,6 +237,7 @@ packages/database/
     │   ├── test_ticket_creation_job_transitions.py
     │   └── test_worker_runtime_status_repository.py
     └── integration/
+        ├── test_audio_retention_repository.py
         ├── test_dashboard_repositories.py
         └── test_ticket_creation_job_repository.py
 ```

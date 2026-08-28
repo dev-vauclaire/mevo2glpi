@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -10,9 +11,10 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import CheckConstraint, Engine, inspect, select, text
+from sqlalchemy import CheckConstraint, Engine, MetaData, Table, inspect, select, text
 
 from glpi_ticketing_database import (
+    AudioRetention,
     Base,
     TicketCreationJob,
     TicketCreationJobEvent,
@@ -56,6 +58,13 @@ def _upgrade_to_revision(engine: Engine, revision: str) -> None:
     with engine.connect() as connection:
         config.attributes["connection"] = connection
         command.upgrade(config, revision)
+
+
+def _downgrade_to_revision(engine: Engine, revision: str) -> None:
+    config = build_alembic_config()
+    with engine.connect() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, revision)
 
 
 def test_revision_graph_has_one_head() -> None:
@@ -159,6 +168,149 @@ def test_upgrade_from_0001_preserves_events_and_allows_operator_retry(
             .order_by(TicketCreationJobEvent.event_id)
         ).all()
     assert event_types == ["job_created", "operator_retry_requested"]
+
+
+def test_upgrade_from_0002_preserves_data_and_enables_retention_events(
+    database_engine: Engine,
+) -> None:
+    _upgrade_to_revision(database_engine, "0002_add_operator_retry_event")
+    job_uuid = uuid4()
+    now = datetime(2026, 8, 28, 12, tzinfo=UTC)
+    with database_engine.begin() as connection:
+        legacy_retentions = Table(
+            "audio_retentions",
+            MetaData(),
+            autoload_with=connection,
+        )
+        connection.execute(
+            TicketCreationJob.__table__.insert(),
+            {
+                "uuid": job_uuid,
+                "storage_key": f"{job_uuid}.wav",
+                "audio_extension": "wav",
+                "audio_size_bytes": 128,
+            },
+        )
+        connection.execute(
+            legacy_retentions.insert(),
+            {
+                "job_uuid": job_uuid,
+                "policy": "ticket_or_deadline",
+                "status": "scheduled",
+                "hard_delete_at": now + timedelta(days=90),
+                "next_check_at": now + timedelta(hours=6),
+                "last_glpi_status": "5",
+            },
+        )
+        connection.execute(
+            TicketCreationJobEvent.__table__.insert(),
+            {
+                "job_uuid": job_uuid,
+                "status": "pending",
+                "stage": None,
+                "event_type": "operator_retry_requested",
+                "actor": "web",
+            },
+        )
+
+    upgrade_to_head(database_engine)
+
+    retention_event_types = (
+        "retention_retry_scheduled",
+        "retention_blocked",
+        "audio_deletion_started",
+        "audio_deleted",
+    )
+    with database_engine.begin() as connection:
+        persisted_retention = connection.execute(
+            select(
+                AudioRetention.job_uuid,
+                AudioRetention.last_glpi_status_id,
+            ).where(AudioRetention.job_uuid == job_uuid)
+        ).one()
+        connection.execute(
+            TicketCreationJobEvent.__table__.insert(),
+            [
+                {
+                    "job_uuid": job_uuid,
+                    "status": "pending",
+                    "stage": None,
+                    "event_type": event_type,
+                    "actor": "worker_retention",
+                }
+                for event_type in retention_event_types
+            ],
+        )
+
+    assert persisted_retention == (job_uuid, 5)
+    assert _current_revision(database_engine) == _single_head()
+    with database_engine.connect() as connection:
+        event_types = connection.scalars(
+            select(TicketCreationJobEvent.event_type)
+            .where(TicketCreationJobEvent.job_uuid == job_uuid)
+            .order_by(TicketCreationJobEvent.event_id)
+        ).all()
+    assert event_types == ["operator_retry_requested", *retention_event_types]
+
+
+def test_retention_status_id_migration_has_a_symmetric_downgrade(
+    database_engine: Engine,
+) -> None:
+    upgrade_to_head(database_engine)
+    job_uuid = uuid4()
+    now = datetime(2026, 8, 28, 12, tzinfo=UTC)
+    with database_engine.begin() as connection:
+        connection.execute(
+            TicketCreationJob.__table__.insert(),
+            {
+                "uuid": job_uuid,
+                "storage_key": f"{job_uuid}.wav",
+                "audio_extension": "wav",
+                "audio_size_bytes": 128,
+            },
+        )
+        connection.execute(
+            AudioRetention.__table__.insert(),
+            {
+                "job_uuid": job_uuid,
+                "policy": "ticket_or_deadline",
+                "status": "scheduled",
+                "hard_delete_at": now + timedelta(days=90),
+                "next_check_at": now + timedelta(hours=6),
+                "last_glpi_status_id": 6,
+            },
+        )
+
+    _downgrade_to_revision(database_engine, "0002_add_operator_retry_event")
+
+    with database_engine.connect() as connection:
+        legacy_retentions = Table(
+            "audio_retentions",
+            MetaData(),
+            autoload_with=connection,
+        )
+        assert "last_glpi_status" in legacy_retentions.c
+        assert "last_glpi_status_id" not in legacy_retentions.c
+        assert (
+            connection.scalar(
+                select(legacy_retentions.c.last_glpi_status).where(
+                    legacy_retentions.c.job_uuid == job_uuid
+                )
+            )
+            == "6"
+        )
+
+    upgrade_to_head(database_engine)
+
+    with database_engine.connect() as connection:
+        assert (
+            connection.scalar(
+                select(AudioRetention.last_glpi_status_id).where(
+                    AudioRetention.job_uuid == job_uuid
+                )
+            )
+            == 6
+        )
 
 
 def test_migrated_schema_matches_shared_metadata(database_engine: Engine) -> None:

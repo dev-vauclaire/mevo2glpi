@@ -431,6 +431,43 @@ def test_retry_event_failure_rolls_back_job_and_retention(
     assert operator_event_count == 0
 
 
+def test_operator_retry_rejects_a_retention_whose_deletion_has_started(
+    ingestion_context: IngestionContext,
+) -> None:
+    audio_uuid = UUID(
+        _upload(ingestion_context, "failed.wav", SYNTHETIC_AUDIO).json()["audio_uuid"]
+    )
+    now = datetime.now(UTC)
+    _make_retryable(ingestion_context, audio_uuid, now=now)
+    deletion_started_at = now - timedelta(minutes=5)
+    retry_at = now + timedelta(minutes=5)
+    with ingestion_context.session_factory.begin() as session:
+        retention = session.get(AudioRetention, audio_uuid)
+        assert retention is not None
+        retention.status = "retry_scheduled"
+        retention.hard_delete_at = now - timedelta(minutes=10)
+        retention.next_check_at = retry_at
+        retention.consecutive_retry_count = 1
+        retention.deletion_reason = "failed_ttl"
+        retention.deletion_started_at = deletion_started_at
+        retention.last_error_category = "storage_unavailable"
+        retention.last_error_code = "filesystem_busy"
+
+    response = ingestion_context.client.post(f"/api/jobs/{audio_uuid}/retry")
+
+    with ingestion_context.session_factory() as session:
+        job = session.get(TicketCreationJob, audio_uuid)
+        retention = session.get(AudioRetention, audio_uuid)
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Job cannot be retried"}
+    assert job is not None
+    assert job.status == "failed"
+    assert retention is not None
+    assert retention.status == "retry_scheduled"
+    assert retention.next_check_at == retry_at
+    assert retention.deletion_started_at == deletion_started_at
+
+
 def test_deleted_retention_returns_410_even_while_bytes_still_exist(
     ingestion_context: IngestionContext,
 ) -> None:
@@ -451,7 +488,7 @@ def test_deleted_retention_returns_410_even_while_bytes_still_exist(
         session.add(
             AudioRetention(
                 job_uuid=audio_uuid,
-                policy="deadline_only",
+                policy="ticket_or_deadline",
                 status="deleted",
                 hard_delete_at=now,
                 deletion_reason="deadline_expired",

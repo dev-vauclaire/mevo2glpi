@@ -172,6 +172,35 @@ def test_get_by_uuid_returns_none_for_an_unknown_job() -> None:
     session.get.assert_called_once_with(TicketCreationJob, job_uuid)
 
 
+def test_lock_by_uuid_returns_snapshot_without_mutating_the_job() -> None:
+    session = create_autospec(Session, instance=True)
+    job_uuid = uuid4()
+    now = datetime(2026, 8, 27, 12, tzinfo=UTC)
+    job = _persisted_job(job_uuid, now)
+    session.get.return_value = job
+
+    snapshot = TicketCreationJobRepository(session).lock_by_uuid(job_uuid)
+
+    assert snapshot == _snapshot_for(job)
+    session.get.assert_called_once_with(
+        TicketCreationJob,
+        job_uuid,
+        with_for_update=True,
+    )
+    session.flush.assert_not_called()
+    session.commit.assert_not_called()
+
+
+def test_lock_by_uuid_rejects_an_unknown_job() -> None:
+    session = create_autospec(Session, instance=True)
+    session.get.return_value = None
+
+    with pytest.raises(database_api.JobNotFoundError, match="does not exist"):
+        TicketCreationJobRepository(session).lock_by_uuid(uuid4())
+
+    session.flush.assert_not_called()
+
+
 def test_list_page_returns_a_stable_cursor_from_the_last_visible_job() -> None:
     session = create_autospec(Session, instance=True)
     oldest_time = datetime(2026, 8, 27, 10, tzinfo=UTC)
@@ -281,6 +310,8 @@ def test_repository_contracts_are_exposed_by_the_package() -> None:
     assert database_api.JobCursor is JobCursor
     assert database_api.JobPage is JobPage
     assert database_api.PendingJob is PendingJob
+    assert database_api.RetentionCandidate.__name__ == "RetentionCandidate"
+    assert database_api.RetentionCandidateKind.__name__ == "RetentionCandidateKind"
 
 
 def _pending_job() -> PendingJob:

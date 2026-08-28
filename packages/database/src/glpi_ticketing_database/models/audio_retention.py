@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    SmallInteger,
     String,
     Uuid,
     func,
@@ -42,7 +43,7 @@ class AudioRetention(Base):
     hard_delete_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_glpi_status: Mapped[str | None] = mapped_column(String(64))
+    last_glpi_status_id: Mapped[int | None] = mapped_column(SmallInteger)
     check_attempt_count: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
@@ -89,6 +90,10 @@ class AudioRetention(Base):
             name="consecutive_retry_count_non_negative",
         ),
         CheckConstraint(
+            "status <> 'retry_scheduled' OR consecutive_retry_count > 0",
+            name="retry_has_attempt",
+        ),
+        CheckConstraint(
             f"deletion_reason IS NULL OR "
             f"deletion_reason IN ({sql_values(DeletionReason)})",
             name="deletion_reason",
@@ -112,6 +117,18 @@ class AudioRetention(Base):
             name="glpi_check_policy",
         ),
         CheckConstraint(
+            "status <> 'checking' OR last_checked_at IS NOT NULL",
+            name="checking_has_timestamp",
+        ),
+        CheckConstraint(
+            "last_glpi_status_id IS NULL OR last_glpi_status_id > 0",
+            name="last_glpi_status_id_positive",
+        ),
+        CheckConstraint(
+            "policy = 'ticket_or_deadline' OR last_glpi_status_id IS NULL",
+            name="last_glpi_status_for_policy",
+        ),
+        CheckConstraint(
             "(deletion_reason IS NULL AND deletion_started_at IS NULL) OR "
             "(deletion_reason IS NOT NULL AND deletion_started_at IS NOT NULL)",
             name="deletion_fields",
@@ -125,9 +142,34 @@ class AudioRetention(Base):
             name="deletion_for_status",
         ),
         CheckConstraint(
+            "deletion_reason IS NULL OR "
+            "(policy = 'ticket_or_deadline' AND "
+            "deletion_reason IN ('ticket_closed', 'deadline_expired')) OR "
+            "(policy = 'deadline_only' AND "
+            "deletion_reason IN ('failed_ttl', 'blocked_ttl'))",
+            name="deletion_reason_for_policy",
+        ),
+        CheckConstraint(
+            "policy <> 'deadline_only' OR "
+            "status NOT IN ('retry_scheduled', 'blocked') OR "
+            "(deletion_reason IS NOT NULL AND deletion_started_at IS NOT NULL)",
+            name="deadline_retry_has_deletion_context",
+        ),
+        CheckConstraint(
             "(status = 'deleted' AND audio_deleted_at IS NOT NULL) OR "
             "(status <> 'deleted' AND audio_deleted_at IS NULL)",
             name="audio_deleted_status",
+        ),
+        CheckConstraint(
+            "audio_deleted_at IS NULL OR "
+            "(deletion_started_at IS NOT NULL AND "
+            "audio_deleted_at >= deletion_started_at)",
+            name="audio_deleted_after_deletion_started",
+        ),
+        CheckConstraint(
+            "deletion_started_at IS NOT NULL OR next_check_at IS NULL OR "
+            "next_check_at <= hard_delete_at",
+            name="next_check_before_deadline",
         ),
         CheckConstraint(
             "(last_error_category IS NULL AND last_error_code IS NULL) OR "

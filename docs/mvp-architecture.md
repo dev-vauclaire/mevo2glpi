@@ -36,6 +36,9 @@ flowchart LR
 - Seul un ticket GLPI au statut contractuel `CLOSED`, avec un `external_id`
   correspondant à l'UUID du job, autorise une suppression anticipée.
   `SOLVED` ne suffit pas.
+- Le dernier statut observé dans GLPI est persisté sous sa forme numérique
+  native dans `audio_retentions.last_glpi_status_id` (`SMALLINT` positif), et
+  non sous un libellé susceptible de varier avec la langue ou la version.
 - Les alertes du MVP sont affichées dans le dashboard. Aucun canal externe
   comme le mail ou Teams n'est inclus dans ce périmètre.
 - Une indisponibilité temporaire ne provoque pas l'arrêt du worker. Celui-ci
@@ -326,7 +329,7 @@ jamais avoir de ticket GLPI.
 | `hard_delete_at` | Échéance absolue, nullable uniquement lorsque la rétention est `inactive` |
 | `next_check_at` | Prochain contrôle GLPI ou prochain retry de rétention éligible |
 | `last_checked_at` | Dernier contrôle tenté, nullable |
-| `last_glpi_status` | Statut GLPI typé observé, nullable |
+| `last_glpi_status_id` | Identifiant numérique positif du statut GLPI observé (`SMALLINT`), nullable |
 | `check_attempt_count` | Nombre total et monotone de contrôles |
 | `consecutive_retry_count` | Indisponibilités temporaires consécutives utilisées pour le backoff |
 | `deletion_reason` | `ticket_closed`, `deadline_expired`, `failed_ttl` ou `blocked_ttl`, nullable |
@@ -337,8 +340,8 @@ jamais avoir de ticket GLPI.
 | `created_at` | Création de la politique |
 | `updated_at` | Dernière transition |
 
-L'identifiant GLPI reste uniquement dans `ticket_creation_jobs` afin d'éviter
-deux valeurs susceptibles de diverger.
+L'identifiant du ticket GLPI (`glpi_ticket_id`) reste uniquement dans
+`ticket_creation_jobs` afin d'éviter deux valeurs susceptibles de diverger.
 
 Index minimaux :
 
@@ -348,11 +351,44 @@ Index minimaux :
 - index unique partiel garantissant une seule rétention `checking` ou
   `deleting` dans le MVP.
 
+Le sous-jalon 5B fournit une sélection déterministe sans verrou, puis des
+transitions qui verrouillent et revalident la ligne ciblée. La priorité de
+sélection est la suivante :
+
+1. reprendre une rétention déjà `deleting` après un arrêt du processus ;
+2. récupérer un contrôle `checking` interrompu et le replanifier ;
+3. démarrer la première suppression lorsque `hard_delete_at` est atteinte et
+   qu'aucun contexte de suppression n'existe encore ;
+4. reprendre une suppression locale en `retry_scheduled` uniquement lorsque
+   son `next_check_at` est atteint ;
+5. démarrer un contrôle GLPI planifié et arrivé à échéance.
+
+La sélection n'autorise pas à agir sur son seul instantané. Dans la transaction
+qui confirme une transition, l'application respecte toujours l'ordre
+`ticket_creation_jobs` puis `audio_retentions` puis
+`ticket_creation_job_events`. Le job et la rétention sont verrouillés par leur
+clé primaire ; l'événement append-only est ensuite inséré avant le commit.
+Cet ordre unique évite que le worker de rétention et les autres applications
+prennent les mêmes lignes dans un ordre inverse. L'orchestration de cette
+transaction appartient au worker du sous-jalon 5C ; 5B expose les repositories
+et les invariants nécessaires sans effectuer d'appel GLPI ni d'accès au
+volume audio.
+
 Une relance opérateur place la rétention existante en `inactive` et remet
 `hard_delete_at` et `next_check_at` à `NULL` dans la même transaction que le
 retour du job à `pending`. Une nouvelle entrée dans `completed`, `failed` ou
 `blocked` réactive ensuite la ligne et recalcule sa deadline. Le worker de
 rétention ne sélectionne jamais une ligne `inactive`.
+
+L'activation refuse de remplacer une rétention déjà active ou terminale. Elle
+crée une ligne absente ou réactive uniquement une ligne `inactive`, ce qui
+empêche une transition répétée d'effacer un contrôle, son backoff ou un
+contexte de purge durable.
+
+Cette relance est refusée dès que `deletion_started_at` existe, y compris si
+la purge est en retry ou bloquée : l'audio peut déjà avoir été renommé vers
+`.purge` ou supprimé. Effacer ce contexte rendrait alors possible un nouveau
+traitement sans octets canoniques et ferait perdre la reprise crash-safe.
 
 ### `ticket_creation_job_events`
 
@@ -366,6 +402,12 @@ error_scope, error_category, technical_code, actor
 `actor` vaut `web`, `worker_automation` ou `worker_retention`. Aucun événement
 ne contient de transcription, de secret, de chemin absolu ou de réponse HTTP
 brute.
+
+Le schéma du sous-jalon 5B autorise les événements
+`retention_retry_scheduled`, `retention_blocked`, `audio_deletion_started` et
+`audio_deleted`. Leur écriture coordonnée avec les transitions de rétention
+sera portée par l'application au sous-jalon 5C ; un repository de modèle ne
+crée jamais implicitement l'événement d'un autre modèle.
 
 ### `worker_runtime_status`
 
@@ -706,11 +748,17 @@ Ces deux champs restent obligatoirement vides pour `inactive`, `scheduled` et
 `checking`. Un `retry_scheduled`, quelle que soit sa politique, possède un
 `next_check_at` afin d'éviter une boucle de retry immédiate.
 
-Une rétention `blocked` reste exclue des contrôles GLPI ordinaires, mais sa
-deadline absolue reste prioritaire. Dès `hard_delete_at`, elle est donc
-sélectionnée par la branche `Expired` et purgée sans dépendre de GLPI.
-Un blocage systémique suspend seulement les appels GLPI : la boucle bloquée
-continue de contrôler les deadlines qui ne nécessitent pas ce service.
+Une rétention `blocked` sans contexte de suppression reste exclue des contrôles
+GLPI ordinaires, mais sa première deadline absolue reste prioritaire. Dès
+`hard_delete_at`, elle est donc sélectionnée par la branche `Expired` et la
+purge peut démarrer sans dépendre de GLPI. En revanche, dès que
+`deletion_started_at` est renseigné, la deadline ne court-circuite plus la
+gestion d'une panne locale : une suppression `retry_scheduled` attend son
+`next_check_at`, même si `hard_delete_at` est dépassée, et une suppression
+`blocked` nécessite une décision opérateur. Cette distinction évite une boucle
+de suppression immédiate qui ignorerait le backoff. Un blocage systémique
+suspend seulement les appels GLPI : la boucle bloquée continue de contrôler
+les premières deadlines qui ne nécessitent pas ce service.
 
 Les jobs `failed` et `blocked` utilisent la politique `deadline_only` : ils ne
 déclenchent aucun polling GLPI avant leur TTL. La sélection ordinaire concerne
@@ -920,11 +968,14 @@ l'authentification applicative est reportée avant toute exposition élargie.
 Périmètre : extraction de `packages/glpi-client`, lecture du statut du ticket,
 application `worker-retention`, deadlines et purge crash-safe.
 
-État : 🟦 sous-jalon 5A implémenté sur la branche. Le client GLPI, ses contrats
-et sa stack Testcontainers appartiennent désormais au package partagé. La
-lecture directe par identifiant est épinglée sur l'API V2.3.0 et retourne le
-statut numérique GLPI 11.0.8. Le worker de rétention, ses transitions et la
-purge restent à implémenter dans les sous-jalons suivants.
+État : 🟦 sous-jalons 5A et 5B implémentés sur la branche. Le client GLPI, ses
+contrats et sa stack Testcontainers appartiennent désormais au package
+partagé. La lecture directe par identifiant est épinglée sur l'API V2.3.0 et
+retourne le statut numérique GLPI 11.0.8. Le sous-jalon 5B ajoute la migration,
+les contraintes, la sélection priorisée et les transitions atomiques de
+`audio_retentions`, ainsi que les valeurs d'événement associées. Il n'appelle
+pas GLPI et ne touche pas aux fichiers. L'application `worker-retention`,
+l'orchestration multi-modèles et la purge crash-safe restent au sous-jalon 5C.
 
 - Tests unitaires : statuts GLPI, correspondance `external_id`, planification,
   priorité de deadline, quarantaine `.purge` et reprise de chaque point de

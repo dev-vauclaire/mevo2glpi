@@ -41,12 +41,20 @@ ne dépend donc pas du répertoire courant du processus.
 
 - `0001_initial_schema` crée les quatre tables du cycle de vie MVP ;
 - `0002_add_operator_retry_event` étend la contrainte des événements avec
-  `operator_retry_requested`, sans réécrire la migration initiale.
+  `operator_retry_requested`, sans réécrire la migration initiale ;
+- `0003_add_retention_lifecycle` remplace le libellé GLPI par son identifiant
+  numérique, ajoute les invariants du cycle de purge et autorise les quatre
+  événements du worker de rétention.
 
-La montée `0001 -> 0002` est testée avec des données préexistantes. Le
-downgrade de `0002` conserve volontairement la sécurité native de PostgreSQL :
-il échoue si des événements `operator_retry_requested` existent encore, au
-lieu de supprimer silencieusement l'historique d'audit.
+Les montées depuis `0001` et `0002` sont testées avec des données
+préexistantes. `0003` convertit explicitement les valeurs numériques de
+`last_glpi_status` vers un `SMALLINT` positif et son downgrade restaure leur
+représentation texte. Une ancienne valeur non vide et non numérique fait
+échouer la migration au lieu d'être perdue silencieusement.
+
+Les downgrades des migrations d'événements conservent volontairement la
+sécurité native de PostgreSQL : ils échouent si des événements plus récents
+existent encore, au lieu de supprimer silencieusement l'historique d'audit.
 
 ## Tests
 

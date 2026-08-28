@@ -1,7 +1,7 @@
 from enum import StrEnum
 
 import pytest
-from sqlalchemy import CheckConstraint, DateTime, String, Uuid
+from sqlalchemy import CheckConstraint, DateTime, SmallInteger, String, Uuid
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex, CreateTable
 
@@ -86,6 +86,10 @@ from glpi_ticketing_database.models import (
                 "job_failed",
                 "job_blocked",
                 "operator_retry_requested",
+                "retention_retry_scheduled",
+                "retention_blocked",
+                "audio_deletion_started",
+                "audio_deleted",
             },
         ),
         (WorkerServiceName, {"worker_automation", "worker_retention"}),
@@ -201,6 +205,14 @@ def test_uuid_columns_use_native_uuid_mapping(
     assert column_type.native_uuid is True
 
 
+def test_glpi_status_uses_a_nullable_small_integer_identifier() -> None:
+    retentions = Base.metadata.tables["audio_retentions"]
+
+    assert "last_glpi_status" not in retentions.c
+    assert isinstance(retentions.c.last_glpi_status_id.type, SmallInteger)
+    assert retentions.c.last_glpi_status_id.nullable is True
+
+
 def test_database_schema_cannot_store_audio_or_transcription_content() -> None:
     column_names = {
         column.name
@@ -245,9 +257,17 @@ def test_retention_invariants_have_database_checks() -> None:
         "ck_audio_retentions_active_hard_delete_at",
         "ck_audio_retentions_next_check_for_policy",
         "ck_audio_retentions_glpi_check_policy",
+        "ck_audio_retentions_checking_has_timestamp",
+        "ck_audio_retentions_last_glpi_status_id_positive",
+        "ck_audio_retentions_last_glpi_status_for_policy",
         "ck_audio_retentions_deletion_fields",
         "ck_audio_retentions_deletion_for_status",
+        "ck_audio_retentions_deletion_reason_for_policy",
+        "ck_audio_retentions_deadline_retry_has_deletion_context",
         "ck_audio_retentions_audio_deleted_status",
+        "ck_audio_retentions_audio_deleted_after_deletion_started",
+        "ck_audio_retentions_next_check_before_deadline",
+        "ck_audio_retentions_retry_has_attempt",
         "ck_audio_retentions_error_fields",
         "ck_audio_retentions_error_for_status",
     }

@@ -130,6 +130,18 @@ class TicketCreationJobRepository:
         job = self._session.get(TicketCreationJob, job_uuid)
         return _to_snapshot(job) if job is not None else None
 
+    def lock_by_uuid(self, job_uuid: UUID) -> JobSnapshot:
+        """Lock one job for a caller-owned transaction without mutating it."""
+        validate_uuid(job_uuid, "job_uuid")
+        job = self._session.get(
+            TicketCreationJob,
+            job_uuid,
+            with_for_update=True,
+        )
+        if job is None:
+            raise JobNotFoundError(f"job {job_uuid} does not exist")
+        return _to_snapshot(job)
+
     def list_page(
         self,
         *,

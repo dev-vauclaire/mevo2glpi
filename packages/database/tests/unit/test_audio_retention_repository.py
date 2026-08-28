@@ -43,19 +43,17 @@ def test_activate_creates_only_an_audio_retention() -> None:
     session.flush.assert_called_once_with()
 
 
-def test_activate_resets_only_an_existing_audio_retention() -> None:
+def test_activate_reactivates_only_an_inactive_audio_retention() -> None:
     session = create_autospec(Session, instance=True)
     job_uuid = uuid4()
     retention = AudioRetention(
         job_uuid=job_uuid,
         policy=RetentionPolicy.TICKET_OR_DEADLINE.value,
-        status=RetentionStatus.BLOCKED.value,
-        hard_delete_at=NOW + timedelta(days=1),
+        status=RetentionStatus.INACTIVE.value,
+        hard_delete_at=None,
         next_check_at=None,
         check_attempt_count=3,
-        consecutive_retry_count=2,
-        last_error_category="unavailable",
-        last_error_code="http_503",
+        consecutive_retry_count=0,
         created_at=NOW - timedelta(days=1),
         updated_at=NOW - timedelta(hours=1),
     )
@@ -73,11 +71,53 @@ def test_activate_resets_only_an_existing_audio_retention() -> None:
     assert retention.status == RetentionStatus.SCHEDULED.value
     assert retention.hard_delete_at == NOW + timedelta(days=30)
     assert retention.next_check_at is None
+    assert retention.check_attempt_count == 3
     assert retention.consecutive_retry_count == 0
     assert retention.last_error_category is None
     assert retention.last_error_code is None
     session.add.assert_not_called()
     session.flush.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        RetentionStatus.SCHEDULED,
+        RetentionStatus.CHECKING,
+        RetentionStatus.RETRY_SCHEDULED,
+        RetentionStatus.DELETING,
+        RetentionStatus.DELETED,
+        RetentionStatus.BLOCKED,
+    ],
+)
+def test_activate_never_overwrites_an_active_or_terminal_retention(
+    status: RetentionStatus,
+) -> None:
+    session = create_autospec(Session, instance=True)
+    retention = _retention(uuid4(), status=status)
+    retention.deletion_started_at = (
+        NOW - timedelta(minutes=5)
+        if status
+        in {
+            RetentionStatus.RETRY_SCHEDULED,
+            RetentionStatus.DELETING,
+            RetentionStatus.DELETED,
+            RetentionStatus.BLOCKED,
+        }
+        else None
+    )
+    session.get.return_value = retention
+    with pytest.raises(InvalidRetentionTransitionError, match="activate"):
+        AudioRetentionRepository(session).activate(
+            retention.job_uuid,
+            policy=RetentionPolicy.DEADLINE_ONLY,
+            hard_delete_at=NOW + timedelta(days=30),
+            next_check_at=None,
+            now=NOW,
+        )
+
+    assert retention.status == status.value
+    session.flush.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -122,7 +162,7 @@ def test_get_by_job_uuid_returns_a_typed_snapshot() -> None:
         hard_delete_at=NOW + timedelta(days=90),
         next_check_at=NOW + timedelta(hours=6),
         last_checked_at=NOW - timedelta(hours=1),
-        last_glpi_status="processing",
+        last_glpi_status_id=2,
         check_attempt_count=4,
         consecutive_retry_count=2,
         deletion_reason=None,
@@ -156,7 +196,7 @@ def test_deactivate_for_operator_retry_clears_transient_retention_state() -> Non
     assert snapshot.hard_delete_at is None
     assert snapshot.next_check_at is None
     assert snapshot.last_checked_at is None
-    assert snapshot.last_glpi_status is None
+    assert snapshot.last_glpi_status_id is None
     assert snapshot.check_attempt_count == 4
     assert snapshot.consecutive_retry_count == 0
     assert snapshot.deletion_reason is None
@@ -213,6 +253,35 @@ def test_deactivate_for_operator_retry_rejects_an_unsafe_status(
     session.flush.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "status",
+    [RetentionStatus.RETRY_SCHEDULED, RetentionStatus.BLOCKED],
+)
+def test_deactivate_for_operator_retry_rejects_started_deletion(
+    status: RetentionStatus,
+) -> None:
+    session = create_autospec(Session, instance=True)
+    retention = _retention(uuid4(), status=status)
+    retention.next_check_at = (
+        NOW + timedelta(hours=1) if status is RetentionStatus.RETRY_SCHEDULED else None
+    )
+    retention.deletion_reason = "deadline_expired"
+    retention.deletion_started_at = NOW - timedelta(minutes=5)
+    retention.last_error_category = "storage_unavailable"
+    retention.last_error_code = "filesystem_busy"
+    session.get.return_value = retention
+
+    with pytest.raises(InvalidRetentionTransitionError, match="started deletion"):
+        AudioRetentionRepository(session).deactivate_for_operator_retry(
+            retention.job_uuid,
+            now=NOW,
+        )
+
+    assert retention.status == status.value
+    assert retention.deletion_started_at == NOW - timedelta(minutes=5)
+    session.flush.assert_not_called()
+
+
 def test_retention_repository_never_owns_transaction_or_session() -> None:
     session = create_autospec(Session, instance=True)
     session.get.return_value = None
@@ -238,7 +307,7 @@ def _retention(job_uuid: UUID, *, status: RetentionStatus) -> AudioRetention:
         hard_delete_at=NOW + timedelta(days=90),
         next_check_at=NOW + timedelta(hours=6),
         last_checked_at=NOW - timedelta(hours=1),
-        last_glpi_status="processing",
+        last_glpi_status_id=2,
         check_attempt_count=4,
         consecutive_retry_count=2,
         deletion_reason=None,

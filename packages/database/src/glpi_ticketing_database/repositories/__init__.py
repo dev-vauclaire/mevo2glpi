@@ -4,6 +4,8 @@ from .audio_retention import (
     AudioRetentionRepository,
     AudioRetentionSnapshot,
     InvalidRetentionTransitionError,
+    RetentionCandidate,
+    RetentionCandidateKind,
     RetentionNotFoundError,
 )
 from .ticket_creation_job import (
@@ -44,6 +46,8 @@ __all__ = [
     "JobPage",
     "JobSnapshot",
     "PendingJob",
+    "RetentionCandidate",
+    "RetentionCandidateKind",
     "RetentionNotFoundError",
     "StaleWorkerInstanceError",
     "TicketCreationJobEventRepository",

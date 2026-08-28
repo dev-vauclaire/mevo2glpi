@@ -426,7 +426,7 @@ def _retention() -> AudioRetentionSnapshot:
         hard_delete_at=NOW + timedelta(days=7),
         next_check_at=None,
         last_checked_at=None,
-        last_glpi_status=None,
+        last_glpi_status_id=None,
         check_attempt_count=0,
         consecutive_retry_count=0,
         deletion_reason=None,

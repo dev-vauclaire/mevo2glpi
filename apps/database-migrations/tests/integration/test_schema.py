@@ -67,14 +67,24 @@ def _retention_values(
     checks_glpi = status in {"scheduled", "checking", "retry_scheduled"}
     has_error = status in {"retry_scheduled", "blocked"}
     is_deleting = status in {"deleting", "deleted"}
+    deletion_reason = None
+    deletion_started_at = None
+    if is_deleting:
+        deletion_reason = "failed_ttl"
+        deletion_started_at = NOW
+    elif status == "blocked":
+        deletion_reason = "blocked_ttl"
+        deletion_started_at = NOW
     values: dict[str, object] = {
         "job_uuid": job_uuid,
         "policy": "ticket_or_deadline" if checks_glpi else "deadline_only",
         "status": status,
         "hard_delete_at": None if status == "inactive" else LATER,
         "next_check_at": NOW if status in {"scheduled", "retry_scheduled"} else None,
-        "deletion_reason": "deadline_expired" if is_deleting else None,
-        "deletion_started_at": NOW if is_deleting else None,
+        "last_checked_at": NOW if status == "checking" else None,
+        "consecutive_retry_count": 1 if status == "retry_scheduled" else 0,
+        "deletion_reason": deletion_reason,
+        "deletion_started_at": deletion_started_at,
         "audio_deleted_at": NOW if status == "deleted" else None,
         "last_error_category": "glpi" if has_error else None,
         "last_error_code": "synthetic_error" if has_error else None,
@@ -460,8 +470,6 @@ def test_retention_error_and_deletion_resume_constraints(
         _retention_values(
             parent_uuids[2],
             status="blocked",
-            deletion_reason="deadline_expired",
-            deletion_started_at=NOW,
         ),
     )
     _insert_rows(migrated_engine, RETENTIONS, *resumable_rows)
@@ -494,17 +502,19 @@ def test_retention_error_and_deletion_resume_constraints(
         )
 
 
-def test_deadline_only_retention_retry_is_due_only_with_a_schedule(
+def test_deadline_only_retention_retry_requires_a_deletion_context_and_schedule(
     migrated_engine: Engine,
 ) -> None:
     retry_job_uuid = uuid4()
     missing_schedule_job_uuid = uuid4()
+    missing_context_job_uuid = uuid4()
     invalid_check_job_uuid = uuid4()
     _insert_rows(
         migrated_engine,
         JOBS,
         _job_values(job_uuid=retry_job_uuid),
         _job_values(job_uuid=missing_schedule_job_uuid),
+        _job_values(job_uuid=missing_context_job_uuid),
         _job_values(job_uuid=invalid_check_job_uuid),
     )
 
@@ -516,6 +526,8 @@ def test_deadline_only_retention_retry_is_due_only_with_a_schedule(
             status="retry_scheduled",
             policy="deadline_only",
             next_check_at=NOW,
+            deletion_reason="failed_ttl",
+            deletion_started_at=NOW,
         ),
     )
     with migrated_engine.connect() as connection:
@@ -537,8 +549,23 @@ def test_deadline_only_retention_retry_is_due_only_with_a_schedule(
             status="retry_scheduled",
             policy="deadline_only",
             next_check_at=None,
+            deletion_reason="failed_ttl",
+            deletion_started_at=NOW,
         ),
         "ck_audio_retentions_next_check_for_policy",
+    )
+    _assert_insert_rejected(
+        migrated_engine,
+        RETENTIONS,
+        _retention_values(
+            missing_context_job_uuid,
+            status="retry_scheduled",
+            policy="deadline_only",
+            next_check_at=NOW,
+            deletion_reason=None,
+            deletion_started_at=None,
+        ),
+        "ck_audio_retentions_deadline_retry_has_deletion_context",
     )
     _assert_insert_rejected(
         migrated_engine,
@@ -549,6 +576,138 @@ def test_deadline_only_retention_retry_is_due_only_with_a_schedule(
             policy="deadline_only",
         ),
         "ck_audio_retentions_glpi_check_policy",
+    )
+
+
+def test_retention_glpi_status_and_active_attempt_invariants(
+    migrated_engine: Engine,
+) -> None:
+    parent_uuids = [uuid4() for _index in range(4)]
+    _insert_rows(
+        migrated_engine,
+        JOBS,
+        *(_job_values(job_uuid=job_uuid) for job_uuid in parent_uuids),
+    )
+
+    invalid_retentions = (
+        (
+            _retention_values(
+                parent_uuids[0],
+                status="scheduled",
+                last_glpi_status_id=0,
+            ),
+            "ck_audio_retentions_last_glpi_status_id_positive",
+        ),
+        (
+            _retention_values(
+                parent_uuids[1],
+                status="scheduled",
+                policy="deadline_only",
+                next_check_at=None,
+                last_glpi_status_id=5,
+            ),
+            "ck_audio_retentions_last_glpi_status_for_policy",
+        ),
+        (
+            _retention_values(
+                parent_uuids[2],
+                status="checking",
+                last_checked_at=None,
+            ),
+            "ck_audio_retentions_checking_has_timestamp",
+        ),
+        (
+            _retention_values(
+                parent_uuids[3],
+                status="retry_scheduled",
+                consecutive_retry_count=0,
+            ),
+            "ck_audio_retentions_retry_has_attempt",
+        ),
+    )
+
+    for values, constraint_name in invalid_retentions:
+        _assert_insert_rejected(
+            migrated_engine,
+            RETENTIONS,
+            values,
+            constraint_name,
+        )
+
+
+def test_retention_deletion_policy_and_timestamps_are_coherent(
+    migrated_engine: Engine,
+) -> None:
+    parent_uuids = [uuid4() for _index in range(4)]
+    _insert_rows(
+        migrated_engine,
+        JOBS,
+        *(_job_values(job_uuid=job_uuid) for job_uuid in parent_uuids),
+    )
+
+    invalid_retentions = (
+        (
+            _retention_values(
+                parent_uuids[0],
+                status="deleting",
+                policy="ticket_or_deadline",
+                deletion_reason="failed_ttl",
+            ),
+            "ck_audio_retentions_deletion_reason_for_policy",
+        ),
+        (
+            _retention_values(
+                parent_uuids[1],
+                status="deleting",
+                audio_deleted_at=NOW + timedelta(seconds=1),
+            ),
+            "ck_audio_retentions_audio_deleted_status",
+        ),
+        (
+            _retention_values(
+                parent_uuids[2],
+                status="deleted",
+                audio_deleted_at=NOW - timedelta(seconds=1),
+            ),
+            "ck_audio_retentions_audio_deleted_after_deletion_started",
+        ),
+        (
+            _retention_values(
+                parent_uuids[3],
+                status="scheduled",
+                next_check_at=LATER + timedelta(seconds=1),
+            ),
+            "ck_audio_retentions_next_check_before_deadline",
+        ),
+    )
+
+    for values, constraint_name in invalid_retentions:
+        _assert_insert_rejected(
+            migrated_engine,
+            RETENTIONS,
+            values,
+            constraint_name,
+        )
+
+
+def test_deletion_retry_may_be_scheduled_after_the_hard_deadline(
+    migrated_engine: Engine,
+) -> None:
+    parent_uuid = uuid4()
+    _insert_rows(migrated_engine, JOBS, _job_values(job_uuid=parent_uuid))
+
+    _insert_rows(
+        migrated_engine,
+        RETENTIONS,
+        _retention_values(
+            parent_uuid,
+            status="retry_scheduled",
+            policy="deadline_only",
+            hard_delete_at=NOW,
+            next_check_at=LATER,
+            deletion_reason="failed_ttl",
+            deletion_started_at=NOW,
+        ),
     )
 
 
