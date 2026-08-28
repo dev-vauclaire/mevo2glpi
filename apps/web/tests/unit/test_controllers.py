@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -71,8 +72,16 @@ async def test_managed_stream_closes_audio_when_asgi_send_fails(
         size_bytes=len(audio_stream.getvalue()),
         _stream=audio_stream,
     )
+
+    async def stream_audio() -> AsyncIterator[bytes]:
+        # Keep this response-lifecycle test independent from AnyIO's sync
+        # iterator threadpool. The real synchronous download path is exercised
+        # by the web and database integration tests.
+        for chunk in downloadable.iter_bytes():
+            yield chunk
+
     response = ManagedStreamingResponse(
-        downloadable.iter_bytes(),
+        stream_audio(),
         close_callback=downloadable.close,
     )
     sent_messages = 0
