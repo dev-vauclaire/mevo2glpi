@@ -16,10 +16,8 @@ SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 
 def test_composed_uvicorn_server_is_reachable_on_loopback(tmp_path: Path) -> None:
-    pending_directory = tmp_path / "pending"
-    completed_directory = tmp_path / "completed"
-    pending_directory.mkdir()
-    completed_directory.mkdir()
+    audio_root = tmp_path / "audios"
+    audio_root.mkdir()
 
     listening_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listening_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -28,8 +26,8 @@ def test_composed_uvicorn_server_is_reachable_on_loopback(tmp_path: Path) -> Non
     random_port = listening_socket.getsockname()[1]
 
     settings = WebSettings(
-        audio_pending_dir=pending_directory,
-        audio_completed_dir=completed_directory,
+        audio_root=audio_root,
+        database_url=("postgresql+psycopg://web:synthetic@127.0.0.1:5432/jobs"),
         web_host="127.0.0.1",
         web_port=random_port,
         _env_file=None,

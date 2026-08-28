@@ -2,16 +2,17 @@
 
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 
 class WebSettings(BaseSettings):
-    """Configuration limited to the paths and policy required by the web app."""
+    """Configuration required by the persistent web application."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -19,12 +20,13 @@ class WebSettings(BaseSettings):
         env_prefix="",
         case_sensitive=False,
         env_ignore_empty=True,
+        hide_input_in_errors=True,
         extra="ignore",
         frozen=True,
     )
 
-    audio_pending_dir: Path = Path("/data/audio-pending")
-    audio_completed_dir: Path = Path("/data/audio-completed")
+    audio_root: Path = Path("/data/audios")
+    database_url: SecretStr
     web_host: str = Field(default="127.0.0.1", min_length=1)
     web_port: int = Field(default=8000, ge=1, le=65535)
     web_trust_proxy_headers: bool = False
@@ -47,13 +49,15 @@ class WebSettings(BaseSettings):
         except ValueError:
             raise ValueError("WEB_HOST must be an IPv4 or IPv6 address") from None
 
-    @model_validator(mode="after")
-    def validate_audio_directories_are_distinct(self) -> Self:
-        """Prevent the upload process from writing into completed storage."""
-        pending_directory = self.audio_pending_dir.expanduser().resolve(strict=False)
-        completed_directory = self.audio_completed_dir.expanduser().resolve(
-            strict=False,
-        )
-        if pending_directory == completed_directory:
-            raise ValueError("Web audio directories must be distinct")
-        return self
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, database_url: SecretStr) -> SecretStr:
+        """Require the synchronous PostgreSQL driver without exposing the URL."""
+        raw_url = database_url.get_secret_value()
+        try:
+            parsed_url = make_url(raw_url)
+        except ArgumentError:
+            raise ValueError("DATABASE_URL must be a valid SQLAlchemy URL") from None
+        if parsed_url.drivername != "postgresql+psycopg":
+            raise ValueError("DATABASE_URL must use the postgresql+psycopg driver")
+        return database_url

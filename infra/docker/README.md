@@ -1,5 +1,13 @@
 # Déploiement Docker du POC sur un serveur de test
 
+> [!IMPORTANT]
+> Cette procédure décrit exactement le déploiement figé par le tag
+> `poc-v0.1.0`. Sur la branche `mvp/job-lifecycle`, l'application web utilise
+> déjà PostgreSQL et le volume canonique `/data/audios`, tandis que le manifeste
+> Compose conserve encore les quatre répertoires du POC. La branche MVP ne doit
+> donc pas être déployée avec ce manifeste avant l'itération dédiée au packaging
+> PostgreSQL, aux migrations et aux deux workers.
+
 Ce répertoire transforme le workspace en trois images et une stack Docker
 Compose destinée à **un seul serveur de démonstration** : Nginx, l'application
 web et le worker. GLPI et Transcribe AI restent des services externes. Les stacks sous

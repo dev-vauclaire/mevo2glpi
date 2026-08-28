@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Déposer un audio</title>
+    <link rel="stylesheet" href="{{ request.url_for('static', path='/css/app.css') }}">
+    <script defer src="{{ request.url_for('static', path='/js/upload.js') }}"></script>
   </head>
   <body>
     <main>
@@ -19,11 +21,13 @@
           name="audio_file"
           type="file"
           accept=".wav,.mp3,.ogg,.m4a"
+          data-audio-input
           required
         >
+        <p class="hint" data-selected-file aria-live="polite"></p>
         <button type="submit">Envoyer</button>
       </form>
-      <p>Taille maximale : {{ max_upload_bytes }} octets.</p>
+      <p class="hint">Taille maximale : {{ max_upload_bytes }} octets.</p>
     </main>
   </body>
 </html>

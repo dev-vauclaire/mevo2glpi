@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -15,9 +15,7 @@ from glpi_ticketing_database import (
     TicketCreationJob,
     TicketCreationJobEvent,
     WorkerRuntimeStatus,
-    create_database_engine,
 )
-from glpi_ticketing_database_migrations.application import upgrade_to_head
 
 pytestmark = pytest.mark.database
 
@@ -27,18 +25,6 @@ JOBS = TicketCreationJob.__table__
 RETENTIONS = AudioRetention.__table__
 EVENTS = TicketCreationJobEvent.__table__
 WORKER_STATUS = WorkerRuntimeStatus.__table__
-
-
-@pytest.fixture
-def migrated_engine(database_url: str) -> Iterator[Engine]:
-    """Yield a migrated PostgreSQL engine and release its pool at teardown."""
-
-    engine = create_database_engine(database_url, connect_timeout_seconds=5)
-    try:
-        upgrade_to_head(engine)
-        yield engine
-    finally:
-        engine.dispose()
 
 
 def _job_values(

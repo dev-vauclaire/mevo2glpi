@@ -325,6 +325,7 @@ source = { editable = "apps/web" }
 dependencies = [
     { name = "fastapi" },
     { name = "glpi-ticketing-common" },
+    { name = "glpi-ticketing-database" },
     { name = "jinja2" },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
@@ -335,6 +336,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.116,<1" },
     { name = "glpi-ticketing-common", editable = "packages/common" },
+    { name = "glpi-ticketing-database", editable = "packages/database" },
     { name = "jinja2", specifier = ">=3.1,<4" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "python-multipart", specifier = ">=0.0.20,<1" },

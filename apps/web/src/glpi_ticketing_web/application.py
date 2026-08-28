@@ -11,6 +11,13 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import ValidationError
 
+from glpi_ticketing_database import (
+    DatabaseConfigurationError,
+    create_database_engine,
+    create_session_factory,
+)
+
+from .services import GetAudioJob, GetDownloadableAudio, SubmitAudioJob
 from .settings import WebSettings
 from .web import create_app
 
@@ -43,19 +50,41 @@ class _ServerFactory(Protocol):
 
 
 def build_application(settings: WebSettings) -> FastAPI:
-    """Compose FastAPI from validated settings and existing storage paths."""
+    """Compose FastAPI, canonical storage and lazy PostgreSQL connections."""
     if not isinstance(settings, WebSettings):
         raise TypeError("settings must be WebSettings")
 
+    engine = None
     try:
-        return create_app(
-            pending_directory=settings.audio_pending_dir,
-            completed_directory=settings.audio_completed_dir,
-            max_upload_bytes=settings.max_upload_bytes,
+        audio_root = settings.audio_root.expanduser().resolve(strict=True)
+        if not audio_root.is_dir():
+            raise NotADirectoryError(audio_root)
+        engine = create_database_engine(
+            settings.database_url.get_secret_value(),
+            connect_timeout_seconds=5,
         )
-    except (OSError, RuntimeError, ValueError):
+        session_factory = create_session_factory(engine)
+        get_audio_job = GetAudioJob(session_factory)
+        return create_app(
+            audio_root=audio_root,
+            submit_audio_job=SubmitAudioJob(
+                audio_root=audio_root,
+                session_factory=session_factory,
+                max_upload_bytes=settings.max_upload_bytes,
+            ),
+            get_audio_job=get_audio_job,
+            get_downloadable_audio=GetDownloadableAudio(
+                audio_root,
+                get_audio_job,
+            ),
+            max_upload_bytes=settings.max_upload_bytes,
+            shutdown_callback=engine.dispose,
+        )
+    except (DatabaseConfigurationError, OSError, RuntimeError, ValueError):
+        if engine is not None:
+            engine.dispose()
         raise WebConfigurationError(
-            "web audio directories are invalid or inaccessible"
+            "web database or audio storage configuration is invalid"
         ) from None
 
 

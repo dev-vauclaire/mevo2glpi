@@ -16,6 +16,10 @@ L'API actuelle est concentrée dans `glpi_ticketing_common.audio_files`.
 | --- | --- | --- | --- |
 | `parse_audio_filename()` | Un nom de fichier sans chemin | `AudioFileName` | Valider et normaliser l'UUID et l'extension |
 | `atomic_write()` | Une destination et un flux binaire | Le chemin publié | Écrire sans exposer un fichier partiel |
+| `build_audio_storage_key()` | UUID et extension d'upload | Clé canonique | Normaliser uniquement à la frontière d'upload |
+| `parse_audio_storage_key()` | Clé persistée | `AudioStorageKey` | Exiger un UUID et une extension déjà canoniques |
+| `publish_audio()` | Racine, clé et flux | `PublishedAudio` | Publier sans écrasement et compter les octets |
+| `delete_audio()` | Racine et clé | booléen | Supprimer un chemin exact puis synchroniser le volume |
 | `move_audio()` | Un fichier source et un répertoire cible | Le chemin cible | Copier entre volumes puis supprimer la source |
 | `move_to_failed()` | Un audio, `failed` et un objet JSON | `FailedTransition` | Publier l'audio et son sidecar avant de supprimer la source |
 | `list_ready_audio_files()` | Un répertoire existant | Une liste triée de chemins | Retourner uniquement les audios complets et valides |
@@ -34,10 +38,10 @@ Exemple :
 123e4567-e89b-42d3-a456-426614174000.m4a
 ```
 
-La casse de l'UUID et de l'extension est acceptée en entrée, puis normalisée en
-minuscules pour les destinations. Les chemins symboliques, répertoires, noms
-non conformes et extensions non supportées ne sont jamais considérés comme des
-audios prêts.
+La casse de l'extension est acceptée uniquement lors de la construction depuis
+un upload. Une clé relue depuis PostgreSQL doit déjà être canonique : toute
+normalisation silencieuse, traversée, sous-répertoire ou destination symbolique
+est refusée.
 
 ## Publication d'un fichier
 
@@ -45,15 +49,16 @@ audios prêts.
 flowchart LR
     A[Flux binaire] --> B[Écriture par blocs dans un fichier .part unique]
     B --> C[flush et fsync du fichier]
-    C --> D[os.replace vers le nom final]
+    C --> D[Lien atomique create-only vers le nom final]
     D --> E[fsync du répertoire cible]
     E --> F[Fichier visible par les scanners]
 ```
 
-`atomic_write()` écrit par blocs de 64 Kio par défaut. Le fichier temporaire
-reste dans le même répertoire que sa destination afin que `os.replace()` publie
-le nom final atomiquement. Un scanner peut donc ignorer les fichiers `.part` et
-ne jamais lire un contenu incomplet.
+Les primitives écrivent par blocs de 64 Kio par défaut. Le fichier temporaire
+reste dans le même répertoire que sa destination. Un lien dur publie ensuite le
+nom final de façon atomique et échoue si ce nom existe déjà ; une course ne peut
+donc jamais écraser un audio. Un scanner historique peut toujours ignorer les
+fichiers `.part` et ne jamais lire un contenu incomplet.
 
 La primitive refuse d'écraser une destination existante. En cas d'échec, elle
 supprime ses artefacts temporaires et ne publie pas de résultat partiel.
@@ -88,7 +93,8 @@ packages/common/
 │   ├── __init__.py
 │   └── audio_files.py
 └── tests/unit/
-    └── test_audio_files.py
+    ├── test_audio_files.py
+    └── test_audio_storage.py
 ```
 
 Conventions du package :

@@ -4,10 +4,10 @@
 le worker d'automatisation, le worker de rétention et l'application de
 migration du MVP.
 
-Le package ne contient ni point d'entrée, ni historique Alembic, ni repository
-métier. L'application one-shot `apps/database-migrations` est seule responsable
-de l'exécution des migrations. Les repositories et les verrous advisory seront
-introduits dans les itérations où ils auront des consommateurs réels.
+Le package ne contient ni point d'entrée ni historique Alembic. L'application
+one-shot `apps/database-migrations` est seule responsable de l'exécution des
+migrations. Le repository de jobs est partagé avec ses consommateurs ; les
+verrous advisory seront introduits avec les workers persistants.
 
 ## Responsabilités
 
@@ -15,6 +15,10 @@ introduits dans les itérations où ils auront des consommateurs réels.
 - exposer `Base.metadata` à Alembic ;
 - fournir un moteur SQLAlchemy synchrone limité à PostgreSQL avec Psycopg 3 ;
 - fournir une fabrique de sessions synchrones ;
+- créer un job `pending` et son événement initial dans une session appartenant
+  à l'appelant ;
+- retourner des snapshots immuables et typés plutôt que des objets ORM liés à
+  une session ;
 - centraliser les valeurs persistées et les contraintes structurelles.
 
 PostgreSQL contient uniquement le cycle de vie et des informations
@@ -53,6 +57,7 @@ des transactions courtes avec la fabrique exposée :
 
 ```python
 from glpi_ticketing_database import (
+    JobRepository,
     create_database_engine,
     create_session_factory,
 )
@@ -61,8 +66,8 @@ engine = create_database_engine(database_url)
 session_factory = create_session_factory(engine)
 
 with session_factory.begin() as session:
-    # Appeler ici un repository recevant la session.
-    ...
+    repository = JobRepository(session)
+    repository.add_pending(pending_job)
 ```
 
 Aucune transaction ne doit rester ouverte pendant un appel GLPI, Transcribe AI
@@ -91,6 +96,7 @@ packages/database/
 ├── src/glpi_ticketing_database/
 │   ├── __init__.py
 │   ├── engine.py
+│   ├── repositories.py
 │   └── models/
 │       ├── __init__.py
 │       ├── base.py
@@ -101,7 +107,8 @@ packages/database/
 │       └── worker_runtime_status.py
 └── tests/unit/
     ├── test_engine.py
-    └── test_models.py
+    ├── test_models.py
+    └── test_repositories.py
 ```
 
 ## Validation depuis la racine
@@ -113,4 +120,5 @@ uv run ruff check packages/database
 ```
 
 Les contraintes réellement dépendantes de PostgreSQL sont couvertes par la
-suite d'intégration de `apps/database-migrations`.
+fixture commune `tests/integration/postgres` et par les suites d'intégration de
+l'application de migration et du web.

@@ -29,6 +29,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY apps/web/src apps/web/src
 COPY packages/common/src packages/common/src
+COPY packages/database/src packages/database/src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
@@ -48,8 +49,7 @@ RUN groupadd --gid 10001 gta \
     && useradd --uid 10001 --gid 10001 \
       --no-create-home --no-log-init --home-dir /nonexistent \
       --shell /usr/sbin/nologin gta \
-    && install -d -m 0750 -o 10001 -g 10001 \
-      /data/audio-pending /data/audio-completed
+    && install -d -m 0750 -o 10001 -g 10001 /data/audios
 
 ENV HOME=/nonexistent \
     PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \

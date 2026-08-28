@@ -83,16 +83,19 @@ pour le MVP.
 │   ├── web/                                           🟦 à enrichir
 │   │   ├── src/glpi_ticketing_web/
 │   │   │   ├── __main__.py                            🟦
-│   │   │   ├── application.py                         ⬜ composition DB
-│   │   │   ├── settings.py                            ⬜ DB + stockage unique
-│   │   │   ├── web.py                                 ⬜ assemblage des routes
-│   │   │   ├── jobs.py                                ⬜ cas d'usage + retry opérateur
-│   │   │   ├── schemas.py                             ⬜ DTO API
+│   │   │   ├── application.py                         🟦 composition DB
+│   │   │   ├── settings.py                            🟦 DB + stockage unique
+│   │   │   ├── web.py                                 🟦 assemblage FastAPI
+│   │   │   ├── routes/                                🟦 routes fines
+│   │   │   ├── controllers/                           🟦 traduction HTTP
+│   │   │   ├── services/                              🟦 use cases ; ⬜ listing + retry
+│   │   │   ├── schemas/                               🟦 ingestion ; ⬜ dashboard
+│   │   │   ├── middlewares/                           🟦 couche réservée
 │   │   │   ├── templates/
 │   │   │   │   └── index.html                         ⬜ dashboard par lot
 │   │   │   └── static/
-│   │   │       ├── dashboard.css                      ⬜
-│   │   │       └── dashboard.js                       ⬜
+│   │   │       ├── css/app.css                        🟦 base ; ⬜ dashboard
+│   │   │       └── js/upload.js                       🟦 base ; ⬜ dashboard
 │   │   └── tests/                                     🟦 à compléter
 │   │
 │   ├── worker-automation/                             🟦 à adapter
@@ -125,7 +128,7 @@ pour le MVP.
 ├── packages/
 │   ├── common/                                        🟦
 │   │   └── src/glpi_ticketing_common/
-│   │       └── audio_files.py                         ⬜ stockage unique
+│   │       └── audio_files.py                         🟦 stockage unique + compatibilité POC
 │   │
 │   ├── database/                                      🟦 fondation persistante
 │   │   ├── pyproject.toml
@@ -140,7 +143,7 @@ pour le MVP.
 │   │   │   │   ├── audio_retention.py                 🟦
 │   │   │   │   ├── ticket_creation_job_event.py       🟦
 │   │   │   │   └── worker_runtime_status.py           🟦
-│   │   │   ├── repositories.py                        ⬜ ajouté avec ses consommateurs
+│   │   │   ├── repositories.py                        🟦 création et lecture d'un job
 │   │   │   └── advisory_locks.py                      ⬜ ajouté avec les workers
 │   │   └── tests/
 │   │
@@ -172,8 +175,8 @@ les quatre classes : un import de `glpi_ticketing_database.models` enregistre
 donc toujours le schéma complet dans l'unique `Base.metadata`. Les enums restent
 centralisés car plusieurs tables partagent leurs valeurs persistées.
 
-Le futur fichier `repositories.py` restera unique tant que ses responsabilités
-réelles ne justifieront pas une nouvelle segmentation.
+Le fichier `repositories.py` reste unique tant que ses responsabilités réelles
+ne justifient pas une nouvelle segmentation.
 
 Aucune classe `UnitOfWork` personnalisée n'est ajoutée. La session SQLAlchemy
 porte déjà cette responsabilité ; les applications ouvrent explicitement une
@@ -421,22 +424,30 @@ relançable ou un audio déjà purgé retourne `409`.
 
 ## Pipeline de l'application web
 
+L'adaptateur web suit les couches
+`Routes -> Controllers -> Services -> Repositories/Storage`. Les routes ne
+contiennent aucune règle métier ; les controllers possèdent uniquement la
+traduction HTTP et les services restent importables sans FastAPI.
+
 ```mermaid
 flowchart TD
     User[Intervenant]:::implemented --> Home[GET / et formulaire réutilisable]:::implemented
     Home --> Batch[Sélection d'un lot et file locale]:::future
-    Batch --> Post[POST /api/jobs<br/>une requête par audio]:::future
+    Batch --> Post[POST /api/jobs<br/>une requête par audio]:::implemented
 
     Post --> Validate[Valider extension et taille]:::implemented
     Validate --> Atomic[Écrire en .part puis publier atomiquement]:::implemented
-    Atomic --> Store[(Volume /data/audios)]:::future
-    Store --> Insert[Transaction : job pending + événement]:::future
-    Insert --> Accepted[202 + UUID + Location]:::future
+    Atomic --> Store[(Volume /data/audios)]:::implemented
+    Store --> Insert[Transaction : job pending + événement]:::implemented
+    Insert --> Accepted[202 + UUID + Location]:::implemented
     Accepted --> Confirm[Confirmation puis nouveau dépôt]:::implemented
-    Insert -->|échec| Compensate[Supprimer l'audio par compensation]:::future
+    Insert -->|échec confirmé| Compensate[Supprimer l'audio par compensation]:::implemented
+    Insert -->|commit incertain| Reconcile[Relire le job<br/>sans suppression ambiguë]:::implemented
 
     Home --> List[GET /api/jobs<br/>pagination, filtres, UUID]:::future
-    List --> Database[(PostgreSQL)]:::future
+    Accepted --> Detail[GET /api/jobs/UUID<br/>état minimal]:::implemented
+    Detail --> Database[(PostgreSQL)]:::implemented
+    List --> Database
     Database --> Dashboard[Tableau, détails et alertes]:::future
 
     Dashboard --> Retry[POST /api/jobs/UUID/retry]:::future
@@ -446,7 +457,7 @@ flowchart TD
     Rearm --> Database
 
     Dashboard --> Download[GET /audios/UUID]:::implemented
-    Download --> Gate[Vérifier completed et audio disponible]:::future
+    Download --> Gate[Vérifier completed et audio disponible]:::implemented
     Gate -->|oui| Audio[200 + audio]:::implemented
     Gate -->|purgé| Gone[410 Gone]:::future
     Gate -->|UUID inconnu ou non terminé| Missing[404]:::implemented
@@ -463,6 +474,13 @@ L'écriture du fichier précède l'insertion SQL. Le worker ne découvre les job
 que par PostgreSQL : un éventuel fichier orphelin ne peut pas être consommé. Le
 worker de rétention supprime les fichiers sans ligne associée uniquement
 après un délai de sécurité configurable.
+
+Si l'accusé de réception du `COMMIT` est perdu, le web ouvre une nouvelle
+session et vérifie l'UUID. Une ligne cohérente confirme le succès. Une ligne
+absente ne confirme toutefois pas l'échec : le premier backend peut encore
+achever le commit. Le web conserve donc aussi l'audio dans ce cas. Un orphelin
+est réconciliable après un délai de sécurité, contrairement à un job `pending`
+dont les octets auraient été supprimés.
 
 Le traitement nominal n'énumère jamais le volume. Seule une tâche de
 maintenance du worker de rétention peut effectuer un scan borné des fichiers
@@ -730,6 +748,9 @@ métier et dans le Compose de production appartient aux itérations suivantes.
 
 Périmètre : publication atomique dans `/data/audios`, création du job
 `pending`, événement initial et réponse `202` avec `Location`.
+
+État : 🟦 implémenté sur la branche. La façade HTML reste disponible jusqu'au
+dashboard par lot ; le worker historique sera basculé lors de l'itération 3.
 
 - Tests unitaires : validation de `storage_key`, refus des traversées de
   chemin, écriture `.part`, compensation et contrats HTTP.

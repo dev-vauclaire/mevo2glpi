@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.116,<1",
     "glpi-ticketing-common>=0.1,<0.2",
+    "glpi-ticketing-database>=0.1,<0.2",
     "jinja2>=3.1,<4",
     "pydantic-settings>=2.10,<3",
     "python-multipart>=0.0.20,<1",

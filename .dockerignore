@@ -23,6 +23,8 @@
 !packages/common/src/**
 !packages/database/
 !packages/database/pyproject.toml
+!packages/database/src/
+!packages/database/src/**
 
 **/__pycache__/
 **/*.py[cod]

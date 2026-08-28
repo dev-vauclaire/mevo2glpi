@@ -55,10 +55,16 @@ automatiquement les répertoires de travail du POC.
   historique expurgé et le heartbeat des workers du MVP ;
 - application one-shot Alembic capable d'attendre PostgreSQL puis de migrer
   une base neuve jusqu'à la révision courante.
+- ingestion MVP par `POST /api/jobs` : publication atomique dans le volume
+  unique, création transactionnelle du job `pending` et de son événement
+  initial, puis consultation minimale avec `GET /api/jobs/{uuid}` ;
+- téléchargement MVP contrôlé par l'état PostgreSQL `completed`, sans scan du
+  volume audio.
 
-Ces deux derniers composants constituent la fondation persistante du MVP. Ils
-ne sont pas encore consommés par le web ou le worker du POC : leur bascule est
-réalisée progressivement dans les itérations suivantes.
+Le web consomme désormais cette fondation persistante. Le worker reste sur le
+cycle de répertoires du POC jusqu'à l'itération 3 ; la branche peut donc être
+temporairement non déployable entre ces deux bascules. Le POC exécutable reste
+disponible avec le tag `poc-v0.1.0`.
 
 ### Limites du POC ciblées par le MVP
 
@@ -92,28 +98,28 @@ explicitement ses dépendances d'exécution.
 | Membre | Distribution Python | Responsabilité actuelle | Documentation |
 | --- | --- | --- | --- |
 | `apps/database-migrations` | `glpi-ticketing-database-migrations` | Application one-shot Alembic et historique versionné du schéma MVP | [Migrations de la base](apps/database-migrations/README.md) |
-| `apps/web` | `glpi-ticketing-web` | Interface FastAPI de dépôt dans `pending` et de lecture depuis `completed` | [Application web](apps/web/README.md) |
+| `apps/web` | `glpi-ticketing-web` | Ingestion persistée, état minimal et téléchargement contrôlé par PostgreSQL | [Application web](apps/web/README.md) |
 | `apps/worker-automation` | `glpi-ticketing-worker-automation` | Pipeline avec état privé : réclamation, transcription, ticket GLPI et finalisation | [Worker d'automatisation](apps/worker-automation/README.md) |
-| `packages/common` | `glpi-ticketing-common` | Nommage UUID, découverte des audios et transitions robustes entre volumes | [Package commun](packages/common/README.md) |
-| `packages/database` | `glpi-ticketing-database` | Modèles, moteur et sessions SQLAlchemy partagés du cycle de vie MVP | [Package database](packages/database/README.md) |
+| `packages/common` | `glpi-ticketing-common` | Stockage canonique MVP et primitives de transition encore requises par le worker POC | [Package commun](packages/common/README.md) |
+| `packages/database` | `glpi-ticketing-database` | Modèles, moteur, sessions et repository de jobs partagés | [Package database](packages/database/README.md) |
 
-Le web et le worker dépendent du package commun. L'application de migration
-dépend du package database pour importer `Base.metadata`. Ces dépendances sont
-déclarées comme sources workspace à la racine. Une application ne doit pas
-importer directement les modules internes d'une autre application.
+Le web dépend des packages commun et database. Le worker dépend encore du seul
+package commun. L'application de migration dépend du package database pour
+importer `Base.metadata`. Ces dépendances sont déclarées comme sources
+workspace à la racine. Une application ne doit pas importer directement les
+modules internes d'une autre application.
 
 Les artefacts sous [`infra/docker/`](infra/docker/README.md) ne constituent pas
-un membre Python supplémentaire. Les images POC existantes continuent
-d'empaqueter uniquement le web, le worker et le package commun ; l'image et le
-service de migration du déploiement MVP seront ajoutés dans une itération
-ultérieure.
+un membre Python supplémentaire. Le déploiement complet du POC reste figé par
+le tag `poc-v0.1.0` ; l'image et le service de migration du déploiement MVP
+seront ajoutés dans une itération ultérieure.
 
 La convention générale est un layout `src` : le code de chaque membre se
 trouve dans `<membre>/src/<package_python>` et ses tests dans
 `<membre>/tests`. Les conventions propres à chaque membre sont détaillées dans
 son README.
 
-## Flux global
+## Flux global du POC (`poc-v0.1.0`)
 
 ```mermaid
 flowchart LR
@@ -326,13 +332,14 @@ en application FastAPI puis en serveur Uvicorn.
 
 | Variables | Propriétaire | Rôle défini par la configuration |
 | --- | --- | --- |
-| `DATABASE_URL` | application de migration, puis web et workers MVP | URL SQLAlchemy obligatoire utilisant `postgresql+psycopg` |
+| `DATABASE_URL` | application de migration et web, puis workers MVP | URL SQLAlchemy obligatoire utilisant `postgresql+psycopg` |
 | `DATABASE_READY_TIMEOUT_SECONDS` | application de migration | Durée maximale d'attente de PostgreSQL |
 | `DATABASE_READY_INTERVAL_SECONDS` | application de migration | Intervalle entre deux sondes de disponibilité |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | application de migration | Timeout borné de chaque tentative de connexion |
-| `AUDIO_PENDING_DIR` | web et worker | Dépôt des uploads et entrée de la file |
+| `AUDIO_ROOT` | web MVP, puis workers | Volume unique contenant les clés canoniques `{uuid}.{extension}` |
+| `AUDIO_PENDING_DIR` | worker POC | Entrée historique de la file, retirée lors de l'itération 3 |
 | `AUDIO_PROCESSING_DIR` | worker | Audio réclamé et traitement en cours |
-| `AUDIO_COMPLETED_DIR` | web et worker | Publication des succès par le worker et lecture par le web |
+| `AUDIO_COMPLETED_DIR` | worker POC | Sortie historique des succès, retirée lors de l'itération 3 |
 | `AUDIO_FAILED_DIR` | worker | Audio terminal et sidecar expurgé |
 | `WEB_HOST`, `WEB_PORT` | web | Adresse IP et port d'écoute Uvicorn ; `127.0.0.1:8000` par défaut |
 | `WEB_TRUST_PROXY_HEADERS` | web | Confiance explicite dans les en-têtes du proxy ; désactivée par défaut |
@@ -380,9 +387,14 @@ Le runbook complet, la préparation des volumes, les fichiers de configuration,
 l'overlay de CA interne, Nginx et la procédure de rollback se trouvent
 dans la [documentation de déploiement](infra/docker/README.md).
 
-### Démarrage de l'application web
+### Démarrage de l'application web du POC
 
-Après avoir créé les répertoires `pending` et `completed` configurés :
+Ce démarrage correspond au tag `poc-v0.1.0`. Sur la branche MVP, utiliser les
+instructions PostgreSQL et `AUDIO_ROOT` du
+[README du web](apps/web/README.md).
+
+Après avoir sélectionné le tag et créé les répertoires `pending` et
+`completed` configurés :
 
 ```bash
 uv run glpi-ticketing-web
@@ -498,7 +510,9 @@ parallélisation :
 
 ```bash
 uv run pytest -m database \
-  apps/database-migrations/tests/integration -vv --maxfail=1
+  apps/database-migrations/tests/integration \
+  apps/web/tests/integration/test_job_ingestion.py \
+  -vv --maxfail=1
 ```
 
 Smoke test du packaging de déploiement, à exécuter séparément et sans

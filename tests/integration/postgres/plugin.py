@@ -1,4 +1,4 @@
-"""Disposable PostgreSQL fixture shared by migration integration tests."""
+"""Lazy disposable PostgreSQL fixtures shared across workspace applications."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import psycopg
@@ -17,7 +18,10 @@ from sqlalchemy import URL
 from testcontainers.compose import DockerCompose
 from testcontainers.core.docker_client import DockerClient
 
-DATABASE_TEST_DIRECTORY = Path(__file__).resolve().parent
+if TYPE_CHECKING:
+    from sqlalchemy import Engine
+
+POSTGRES_TEST_DIRECTORY = Path(__file__).resolve().parent
 POSTGRES_READY_TIMEOUT_SECONDS = 60.0
 POSTGRES_POLL_INTERVAL_SECONDS = 0.25
 
@@ -58,11 +62,8 @@ class PostgresTestEnvironment:
         ).render_as_string(hide_password=False)
 
     @property
-    def admin_url(self) -> str:
-        return self.url_for(self.admin_database)
-
-    @property
     def admin_psycopg_url(self) -> str:
+        """Return the administration database URL used by the fixture."""
         return self.psycopg_url_for(self.admin_database)
 
 
@@ -145,20 +146,16 @@ def _clean_test_resources(
         raise RuntimeError("Disposable PostgreSQL resources were not fully removed")
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _prevent_parallel_database_suite() -> Iterator[None]:
-    if os.environ.get("PYTEST_XDIST_WORKER") is not None:
-        pytest.fail("The database integration suite must not use pytest-xdist")
-    yield
-
-
 @pytest.fixture(scope="session")
 def postgres_environment() -> Iterator[PostgresTestEnvironment]:
-    """Start PostgreSQL once and remove its container and network at teardown."""
+    """Start PostgreSQL once, only when a database fixture is requested."""
+    if os.environ.get("PYTEST_XDIST_WORKER") is not None:
+        pytest.fail("The database integration suite must not use pytest-xdist")
+
     environment = _new_environment()
     docker_client = DockerClient()
     compose = DockerCompose(
-        context=DATABASE_TEST_DIRECTORY,
+        context=POSTGRES_TEST_DIRECTORY,
         compose_file_name="compose.yml",
         pull=False,
         build=False,
@@ -199,7 +196,7 @@ def postgres_environment() -> Iterator[PostgresTestEnvironment]:
 
 @pytest.fixture
 def database_url(postgres_environment: PostgresTestEnvironment) -> Iterator[str]:
-    """Create an isolated database and drop it after one integration test."""
+    """Create an isolated empty database and drop it after one test."""
     database_name = f"gta_test_{secrets.token_hex(8)}"
     with psycopg.connect(
         postgres_environment.admin_psycopg_url,
@@ -225,3 +222,32 @@ def database_url(postgres_environment: PostgresTestEnvironment) -> Iterator[str]
             connection.execute(
                 sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name))
             )
+
+
+@pytest.fixture
+def migrated_database_url(database_url: str) -> str:
+    """Apply the workspace Alembic head to an isolated database."""
+    from glpi_ticketing_database import create_database_engine
+    from glpi_ticketing_database_migrations.application import upgrade_to_head
+
+    engine = create_database_engine(database_url, connect_timeout_seconds=5)
+    try:
+        upgrade_to_head(engine)
+    finally:
+        engine.dispose()
+    return database_url
+
+
+@pytest.fixture
+def migrated_engine(migrated_database_url: str) -> Iterator[Engine]:
+    """Yield an engine connected to an isolated database at Alembic head."""
+    from glpi_ticketing_database import create_database_engine
+
+    engine = create_database_engine(
+        migrated_database_url,
+        connect_timeout_seconds=5,
+    )
+    try:
+        yield engine
+    finally:
+        engine.dispose()

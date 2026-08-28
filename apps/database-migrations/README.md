@@ -45,12 +45,15 @@ Les tests unitaires ne nécessitent pas PostgreSQL :
 uv run pytest apps/database-migrations/tests/unit
 ```
 
-La suite marquée `database` démarre une seule image PostgreSQL 16 épinglée par
-digest. Elle l'expose sur un port aléatoire limité au loopback, crée une base
-isolée par test, vérifie la migration et les contraintes réelles, puis détruit
-le conteneur et son réseau. Elle ne doit pas être parallélisée :
+La fixture commune `tests/integration/postgres` démarre une seule image
+PostgreSQL 16 épinglée par digest. Elle l'expose sur un port aléatoire limité au
+loopback, crée une base isolée par test, vérifie la migration et les contraintes
+réelles, puis détruit le conteneur et son réseau. Elle est partagée avec les
+tests d'ingestion du web et ne doit pas être parallélisée :
 
 ```bash
 uv run pytest -m database \
-  apps/database-migrations/tests/integration -vv --maxfail=1
+  apps/database-migrations/tests/integration \
+  apps/web/tests/integration/test_job_ingestion.py \
+  -vv --maxfail=1
 ```

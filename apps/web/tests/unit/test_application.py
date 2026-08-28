@@ -14,20 +14,20 @@ from glpi_ticketing_web.application import (
 )
 from glpi_ticketing_web.settings import WebSettings
 
+DATABASE_URL = "postgresql+psycopg://web:password@127.0.0.1:5432/jobs"
+
 
 def _settings(tmp_path: Path, **overrides: object) -> WebSettings:
+    audio_root = tmp_path / "audios"
+    audio_root.mkdir(parents=True, exist_ok=True)
     values: dict[str, object] = {
-        "audio_pending_dir": tmp_path / "pending",
-        "audio_completed_dir": tmp_path / "completed",
+        "audio_root": audio_root,
+        "database_url": DATABASE_URL,
         "web_host": "127.0.0.1",
         "web_port": 8765,
         "max_upload_bytes": 4096,
     }
     values.update(overrides)
-    for field_name in ("audio_pending_dir", "audio_completed_dir"):
-        directory = values[field_name]
-        if isinstance(directory, Path):
-            directory.mkdir(parents=True, exist_ok=True)
     return WebSettings(**values, _env_file=None)
 
 
@@ -37,8 +37,7 @@ def test_build_application_wires_settings_into_fastapi(tmp_path: Path) -> None:
     application = build_application(settings)
 
     config = application.state.web_config
-    assert config.pending_directory == settings.audio_pending_dir.resolve()
-    assert config.completed_directory == settings.audio_completed_dir.resolve()
+    assert config.audio_root == settings.audio_root.resolve()
     assert config.max_upload_bytes == 4096
 
 
@@ -51,8 +50,8 @@ def test_build_server_uses_configured_bind_address(tmp_path: Path) -> None:
     assert server.config.port == 9876
     assert server.config.proxy_headers is False
     assert server.config.forwarded_allow_ips == []
-    assert server.config.app.state.web_config.pending_directory == (
-        settings.audio_pending_dir.resolve()
+    assert server.config.app.state.web_config.audio_root == (
+        settings.audio_root.resolve()
     )
 
 
@@ -102,15 +101,14 @@ def test_run_cli_returns_success_after_server_stops(tmp_path: Path) -> None:
     assert observed_settings == [settings]
 
 
-def test_run_cli_does_not_log_invalid_configuration_values(
+def test_run_cli_does_not_log_invalid_database_url(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    private_path = "/private/never-log-this-directory"
+    secret = "never-log-this-database-password"
 
     def invalid_settings() -> WebSettings:
         return WebSettings(
-            audio_pending_dir=private_path,
-            audio_completed_dir=private_path,
+            database_url=f"postgresql://web:{secret}@database/jobs",
             _env_file=None,
         )
 
@@ -118,16 +116,16 @@ def test_run_cli_does_not_log_invalid_configuration_values(
         exit_code = run_cli(settings_factory=invalid_settings)
 
     assert exit_code is WebExitCode.CONFIGURATION_ERROR
-    assert private_path not in caplog.text
+    assert secret not in caplog.text
     assert "web configuration is invalid" in caplog.text
 
 
-def test_run_cli_rejects_missing_directory_without_logging_its_path(
+def test_run_cli_rejects_missing_audio_root_without_logging_its_path(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     settings = _settings(tmp_path)
-    missing_directory = settings.audio_pending_dir
+    missing_directory = settings.audio_root
     missing_directory.rmdir()
 
     with caplog.at_level(logging.INFO):

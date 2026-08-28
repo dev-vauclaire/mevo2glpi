@@ -38,6 +38,7 @@ dev = [
 minversion = "8.4"
 addopts = "--strict-config --strict-markers --import-mode=importlib"
 testpaths = ["apps", "packages", "tests"]
+pythonpath = ["."]
 markers = [
     "database: démarre une instance PostgreSQL jetable pour valider le schéma et les migrations",
     "deployment: construit et démarre les images runtime et le reverse proxy Docker du POC",

@@ -22,6 +22,7 @@ from .models import (
     WorkerRuntimeStatus,
     WorkerServiceName,
 )
+from .repositories import JobRepository, JobSnapshot, PendingJob
 
 __all__ = [
     "AudioExtension",
@@ -31,10 +32,13 @@ __all__ = [
     "DeletionReason",
     "ErrorScope",
     "JobEventActor",
+    "JobRepository",
+    "JobSnapshot",
     "JobStage",
     "JobStatus",
     "RetentionPolicy",
     "RetentionStatus",
+    "PendingJob",
     "TicketCreationJob",
     "TicketCreationJobEvent",
     "WorkerRuntimeState",
