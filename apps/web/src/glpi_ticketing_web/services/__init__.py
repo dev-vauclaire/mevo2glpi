@@ -1,6 +1,7 @@
 """Application service layer for the web workspace."""
 
 from .jobs import (
+    AudioPurgedError,
     AudioStorageConflictError,
     AudioStorageInvariantError,
     AudioStorageUnavailableError,
@@ -8,8 +9,18 @@ from .jobs import (
     EmptyAudioError,
     GetAudioJob,
     GetDownloadableAudio,
+    InvalidCursorError,
+    JobEventListPage,
+    JobEventView,
+    JobListPage,
     JobPersistenceUnavailableError,
     JobQueryUnavailableError,
+    JobRetryConflictError,
+    JobView,
+    ListAudioJobEvents,
+    ListAudioJobs,
+    RetriedJob,
+    RetryAudioJob,
     SubmitAudioJob,
     SubmittedJob,
     UnsupportedAudioUploadError,
@@ -17,6 +28,7 @@ from .jobs import (
 )
 
 __all__ = [
+    "AudioPurgedError",
     "AudioStorageConflictError",
     "AudioStorageInvariantError",
     "AudioStorageUnavailableError",
@@ -24,8 +36,18 @@ __all__ = [
     "EmptyAudioError",
     "GetAudioJob",
     "GetDownloadableAudio",
+    "InvalidCursorError",
+    "JobEventListPage",
+    "JobEventView",
+    "JobListPage",
     "JobPersistenceUnavailableError",
     "JobQueryUnavailableError",
+    "JobRetryConflictError",
+    "JobView",
+    "ListAudioJobEvents",
+    "ListAudioJobs",
+    "RetriedJob",
+    "RetryAudioJob",
     "SubmitAudioJob",
     "SubmittedJob",
     "UnsupportedAudioUploadError",

@@ -7,8 +7,9 @@ PostgreSQL et un volume audio canonique unique.
 
 L'état démonstratif du POC est figé par le tag `poc-v0.1.0`. La branche
 `mvp/job-lifecycle` a déjà basculé l'ingestion web et le worker d'automatisation
-sur PostgreSQL. Le dashboard d'observabilité et le worker de rétention restent
-à réaliser. La structure et les pipelines sont suivis dans le document vivant
+sur PostgreSQL et fournit désormais l'API de consultation ainsi que le
+dashboard par lot. Le worker de rétention et les alertes runtime restent à
+réaliser. La structure et les pipelines sont suivis dans le document vivant
 [`docs/mvp-architecture.md`](docs/mvp-architecture.md).
 Le MVP part d'une base PostgreSQL et d'un volume audio neufs ; il ne migre pas
 automatiquement les répertoires de travail du POC.
@@ -72,7 +73,13 @@ active de la branche MVP :
   métier, revalidé aux frontières externes avec arrêt fail-closed en cas de
   perte, et heartbeat runtime minimal ;
 - tests d'intégration du cycle de vie sur PostgreSQL migré et pipeline E2E
-  persistant avec Transcribe AI et GLPI.
+  persistant avec Transcribe AI et GLPI ;
+- API paginée des jobs et de leurs événements, recherche exacte par UUID,
+  détail expurgé et téléchargement distinguant un audio purgé ;
+- dashboard interne avec dépôt multiple borné à trois requêtes simultanées,
+  actualisation du suivi et relance opérateur des jobs `failed` ou `blocked` ;
+- réarmement transactionnel qui conserve l'ID GLPI durable, désactive la
+  rétention et ajoute un événement d'audit sans scanner le volume.
 
 Le Compose présent dans le dépôt reste celui du POC : la branche MVP n'est pas
 encore packagée pour un déploiement cohérent. PostgreSQL, la migration one-shot,
@@ -114,7 +121,7 @@ explicitement ses dépendances d'exécution.
 | Membre | Distribution Python | Responsabilité actuelle | Documentation |
 | --- | --- | --- | --- |
 | `apps/database-migrations` | `glpi-ticketing-database-migrations` | Application one-shot Alembic et historique versionné du schéma MVP | [Migrations de la base](apps/database-migrations/README.md) |
-| `apps/web` | `glpi-ticketing-web` | Ingestion persistée, état minimal et téléchargement contrôlé par PostgreSQL | [Application web](apps/web/README.md) |
+| `apps/web` | `glpi-ticketing-web` | Ingestion persistée, dashboard interne, retry opérateur et téléchargement contrôlé | [Application web](apps/web/README.md) |
 | `apps/worker-automation` | `glpi-ticketing-worker-automation` | Sélection et orchestration persistantes, transcription, ticket GLPI et finalisation | [Worker d'automatisation](apps/worker-automation/README.md) |
 | `packages/common` | `glpi-ticketing-common` | Publication et résolution du stockage audio canonique unique | [Package commun](packages/common/README.md) |
 | `packages/database` | `glpi-ticketing-database` | Modèles, sessions, repositories de cycle de vie/runtime et verrous advisory | [Package database](packages/database/README.md) |

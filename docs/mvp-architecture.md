@@ -80,7 +80,7 @@ pour le MVP.
 │   │       ├── unit/
 │   │       └── integration/
 │   │
-│   ├── web/                                           🟦 à enrichir
+│   ├── web/                                           🟦 dashboard MVP
 │   │   ├── src/glpi_ticketing_web/
 │   │   │   ├── __main__.py                            🟦
 │   │   │   ├── application.py                         🟦 composition DB
@@ -88,15 +88,16 @@ pour le MVP.
 │   │   │   ├── web.py                                 🟦 assemblage FastAPI
 │   │   │   ├── routes/                                🟦 routes fines
 │   │   │   ├── controllers/                           🟦 traduction HTTP
-│   │   │   ├── services/                              🟦 use cases ; ⬜ listing + retry
-│   │   │   ├── schemas/                               🟦 ingestion ; ⬜ dashboard
+│   │   │   ├── services/                              🟦 use cases par responsabilité
+│   │   │   │   └── jobs/                              🟦 ingestion, requêtes, download, retry
+│   │   │   ├── schemas/                               🟦 contrats ingestion + dashboard
 │   │   │   ├── middlewares/                           🟦 couche réservée
 │   │   │   ├── templates/
-│   │   │   │   └── index.html                         ⬜ dashboard par lot
+│   │   │   │   └── index.html                         🟦 dashboard par lot
 │   │   │   └── static/
-│   │   │       ├── css/app.css                        🟦 base ; ⬜ dashboard
-│   │   │       └── js/upload.js                       🟦 base ; ⬜ dashboard
-│   │   └── tests/                                     🟦 à compléter
+│   │   │       ├── css/app.css                        🟦 interface responsive
+│   │   │       └── js/                                🟦 API, uploads, dashboard, assemblage
+│   │   └── tests/                                     🟦 contrats + intégration PostgreSQL
 │   │
 │   ├── worker-automation/                             🟦 worker persistant
 │   │   ├── src/glpi_ticketing_worker_automation/
@@ -448,7 +449,7 @@ traduction HTTP et les services restent importables sans FastAPI.
 ```mermaid
 flowchart TD
     User[Intervenant]:::implemented --> Home[GET / et formulaire réutilisable]:::implemented
-    Home --> Batch[Sélection d'un lot et file locale]:::future
+    Home --> Batch[Sélection d'un lot et file locale]:::implemented
     Batch --> Post[POST /api/jobs<br/>une requête par audio]:::implemented
 
     Post --> Validate[Valider extension et taille]:::implemented
@@ -460,22 +461,25 @@ flowchart TD
     Insert -->|échec confirmé| Compensate[Supprimer l'audio par compensation]:::implemented
     Insert -->|commit incertain| Reconcile[Relire le job<br/>sans suppression ambiguë]:::implemented
 
-    Home --> List[GET /api/jobs<br/>pagination, filtres, UUID]:::future
-    Accepted --> Detail[GET /api/jobs/UUID<br/>état minimal]:::implemented
+    Home --> List[GET /api/jobs<br/>pagination, filtres, UUID]:::implemented
+    Accepted --> Detail[GET /api/jobs/UUID<br/>détail du cycle de vie]:::implemented
     Detail --> Database[(PostgreSQL)]:::implemented
+    Detail --> Events[GET /api/jobs/UUID/events<br/>historique paginé]:::implemented
+    Events --> Database
     List --> Database
-    Database --> Dashboard[Tableau, détails et alertes]:::future
+    Database --> Dashboard[Tableau et détails]:::implemented
+    Dashboard --> Alerts[Alertes runtime et jobs en retard]:::future
 
-    Dashboard --> Retry[POST /api/jobs/UUID/retry]:::future
-    Retry --> RetryGate{failed ou blocked<br/>et audio présent ?}:::future
-    RetryGate -->|oui| Rearm[Transaction : pending + rétention inactive<br/>+ événement opérateur]:::future
-    RetryGate -->|non| Conflict[404 ou 409]:::future
+    Dashboard --> Retry[POST /api/jobs/UUID/retry]:::implemented
+    Retry --> RetryGate{failed ou blocked<br/>et audio présent ?}:::implemented
+    RetryGate -->|oui| Rearm[Transaction : pending + rétention inactive<br/>+ événement opérateur]:::implemented
+    RetryGate -->|non| Conflict[404 ou 409]:::implemented
     Rearm --> Database
 
     Dashboard --> Download[GET /audios/UUID]:::implemented
     Download --> Gate[Vérifier completed et audio disponible]:::implemented
     Gate -->|oui| Audio[200 + audio]:::implemented
-    Gate -->|purgé| Gone[410 Gone]:::future
+    Gate -->|purgé| Gone[410 Gone]:::implemented
     Gate -->|UUID inconnu ou non terminé| Missing[404]:::implemented
 
     classDef implemented fill:#dbeafe,stroke:#2563eb,color:#111827;
@@ -505,6 +509,12 @@ qu'aucune ligne ne référence la `storage_key` concernée.
 
 `GET /api/jobs/{uuid}` retourne `404` seulement si la ligne n'existe pas. Une
 purge ne supprime jamais le job ni ses événements.
+
+La relance opérateur verrouille et modifie successivement le job, la rétention
+et l'historique dans une seule transaction. Si seul l'accusé du `COMMIT` est
+perdu, une nouvelle session exige la cohérence des trois lignes avant de
+confirmer le `202`. Un échec d'ajout de l'événement annule donc aussi le
+réarmement et la désactivation de la rétention.
 
 ## Pipeline du worker d'automatisation
 
@@ -582,6 +592,13 @@ Le test de `glpi_ticket_id` s'applique aussi à un job réarmé par un opérateu
 Si le ticket est déjà confirmé, le worker reprend la finalisation sans demander
 une transcription inutile. Sans identifiant GLPI persisté, il redemande la
 transcription puisque son contenu n'est pas conservé.
+
+Un `glpi_ticket_id` persisté est la frontière de durabilité du MVP : le worker
+considère alors le ticket comme confirmé et termine le job sans relire GLPI.
+La recherche par `external_id` appartient uniquement à la création ou à la
+réconciliation effectuée tant que cet identifiant local n'a pas encore été
+enregistré. La détection ultérieure d'un ticket supprimé ou incohérent relève
+du contrôle de rétention, pas de la reprise du worker d'automatisation.
 
 Un crash technique inattendu peut être relancé par Docker Compose. Un résultat
 `failed` ou `blocked` est un état métier persisté, pas une raison de redémarrer
@@ -826,9 +843,9 @@ métier et dans le Compose de production appartient aux itérations suivantes.
 Périmètre : publication atomique dans `/data/audios`, création du job
 `pending`, événement initial et réponse `202` avec `Location`.
 
-État : 🟦 implémenté sur la branche. La façade HTML reste disponible jusqu'au
-dashboard par lot ; le worker consomme désormais ces jobs persistés depuis
-l'itération 3.
+État : 🟦 implémenté sur la branche. À ce jalon, la façade HTML était conservée
+temporairement ; elle a été remplacée par le dashboard par lot à l'itération 4.
+Le worker consomme ces jobs persistés depuis l'itération 3.
 
 - Tests unitaires : validation de `storage_key`, refus des traversées de
   chemin, écriture `.part`, compensation et contrats HTTP.
@@ -878,16 +895,23 @@ système observables dès cette bascule.
 Périmètre : liste paginée, recherche UUID, détail et événements, envoi de
 plusieurs fichiers, téléchargement contrôlé et API de retry opérateur.
 
+État : 🟦 implémenté sur la branche. Le navigateur borne les dépôts à trois
+requêtes simultanées et PostgreSQL reste l'unique source de vérité de toutes
+les vues. L'accès demeure volontairement limité au réseau interne ;
+l'authentification applicative est reportée avant toute exposition élargie.
+
 - Tests unitaires : DTO, pagination, filtres, transitions du retry, refus
   `404`/`409`, rendu du dashboard et absence de contenu sensible.
 - Tests d'intégration : API avec PostgreSQL, lot partiellement refusé,
   recherche et tri, relance atomique avec rétention `inactive`, `404` inconnu
   et `410` après purge.
-- Tests POC à adapter : tests centrés sur la page `uploaded.html` et sur la
-  lecture directe de `completed`. Le comportement de dépôts successifs reste
-  couvert dans le parcours par lot.
-- Code POC à retirer si devenu sans consommateur : page de confirmation
-  isolée et routes historiques remplacées par les contrats `/api/jobs`.
+- Tests POC adaptés : les tests centrés sur la page `uploaded.html` sont
+  remplacés par les contrats du formulaire multiple réutilisable. Les tests de
+  téléchargement créent désormais aussi l'état de rétention attendu et
+  distinguent `404`, `410` et invariant de stockage.
+- Code POC retiré : page `uploaded.html`, script `upload.js`, route
+  `POST /audios` et méthode de controller associée. Les use cases web sont
+  segmentés par responsabilité dans `services/jobs/`.
 - Sortie : aucun listing ou téléchargement ne déduit l'état depuis un
   répertoire.
 

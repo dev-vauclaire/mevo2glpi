@@ -8,7 +8,7 @@ from uuid import UUID
 
 import pytest
 
-import glpi_ticketing_web.services.jobs as jobs
+import glpi_ticketing_web.services.jobs.ingestion as jobs
 from glpi_ticketing_database import (
     AudioExtension,
     JobSnapshot,
@@ -19,9 +19,7 @@ from glpi_ticketing_database import (
 from glpi_ticketing_web.services import (
     AudioStorageConflictError,
     EmptyAudioError,
-    GetAudioJob,
     JobPersistenceUnavailableError,
-    JobQueryUnavailableError,
     SubmitAudioJob,
     UnsupportedAudioUploadError,
     UploadTooLargeError,
@@ -380,26 +378,6 @@ def test_compensation_failure_preserves_sanitized_primary_diagnostic(
     assert private_value not in caplog.text
     assert str(audio_root) not in caplog.text
     assert "audio_compensation_failed" in caplog.text
-
-
-def test_get_audio_job_closes_its_session() -> None:
-    expected = _snapshot(_pending_job())
-    session = FakeSession(snapshot=expected)
-
-    result = GetAudioJob(FakeSessionFactory([session])).execute(AUDIO_UUID)  # type: ignore[arg-type]
-
-    assert result == expected
-    assert session.calls == ["get_by_uuid", "close"]
-
-
-def test_get_audio_job_sanitizes_query_failure() -> None:
-    session = FakeSession(get_error=RuntimeError("secret database URL"))
-
-    with pytest.raises(JobQueryUnavailableError) as captured_error:
-        GetAudioJob(FakeSessionFactory([session])).execute(AUDIO_UUID)  # type: ignore[arg-type]
-
-    assert "secret database URL" not in str(captured_error.value)
-    assert session.calls == ["get_by_uuid", "close"]
 
 
 def _audio_root(tmp_path: Path) -> Path:

@@ -3,31 +3,212 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Déposer un audio</title>
+    <meta
+      name="description"
+      content="Dépôt et suivi des demandes de création de tickets GLPI."
+    >
+    <title>Automatisation des tickets GLPI</title>
     <link rel="stylesheet" href="{{ request.url_for('static', path='/css/app.css') }}">
-    <script defer src="{{ request.url_for('static', path='/js/upload.js') }}"></script>
+    <script
+      type="module"
+      src="{{ request.url_for('static', path='/js/app.js') }}"
+    ></script>
   </head>
   <body>
-    <main>
-      <h1>Déposer un audio</h1>
-      <form
-        action="{{ upload_path }}"
-        method="post"
-        enctype="multipart/form-data"
-      >
-        <label for="audio-file">Fichier audio</label>
-        <input
-          id="audio-file"
-          name="audio_file"
-          type="file"
-          accept=".wav,.mp3,.ogg,.m4a"
-          data-audio-input
-          required
+    <header class="app-header">
+      <div class="app-header__content">
+        <div>
+          <p class="eyebrow">GLPI Ticketing Automation</p>
+          <h1>Traitement des demandes audio</h1>
+        </div>
+        <p class="environment-badge">Réseau interne</p>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <noscript>
+        <p class="notice notice--error">
+          JavaScript doit être activé pour déposer et suivre les fichiers audio.
+        </p>
+      </noscript>
+
+      <section class="panel upload-panel" aria-labelledby="upload-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Nouveau traitement</p>
+            <h2 id="upload-title">Déposer des fichiers audio</h2>
+          </div>
+          <p class="section-heading__aside">
+            Jusqu’à 3 envois sont traités simultanément.
+          </p>
+        </div>
+
+        <form
+          class="upload-form"
+          action="{{ upload_path }}"
+          method="post"
+          enctype="multipart/form-data"
+          data-upload-form
         >
-        <p class="hint" data-selected-file aria-live="polite"></p>
-        <button type="submit">Envoyer</button>
-      </form>
-      <p class="hint">Taille maximale : {{ max_upload_bytes }} octets.</p>
+          <label class="drop-zone" for="audio-files">
+            <span class="drop-zone__title">Choisir un ou plusieurs audios</span>
+            <span class="drop-zone__hint">
+              WAV, MP3, OGG ou M4A — {{ max_upload_bytes }} octets maximum par fichier
+            </span>
+          </label>
+          <input
+            class="file-input"
+            id="audio-files"
+            name="audio_file"
+            type="file"
+            accept=".wav,.mp3,.ogg,.m4a"
+            data-audio-input
+            multiple
+            required
+          >
+          <div class="upload-form__actions">
+            <p class="hint" data-selected-files aria-live="polite">
+              Aucun fichier sélectionné.
+            </p>
+            <button class="button button--primary" type="submit" data-upload-submit>
+              Lancer les traitements
+            </button>
+          </div>
+        </form>
+
+        <div class="upload-results" data-upload-results-container hidden>
+          <h3>Résultat des envois</h3>
+          <p class="sr-only" data-upload-feedback aria-live="assertive"></p>
+          <ul class="upload-list" data-upload-results></ul>
+        </div>
+      </section>
+
+      <section class="panel jobs-panel" aria-labelledby="jobs-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Observabilité</p>
+            <h2 id="jobs-title">Suivi des traitements</h2>
+          </div>
+          <button
+            class="button button--secondary"
+            type="button"
+            data-dashboard-refresh
+          >
+            Actualiser
+          </button>
+        </div>
+
+        <form class="filters" data-job-filters>
+          <div class="field">
+            <label for="state-filter">État</label>
+            <select id="state-filter" name="state" data-state-filter>
+              <option value="">Tous les états</option>
+              <option value="pending">En attente</option>
+              <option value="processing">En cours</option>
+              <option value="retry_scheduled">Nouvelle tentative planifiée</option>
+              <option value="completed">Terminé</option>
+              <option value="failed">Échec</option>
+              <option value="blocked">Bloqué</option>
+            </select>
+          </div>
+          <div class="field field--grow">
+            <label for="uuid-filter">UUID audio exact</label>
+            <input
+              id="uuid-filter"
+              name="audio_uuid"
+              type="search"
+              inputmode="text"
+              autocomplete="off"
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              data-uuid-filter
+            >
+          </div>
+          <button class="button button--secondary" type="submit">Filtrer</button>
+        </form>
+
+        <p class="dashboard-feedback" data-dashboard-feedback aria-live="polite">
+          Chargement des traitements…
+        </p>
+
+        <div class="table-wrapper" data-jobs-table-container hidden>
+          <table>
+            <caption class="sr-only">Liste paginée des traitements audio</caption>
+            <thead>
+              <tr>
+                <th scope="col">UUID audio</th>
+                <th scope="col">État</th>
+                <th scope="col">Étape</th>
+                <th scope="col">Dernière transition</th>
+                <th scope="col">Tentative</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody data-jobs-table></tbody>
+          </table>
+        </div>
+
+        <nav class="pagination" aria-label="Pagination des traitements">
+          <button
+            class="button button--secondary"
+            type="button"
+            data-page-previous
+            disabled
+          >
+            Page précédente
+          </button>
+          <button
+            class="button button--secondary"
+            type="button"
+            data-page-next
+            disabled
+          >
+            Page suivante
+          </button>
+        </nav>
+      </section>
     </main>
+
+    <dialog class="job-dialog" data-job-dialog aria-labelledby="job-dialog-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Détail du traitement</p>
+          <h2 id="job-dialog-title" data-detail-title>Traitement audio</h2>
+        </div>
+        <button
+          class="icon-button"
+          type="button"
+          aria-label="Fermer le détail"
+          data-detail-close
+        >
+          ×
+        </button>
+      </div>
+
+      <p data-detail-feedback aria-live="polite">Chargement du détail…</p>
+      <dl class="detail-grid" data-job-detail hidden></dl>
+
+      <div class="detail-actions" data-detail-actions hidden>
+        <a class="button button--secondary" href="#" data-audio-download hidden>
+          Télécharger l’audio
+        </a>
+        <button class="button button--warning" type="button" data-job-retry hidden>
+          Relancer ce traitement
+        </button>
+      </div>
+
+      <section class="events" aria-labelledby="events-title">
+        <h3 id="events-title">Historique des transitions</h3>
+        <p data-events-feedback aria-live="polite"></p>
+        <ol class="timeline" data-job-events></ol>
+        <button
+          class="button button--secondary"
+          type="button"
+          data-events-more
+          hidden
+        >
+          Charger plus d’événements
+        </button>
+      </section>
+    </dialog>
   </body>
 </html>

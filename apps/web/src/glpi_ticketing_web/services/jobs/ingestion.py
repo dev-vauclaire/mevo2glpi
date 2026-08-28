@@ -1,112 +1,43 @@
-"""Application services for persistent audio jobs."""
+"""Durable ingestion of one canonical audio and its pending lifecycle job."""
 
 from __future__ import annotations
 
 import logging
-import os
-import stat
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from collections.abc import Callable
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import BinaryIO
 from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from glpi_ticketing_common.audio_files import (
     AudioStorageKey,
-    InvalidAudioStorageKeyError,
     build_audio_storage_key,
     delete_audio,
     parse_audio_storage_key,
     publish_audio,
-    resolve_audio_storage_path,
 )
 from glpi_ticketing_database import (
     AudioExtension,
     JobEventActor,
     JobEventType,
     JobSnapshot,
-    JobStatus,
     PendingJob,
     TicketCreationJobEventRepository,
     TicketCreationJobRepository,
 )
 
+from .models import (
+    AudioStorageConflictError,
+    AudioStorageUnavailableError,
+    EmptyAudioError,
+    JobPersistenceUnavailableError,
+    SubmittedJob,
+    UnsupportedAudioUploadError,
+    UploadTooLargeError,
+)
+
 LOGGER = logging.getLogger(__name__)
-
-_AUDIO_STREAM_BUFFER_SIZE = 64 * 1024
-
-
-class UploadTooLargeError(ValueError):
-    """Report an upload exceeding the configured byte limit."""
-
-
-class UnsupportedAudioUploadError(ValueError):
-    """Report an upload filename whose extension is not supported."""
-
-
-class EmptyAudioError(ValueError):
-    """Report an empty upload, which cannot become a lifecycle job."""
-
-
-class AudioStorageUnavailableError(RuntimeError):
-    """Report a sanitized failure to publish or clean audio storage."""
-
-
-class AudioStorageConflictError(RuntimeError):
-    """Report that a generated canonical storage destination already exists."""
-
-
-class AudioStorageInvariantError(RuntimeError):
-    """Report that persisted metadata and canonical storage are inconsistent."""
-
-
-class JobPersistenceUnavailableError(RuntimeError):
-    """Report a sanitized persistence failure after audio publication."""
-
-    def __init__(self, technical_code: str) -> None:
-        super().__init__("Job persistence is unavailable")
-        self.technical_code = technical_code
-
-
-class JobQueryUnavailableError(RuntimeError):
-    """Report a sanitized failure to read lifecycle state."""
-
-
-@dataclass(frozen=True, slots=True)
-class SubmittedJob:
-    """Stable result returned after accepting a new audio job."""
-
-    audio_uuid: UUID
-    state: JobStatus = JobStatus.PENDING
-
-
-@dataclass(frozen=True, slots=True)
-class DownloadableAudio:
-    """Validated audio descriptor whose stream stays open until consumption."""
-
-    uuid: UUID
-    extension: AudioExtension
-    size_bytes: int
-    _stream: BinaryIO = field(repr=False, compare=False)
-
-    def iter_bytes(self) -> Iterator[bytes]:
-        """Yield the validated audio and always close its descriptor."""
-        try:
-            while chunk := self._stream.read(_AUDIO_STREAM_BUFFER_SIZE):
-                yield chunk
-        finally:
-            self._stream.close()
-
-    def close(self) -> None:
-        """Close an audio that could not be handed to the response iterator."""
-        self._stream.close()
-
-
-class _AudioJobReader(Protocol):
-    def execute(self, audio_uuid: UUID) -> JobSnapshot | None:
-        """Return one persisted job snapshot."""
 
 
 class _SizeLimitedReader:
@@ -121,14 +52,12 @@ class _SizeLimitedReader:
         """Read at most the remaining allowance plus one detection byte."""
         if size == 0:
             return b""
-
         remaining_bytes = self._max_bytes - self._bytes_read
         probe_size = remaining_bytes + 1
         requested_size = probe_size if size < 0 else min(size, probe_size)
         chunk = self._source.read(requested_size)
         if not isinstance(chunk, bytes):
             raise TypeError("Upload stream must return bytes")
-
         self._bytes_read += len(chunk)
         if self._bytes_read > self._max_bytes:
             raise UploadTooLargeError("Audio file exceeds the upload size limit")
@@ -175,13 +104,11 @@ class SubmitAudioJob:
         storage = parse_audio_storage_key(
             build_audio_storage_key(audio_uuid, extension)
         )
-        limited_source = _SizeLimitedReader(source, self._max_upload_bytes)
-
         try:
             published = publish_audio(
                 self._audio_root,
                 storage.storage_key,
-                limited_source,
+                _SizeLimitedReader(source, self._max_upload_bytes),
             )
         except FileExistsError as error:
             raise AudioStorageConflictError(
@@ -195,17 +122,7 @@ class SubmitAudioJob:
             ) from error
 
         if published.size_bytes == 0:
-            try:
-                delete_audio(self._audio_root, storage.storage_key)
-            except OSError as error:
-                LOGGER.error(
-                    "empty audio cleanup failed audio_uuid=%s "
-                    "error_code=audio_cleanup_failed",
-                    audio_uuid,
-                )
-                raise AudioStorageUnavailableError(
-                    "Audio storage is unavailable"
-                ) from error
+            self._remove_empty_audio(storage, audio_uuid)
             raise EmptyAudioError("Audio file must not be empty")
 
         pending_job = PendingJob(
@@ -216,6 +133,19 @@ class SubmitAudioJob:
         )
         self._persist_pending(pending_job, storage)
         return SubmittedJob(audio_uuid=audio_uuid)
+
+    def _remove_empty_audio(self, storage: AudioStorageKey, audio_uuid: UUID) -> None:
+        try:
+            delete_audio(self._audio_root, storage.storage_key)
+        except OSError as error:
+            LOGGER.error(
+                "empty audio cleanup failed audio_uuid=%s "
+                "error_code=audio_cleanup_failed",
+                audio_uuid,
+            )
+            raise AudioStorageUnavailableError(
+                "Audio storage is unavailable"
+            ) from error
 
     def _persist_pending(
         self,
@@ -252,7 +182,6 @@ class SubmitAudioJob:
         pending_job: PendingJob,
         commit_error: Exception,
     ) -> None:
-        snapshot: JobSnapshot | None
         reconciliation_session: Session | None = None
         try:
             reconciliation_session = self._session_factory()
@@ -289,25 +218,16 @@ class SubmitAudioJob:
                 pending_job.uuid,
             )
             return
-
         if snapshot is not None:
-            LOGGER.error(
-                "job commit invariant unresolved audio_uuid=%s "
-                "error_code=database_commit_conflict",
-                pending_job.uuid,
-            )
-            raise JobPersistenceUnavailableError(
-                "database_commit_conflict"
-            ) from commit_error
-
+            technical_code = "database_commit_conflict"
+        else:
+            technical_code = "database_outcome_unknown"
         LOGGER.error(
-            "job commit outcome unknown audio_uuid=%s "
-            "error_code=database_outcome_unknown",
+            "job commit unresolved audio_uuid=%s error_code=%s",
             pending_job.uuid,
+            technical_code,
         )
-        raise JobPersistenceUnavailableError(
-            "database_outcome_unknown"
-        ) from commit_error
+        raise JobPersistenceUnavailableError(technical_code) from commit_error
 
     def _compensate_confirmed_failure(
         self,
@@ -326,7 +246,6 @@ class SubmitAudioJob:
             raise JobPersistenceUnavailableError(
                 "audio_compensation_failed"
             ) from persistence_error
-
         LOGGER.warning(
             "job persistence failed audio_uuid=%s error_code=database_write_failed",
             audio_uuid,
@@ -334,75 +253,6 @@ class SubmitAudioJob:
         raise JobPersistenceUnavailableError(
             "database_write_failed"
         ) from persistence_error
-
-
-class GetAudioJob:
-    """Read one immutable job snapshot using a short-lived session."""
-
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
-        self._session_factory = session_factory
-
-    def execute(self, audio_uuid: UUID) -> JobSnapshot | None:
-        """Return a job snapshot, or ``None`` when its UUID is unknown."""
-        session: Session | None = None
-        try:
-            session = self._session_factory()
-            return TicketCreationJobRepository(session).get_by_uuid(audio_uuid)
-        except Exception as error:
-            raise JobQueryUnavailableError("Job persistence is unavailable") from error
-        finally:
-            _close_session(session)
-
-
-class GetDownloadableAudio:
-    """Open a completed audio through its persisted canonical storage key."""
-
-    def __init__(self, audio_root: Path, get_audio_job: _AudioJobReader) -> None:
-        resolved_audio_root = Path(audio_root).expanduser().resolve(strict=True)
-        if not resolved_audio_root.is_dir():
-            raise NotADirectoryError(resolved_audio_root)
-        self._audio_root = resolved_audio_root
-        self._get_audio_job = get_audio_job
-
-    def execute(self, audio_uuid: UUID) -> DownloadableAudio | None:
-        """Return a validated completed audio, or ``None`` when unavailable."""
-        snapshot = self._get_audio_job.execute(audio_uuid)
-        if snapshot is None or snapshot.status is not JobStatus.COMPLETED:
-            return None
-
-        try:
-            audio_path = resolve_audio_storage_path(
-                self._audio_root,
-                snapshot.storage_key,
-            )
-            audio_stream, size_bytes = _open_audio_stream(audio_path)
-        except FileNotFoundError:
-            return None
-        except (InvalidAudioStorageKeyError, OSError) as error:
-            raise AudioStorageInvariantError(
-                "Audio storage invariant violated"
-            ) from error
-
-        return DownloadableAudio(
-            uuid=snapshot.uuid,
-            extension=snapshot.audio_extension,
-            size_bytes=size_bytes,
-            _stream=audio_stream,
-        )
-
-
-def _open_audio_stream(audio_path: Path) -> tuple[BinaryIO, int]:
-    """Open one regular file without following a path swapped to a symlink."""
-    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
-    file_descriptor = os.open(audio_path, flags)
-    try:
-        file_stat = os.fstat(file_descriptor)
-        if not stat.S_ISREG(file_stat.st_mode):
-            raise InvalidAudioStorageKeyError("Audio storage path is not regular")
-        return os.fdopen(file_descriptor, "rb", closefd=True), file_stat.st_size
-    except BaseException:
-        os.close(file_descriptor)
-        raise
 
 
 def _snapshot_matches(snapshot: JobSnapshot, pending_job: PendingJob) -> bool:
@@ -433,18 +283,4 @@ def _close_session(session: Session | None) -> None:
         pass
 
 
-__all__ = [
-    "AudioStorageConflictError",
-    "AudioStorageInvariantError",
-    "AudioStorageUnavailableError",
-    "DownloadableAudio",
-    "EmptyAudioError",
-    "GetAudioJob",
-    "GetDownloadableAudio",
-    "JobPersistenceUnavailableError",
-    "JobQueryUnavailableError",
-    "SubmitAudioJob",
-    "SubmittedJob",
-    "UnsupportedAudioUploadError",
-    "UploadTooLargeError",
-]
+__all__ = ["SubmitAudioJob"]

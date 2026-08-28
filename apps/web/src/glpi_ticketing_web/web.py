@@ -25,6 +25,9 @@ from glpi_ticketing_web.routes import (
 from glpi_ticketing_web.services import (
     GetAudioJob,
     GetDownloadableAudio,
+    ListAudioJobEvents,
+    ListAudioJobs,
+    RetryAudioJob,
     SubmitAudioJob,
 )
 from glpi_ticketing_web.settings import DEFAULT_MAX_UPLOAD_BYTES
@@ -43,7 +46,10 @@ def create_app(
     *,
     audio_root: Path,
     submit_audio_job: SubmitAudioJob,
+    list_audio_jobs: ListAudioJobs,
     get_audio_job: GetAudioJob,
+    list_audio_job_events: ListAudioJobEvents,
+    retry_audio_job: RetryAudioJob,
     get_downloadable_audio: GetDownloadableAudio,
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
     shutdown_callback: Callable[[], None] | None = None,
@@ -72,9 +78,11 @@ def create_app(
 
     job_controller = JobController(
         submit_audio_job=submit_audio_job,
+        list_audio_jobs=list_audio_jobs,
         get_audio_job=get_audio_job,
+        list_audio_job_events=list_audio_job_events,
+        retry_audio_job=retry_audio_job,
         get_downloadable_audio=get_downloadable_audio,
-        templates=_TEMPLATES,
     )
     page_controller = PageController(
         templates=_TEMPLATES,

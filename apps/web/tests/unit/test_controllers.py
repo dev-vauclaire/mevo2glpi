@@ -5,30 +5,58 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
-from fastapi.templating import Jinja2Templates
+from fastapi import HTTPException, Response
 
 import glpi_ticketing_web.controllers.jobs as jobs_controller_module
-from glpi_ticketing_database import AudioExtension
+from glpi_ticketing_database import AudioExtension, JobStatus
 from glpi_ticketing_web.controllers import JobController, ManagedStreamingResponse
-from glpi_ticketing_web.services import DownloadableAudio
+from glpi_ticketing_web.services import (
+    AudioStorageUnavailableError,
+    DownloadableAudio,
+    InvalidCursorError,
+    JobListPage,
+    JobRetryConflictError,
+    RetriedJob,
+)
 
 AUDIO_UUID = UUID("8ce23f5b-4e31-49f1-ae23-4eacdbba48f8")
 
 
 @dataclass
 class FakeDownloadService:
-    downloadable: DownloadableAudio
+    downloadable: DownloadableAudio | Exception
 
     def execute(self, _audio_uuid: UUID) -> DownloadableAudio:
+        if isinstance(self.downloadable, Exception):
+            raise self.downloadable
         return self.downloadable
 
 
+class FakeRetryService:
+    def __init__(self, result: RetriedJob | None | Exception) -> None:
+        self.result = result
+
+    def execute(self, _audio_uuid: UUID) -> RetriedJob | None:
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+class FakeListService:
+    def __init__(self, result: JobListPage | Exception) -> None:
+        self.result = result
+
+    def execute(self, **_kwargs: object) -> JobListPage:
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
 def test_download_closes_audio_if_response_construction_fails(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     audio_stream = BytesIO(b"synthetic-audio")
@@ -40,9 +68,11 @@ def test_download_closes_audio_if_response_construction_fails(
     )
     controller = JobController(
         submit_audio_job=object(),  # type: ignore[arg-type]
+        list_audio_jobs=object(),  # type: ignore[arg-type]
         get_audio_job=object(),  # type: ignore[arg-type]
+        list_audio_job_events=object(),  # type: ignore[arg-type]
+        retry_audio_job=object(),  # type: ignore[arg-type]
         get_downloadable_audio=FakeDownloadService(downloadable),  # type: ignore[arg-type]
-        templates=Jinja2Templates(directory=tmp_path),
     )
 
     def fail_response(*_args, **_kwargs):
@@ -58,6 +88,90 @@ def test_download_closes_audio_if_response_construction_fails(
         controller.download_audio(AUDIO_UUID)
 
     assert audio_stream.closed
+
+
+def test_retry_returns_202_pending_and_job_location() -> None:
+    controller = _controller(
+        retry_service=FakeRetryService(
+            RetriedJob(audio_uuid=AUDIO_UUID, state=JobStatus.PENDING)
+        )
+    )
+    response = Response()
+
+    body = controller.retry_job(
+        _request(),  # type: ignore[arg-type]
+        response,
+        AUDIO_UUID,
+    )
+
+    assert response.status_code == 202
+    assert response.headers["location"] == f"/api/jobs/{AUDIO_UUID}"
+    assert body.model_dump(mode="json") == {
+        "audio_uuid": str(AUDIO_UUID),
+        "state": "pending",
+    }
+
+
+@pytest.mark.parametrize(
+    ("service_result", "expected_status"),
+    [
+        (None, 404),
+        (JobRetryConflictError("private detail"), 409),
+        (AudioStorageUnavailableError("private volume failure"), 503),
+    ],
+)
+def test_retry_translates_unknown_and_conflicting_jobs(
+    service_result: RetriedJob | None | Exception,
+    expected_status: int,
+) -> None:
+    controller = _controller(retry_service=FakeRetryService(service_result))
+
+    with pytest.raises(HTTPException) as captured_error:
+        controller.retry_job(
+            _request(),  # type: ignore[arg-type]
+            Response(),
+            AUDIO_UUID,
+        )
+
+    assert captured_error.value.status_code == expected_status
+    assert "private detail" not in str(captured_error.value.detail)
+    assert "private volume failure" not in str(captured_error.value.detail)
+
+
+def test_download_translates_storage_unavailability_to_503() -> None:
+    controller = JobController(
+        submit_audio_job=object(),  # type: ignore[arg-type]
+        list_audio_jobs=object(),  # type: ignore[arg-type]
+        get_audio_job=object(),  # type: ignore[arg-type]
+        list_audio_job_events=object(),  # type: ignore[arg-type]
+        retry_audio_job=object(),  # type: ignore[arg-type]
+        get_downloadable_audio=FakeDownloadService(
+            AudioStorageUnavailableError("private volume failure")
+        ),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(HTTPException) as captured_error:
+        controller.download_audio(AUDIO_UUID)
+
+    assert captured_error.value.status_code == 503
+    assert "private volume failure" not in str(captured_error.value.detail)
+
+
+def test_invalid_list_cursor_is_translated_to_422() -> None:
+    controller = _controller(
+        list_service=FakeListService(InvalidCursorError("private cursor payload"))
+    )
+
+    with pytest.raises(HTTPException) as captured_error:
+        controller.list_jobs(
+            state=None,
+            audio_uuid=None,
+            limit=25,
+            cursor="opaque",
+        )
+
+    assert captured_error.value.status_code == 422
+    assert "private cursor payload" not in str(captured_error.value.detail)
 
 
 @pytest.mark.asyncio
@@ -114,3 +228,27 @@ async def test_managed_stream_closes_audio_when_asgi_send_fails(
         await response(scope, receive, send)  # type: ignore[arg-type]
 
     assert audio_stream.closed
+
+
+def _controller(
+    *,
+    retry_service: FakeRetryService | None = None,
+    list_service: FakeListService | None = None,
+) -> JobController:
+    return JobController(
+        submit_audio_job=object(),  # type: ignore[arg-type]
+        list_audio_jobs=list_service
+        or FakeListService(JobListPage(items=(), next_cursor=None)),  # type: ignore[arg-type]
+        get_audio_job=object(),  # type: ignore[arg-type]
+        list_audio_job_events=object(),  # type: ignore[arg-type]
+        retry_audio_job=retry_service or FakeRetryService(None),  # type: ignore[arg-type]
+        get_downloadable_audio=object(),  # type: ignore[arg-type]
+    )
+
+
+def _request() -> SimpleNamespace:
+    class FakeApp:
+        def url_path_for(self, _name: str, *, audio_uuid: str) -> str:
+            return f"/api/jobs/{audio_uuid}"
+
+    return SimpleNamespace(app=FakeApp())

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -14,6 +14,7 @@ from sqlalchemy import Engine, event, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from glpi_ticketing_database import (
+    AudioRetention,
     JobStatus,
     TicketCreationJob,
     TicketCreationJobEvent,
@@ -22,6 +23,9 @@ from glpi_ticketing_database import (
 from glpi_ticketing_web.services import (
     GetAudioJob,
     GetDownloadableAudio,
+    ListAudioJobEvents,
+    ListAudioJobs,
+    RetryAudioJob,
     SubmitAudioJob,
 )
 from glpi_ticketing_web.web import create_app
@@ -56,7 +60,14 @@ def ingestion_context(
             session_factory=session_factory,
             max_upload_bytes=MAX_UPLOAD_BYTES,
         ),
+        list_audio_jobs=ListAudioJobs(session_factory),
         get_audio_job=get_audio_job,
+        list_audio_job_events=ListAudioJobEvents(session_factory),
+        retry_audio_job=RetryAudioJob(
+            audio_root=audio_root,
+            session_factory=session_factory,
+            get_audio_job=get_audio_job,
+        ),
         get_downloadable_audio=GetDownloadableAudio(audio_root, get_audio_job),
         max_upload_bytes=MAX_UPLOAD_BYTES,
     )
@@ -81,11 +92,13 @@ def test_create_job_persists_audio_job_and_initial_event(
         "state": "pending",
     }
     assert response.headers["location"] == f"/api/jobs/{audio_uuid}"
-    assert ingestion_context.client.get(response.headers["location"]).json() == {
-        "audio_uuid": str(audio_uuid),
-        "state": "pending",
-        "stage": None,
-    }
+    detail = ingestion_context.client.get(response.headers["location"]).json()
+    assert detail["audio_uuid"] == str(audio_uuid)
+    assert detail["state"] == "pending"
+    assert detail["stage"] is None
+    assert detail["retention_status"] is None
+    assert "storage_key" not in detail
+    assert "transcription_provider_job_id" not in detail
 
     with ingestion_context.session_factory() as session:
         job = session.get(TicketCreationJob, audio_uuid)
@@ -245,16 +258,25 @@ def test_completed_job_audio_is_downloaded_by_canonical_key(
     storage_key = f"{audio_uuid}.ogg"
     now = datetime.now(UTC)
     with ingestion_context.session_factory.begin() as session:
+        job = TicketCreationJob(
+            uuid=audio_uuid,
+            status=JobStatus.COMPLETED.value,
+            stage="finalization",
+            storage_key=storage_key,
+            audio_extension="ogg",
+            audio_size_bytes=len(SYNTHETIC_AUDIO),
+            glpi_ticket_id=42,
+            finished_at=now,
+        )
+        session.add(job)
+        session.flush()
         session.add(
-            TicketCreationJob(
-                uuid=audio_uuid,
-                status=JobStatus.COMPLETED.value,
-                stage="finalization",
-                storage_key=storage_key,
-                audio_extension="ogg",
-                audio_size_bytes=len(SYNTHETIC_AUDIO),
-                glpi_ticket_id=42,
-                finished_at=now,
+            AudioRetention(
+                job_uuid=audio_uuid,
+                policy="ticket_or_deadline",
+                status="scheduled",
+                hard_delete_at=now + timedelta(days=30),
+                next_check_at=now + timedelta(hours=6),
             )
         )
     (ingestion_context.audio_root / storage_key).write_bytes(SYNTHETIC_AUDIO)
@@ -264,6 +286,217 @@ def test_completed_job_audio_is_downloaded_by_canonical_key(
     assert response.status_code == 200
     assert response.content == SYNTHETIC_AUDIO
     assert response.headers["content-type"] == "audio/ogg"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["content-disposition"] == (
+        f'attachment; filename="{audio_uuid}.ogg"'
+    )
+
+
+def test_job_dashboard_uses_stable_keyset_pagination_and_exact_filters(
+    ingestion_context: IngestionContext,
+) -> None:
+    audio_uuids = [
+        UUID(
+            _upload(ingestion_context, f"audio-{index}.wav", SYNTHETIC_AUDIO).json()[
+                "audio_uuid"
+            ]
+        )
+        for index in range(3)
+    ]
+    base_time = datetime(2026, 8, 28, 12, tzinfo=UTC)
+    with ingestion_context.session_factory.begin() as session:
+        for index, audio_uuid in enumerate(audio_uuids):
+            job = session.get(TicketCreationJob, audio_uuid)
+            assert job is not None
+            job.updated_at = base_time + timedelta(minutes=index)
+
+    first = ingestion_context.client.get("/api/jobs", params={"limit": 2})
+    second = ingestion_context.client.get(
+        "/api/jobs",
+        params={"limit": 2, "cursor": first.json()["next_cursor"]},
+    )
+    filtered = ingestion_context.client.get(
+        "/api/jobs",
+        params={"state": "pending", "audio_uuid": str(audio_uuids[1])},
+    )
+
+    assert first.status_code == 200
+    assert [UUID(item["audio_uuid"]) for item in first.json()["items"]] == [
+        audio_uuids[2],
+        audio_uuids[1],
+    ]
+    assert first.json()["next_cursor"] is not None
+    assert [UUID(item["audio_uuid"]) for item in second.json()["items"]] == [
+        audio_uuids[0]
+    ]
+    assert second.json()["next_cursor"] is None
+    assert [item["audio_uuid"] for item in filtered.json()["items"]] == [
+        str(audio_uuids[1])
+    ]
+
+
+def test_event_history_is_scoped_to_its_job_and_paginated_separately(
+    ingestion_context: IngestionContext,
+) -> None:
+    first_uuid = UUID(
+        _upload(ingestion_context, "first.wav", SYNTHETIC_AUDIO).json()["audio_uuid"]
+    )
+    second_uuid = UUID(
+        _upload(ingestion_context, "second.wav", SYNTHETIC_AUDIO).json()["audio_uuid"]
+    )
+
+    response = ingestion_context.client.get(
+        f"/api/jobs/{first_uuid}/events",
+        params={"limit": 1},
+    )
+    unknown = ingestion_context.client.get(f"/api/jobs/{uuid4()}/events")
+
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+    assert response.json()["items"][0]["event_type"] == "job_created"
+    assert str(second_uuid) not in response.text
+    assert unknown.status_code == 404
+
+
+def test_operator_retry_is_atomic_and_preserves_ticket_and_attempt_history(
+    ingestion_context: IngestionContext,
+) -> None:
+    audio_uuid = UUID(
+        _upload(ingestion_context, "failed.wav", SYNTHETIC_AUDIO).json()["audio_uuid"]
+    )
+    now = datetime.now(UTC)
+    _make_retryable(ingestion_context, audio_uuid, now=now)
+
+    response = ingestion_context.client.post(f"/api/jobs/{audio_uuid}/retry")
+
+    with ingestion_context.session_factory() as session:
+        job = session.get(TicketCreationJob, audio_uuid)
+        retention = session.get(AudioRetention, audio_uuid)
+        events = session.scalars(
+            select(TicketCreationJobEvent)
+            .where(TicketCreationJobEvent.job_uuid == audio_uuid)
+            .order_by(TicketCreationJobEvent.event_id)
+        ).all()
+    assert response.status_code == 202
+    assert response.headers["location"] == f"/api/jobs/{audio_uuid}"
+    assert response.json() == {"audio_uuid": str(audio_uuid), "state": "pending"}
+    assert job is not None
+    assert job.status == "pending"
+    assert job.stage is None
+    assert job.glpi_ticket_id == 42
+    assert job.attempt_count == 5
+    assert job.consecutive_retry_count == 0
+    assert retention is not None
+    assert retention.status == "inactive"
+    assert retention.hard_delete_at is None
+    assert events[-1].event_type == "operator_retry_requested"
+    assert events[-1].actor == "web"
+
+
+def test_retry_event_failure_rolls_back_job_and_retention(
+    ingestion_context: IngestionContext,
+) -> None:
+    audio_uuid = UUID(
+        _upload(ingestion_context, "failed.wav", SYNTHETIC_AUDIO).json()["audio_uuid"]
+    )
+    _make_retryable(ingestion_context, audio_uuid, now=datetime.now(UTC))
+    with ingestion_context.engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE ticket_creation_job_events "
+                "ADD CONSTRAINT ck_test_reject_operator_retry "
+                "CHECK (event_type <> 'operator_retry_requested')"
+            )
+        )
+
+    response = ingestion_context.client.post(f"/api/jobs/{audio_uuid}/retry")
+
+    with ingestion_context.session_factory() as session:
+        job = session.get(TicketCreationJob, audio_uuid)
+        retention = session.get(AudioRetention, audio_uuid)
+        operator_event_count = session.scalar(
+            select(func.count())
+            .select_from(TicketCreationJobEvent)
+            .where(
+                TicketCreationJobEvent.job_uuid == audio_uuid,
+                TicketCreationJobEvent.event_type == "operator_retry_requested",
+            )
+        )
+    assert response.status_code == 503
+    assert job is not None
+    assert job.status == "failed"
+    assert job.glpi_ticket_id == 42
+    assert retention is not None
+    assert retention.status == "scheduled"
+    assert operator_event_count == 0
+
+
+def test_deleted_retention_returns_410_even_while_bytes_still_exist(
+    ingestion_context: IngestionContext,
+) -> None:
+    audio_uuid = UUID(
+        _upload(ingestion_context, "completed.wav", SYNTHETIC_AUDIO).json()[
+            "audio_uuid"
+        ]
+    )
+    now = datetime.now(UTC)
+    with ingestion_context.session_factory.begin() as session:
+        job = session.get(TicketCreationJob, audio_uuid)
+        assert job is not None
+        job.status = "completed"
+        job.stage = "finalization"
+        job.glpi_ticket_id = 42
+        job.finished_at = now
+        job.updated_at = now
+        session.add(
+            AudioRetention(
+                job_uuid=audio_uuid,
+                policy="deadline_only",
+                status="deleted",
+                hard_delete_at=now,
+                deletion_reason="deadline_expired",
+                deletion_started_at=now,
+                audio_deleted_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    response = ingestion_context.client.get(f"/audios/{audio_uuid}")
+
+    assert response.status_code == 410
+    assert response.json() == {"detail": "Audio file has been purged"}
+
+
+def _make_retryable(
+    context: IngestionContext,
+    audio_uuid: UUID,
+    *,
+    now: datetime,
+) -> None:
+    with context.session_factory.begin() as session:
+        job = session.get(TicketCreationJob, audio_uuid)
+        assert job is not None
+        job.status = "failed"
+        job.stage = "finalization"
+        job.glpi_ticket_id = 42
+        job.attempt_count = 5
+        job.consecutive_retry_count = 3
+        job.last_error_scope = "job"
+        job.last_error_category = "validation"
+        job.last_error_code = "terminal_error"
+        job.finished_at = now
+        job.updated_at = now
+        session.add(
+            AudioRetention(
+                job_uuid=audio_uuid,
+                policy="deadline_only",
+                status="scheduled",
+                hard_delete_at=now + timedelta(days=7),
+                created_at=now,
+                updated_at=now,
+            )
+        )
 
 
 def _upload(context: IngestionContext, filename: str, content: bytes):

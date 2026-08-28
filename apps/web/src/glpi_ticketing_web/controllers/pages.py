@@ -23,7 +23,7 @@ class PageController:
             name="index.html",
             context={
                 "max_upload_bytes": self._max_upload_bytes,
-                "upload_path": request.app.url_path_for("upload_audio"),
+                "upload_path": request.app.url_path_for("create_job"),
             },
         )
 

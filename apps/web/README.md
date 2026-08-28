@@ -1,23 +1,25 @@
 # Application web
 
-`glpi-ticketing-web` reçoit les audios et crée leur état persistant initial.
-Sur la branche MVP, PostgreSQL est l'unique source de vérité : le web ne déduit
-plus jamais l'état d'un job en parcourant des répertoires.
+`glpi-ticketing-web` reçoit les audios, crée leur état persistant et expose le
+dashboard interne du MVP. PostgreSQL est l'unique source de vérité : le web ne
+déduit jamais l'état d'un job en parcourant le volume audio.
 
 Le tag `poc-v0.1.0` conserve l'ancienne application fondée sur `pending` et
-`completed`. Le worker de la branche courante ne basculera vers PostgreSQL qu'à
-l'itération 3 ; le Compose MVP complet appartient à une itération ultérieure.
+`completed`. La branche courante utilise le stockage canonique et PostgreSQL ;
+le Compose MVP complet appartient à une itération ultérieure.
 
 ## Entrées et sorties
 
 | Route | Entrée | Sortie nominale |
 | --- | --- | --- |
 | `GET /health` | aucune | `200`, liveness du processus uniquement |
-| `GET /` | aucune | formulaire HTML réutilisable |
+| `GET /` | aucune | dépôt multiple et dashboard interne |
 | `POST /api/jobs` | multipart `audio_file` | `202`, UUID, `state=pending` et `Location` |
-| `POST /audios` | multipart `audio_file` | façade HTML temporaire utilisant le même cas d'usage |
-| `GET /api/jobs/{uuid}` | UUID canonique | état et étape persistés, ou `404` |
-| `GET /audios/{uuid}` | UUID canonique | audio uniquement si PostgreSQL indique `completed` |
+| `GET /api/jobs` | `state`, UUID exact, `limit`, curseur optionnels | page triée par dernière transition décroissante |
+| `GET /api/jobs/{uuid}` | UUID canonique | détail persistant et rétention, ou `404` |
+| `GET /api/jobs/{uuid}/events` | `limit` et curseur optionnels | historique expurgé, paginé séparément |
+| `POST /api/jobs/{uuid}/retry` | UUID d'un job `failed` ou `blocked` | `202`, état `pending` et `Location` |
+| `GET /audios/{uuid}` | UUID canonique | audio `completed`, `410` si purgé, sinon `404` |
 
 Exemple de réponse :
 
@@ -33,16 +35,42 @@ ressource consultable. Les extensions acceptées sont `wav`, `mp3`, `ogg` et
 `m4a`. L'extension du nom est validée, mais le contenu binaire et le type MIME
 ne sont pas encore inspectés.
 
+Le navigateur émet une requête par fichier et limite le lot à trois requêtes
+simultanées. Chaque résultat reste indépendant, le formulaire est remis à zéro
+après le lot et le tableau se rafraîchit sans recharger la page. La pagination
+utilise un curseur opaque fondé sur `(updated_at, uuid)` ; le client ne doit ni
+l'interpréter ni le fabriquer.
+
+La relance opérateur est autorisée uniquement lorsque le job est `failed` ou
+`blocked`, que son fichier canonique existe encore et que sa taille correspond
+aux métadonnées persistées. Une transaction verrouillée réarme le job, rend sa
+rétention `inactive` et ajoute `operator_retry_requested`. Elle conserve
+notamment `glpi_ticket_id` : si cet ID existe déjà, le worker finalise ensuite
+localement sans rappeler GLPI.
+
+Une perte de l'accusé de réception du `COMMIT` de relance est réconciliée dans
+une nouvelle session : job `pending`, rétention `inactive` et événement
+opérateur doivent être tous les trois présents. Le web retourne alors `202` ;
+une issue encore ambiguë reste un `503` et n'entraîne jamais un second
+réarmement aveugle.
+
 Erreurs principales :
 
 - `413` : limite de taille dépassée ;
 - `415` : extension inconnue ;
-- `422` : champ absent ou fichier vide ;
-- `409` : collision exceptionnelle de destination ;
+- `422` : champ absent, fichier vide, filtre ou curseur invalide ;
+- `404` : job inconnu ou audio non terminé ;
+- `409` : collision de destination, ou état/audio incompatible avec une
+  relance opérateur ;
+- `410` : audio terminé déjà en suppression ou supprimé ;
+- `500` : ligne `completed` incohérente avec sa rétention ou son stockage ;
 - `503` : stockage ou PostgreSQL temporairement indisponible.
 
 Les réponses et les logs n'incluent ni URL SQL, ni chemin absolu, ni contenu
-audio, ni message brut provenant d'une exception d'infrastructure.
+audio, ni message brut provenant d'une exception d'infrastructure. Un audio
+autorisé est servi comme pièce jointe sous son nom UUID canonique, avec
+`Cache-Control: private, no-store` afin d'éviter sa conservation par un cache
+HTTP partagé ou par le navigateur.
 
 ## Flux d'ingestion
 
@@ -117,7 +145,8 @@ apps/web/
 │   ├── settings.py          # configuration typée et secrets masqués
 │   ├── routes/              # déclarations URL/méthode et délégation pure
 │   ├── controllers/         # adaptation du protocole HTTP
-│   ├── services/            # use cases indépendants de FastAPI
+│   ├── services/
+│   │   └── jobs/            # ingestion, requêtes, download, retry et DTO internes
 │   ├── schemas/             # contrats HTTP Pydantic
 │   ├── middlewares/         # traitements HTTP transversaux futurs
 │   ├── templates/           # pages HTML Jinja
@@ -146,6 +175,12 @@ Conventions :
   `rollback()` ou `close()` ;
 - aucun accès fichier n'est exécuté pendant la transaction SQL ;
 - le nom original n'entre jamais dans `storage_key`.
+
+L'interface utilise du JavaScript natif segmenté en `api.js`, `uploads.js`,
+`dashboard.js` et `app.js`. Les valeurs venant de l'API sont ajoutées au DOM
+avec `textContent` ou `replaceChildren`, jamais interprétées comme du HTML.
+Cette itération suppose un accès limité au réseau interne et n'ajoute pas de
+mécanisme d'authentification applicative.
 
 ## Configuration
 
@@ -182,7 +217,7 @@ Intégration PostgreSQL jetable, non parallélisée :
 
 ```bash
 uv run pytest -m database \
-  apps/web/tests/integration/test_job_ingestion.py -vv --maxfail=1
+  apps/web/tests/integration -vv --maxfail=1
 ```
 
 Qualité :
@@ -194,8 +229,8 @@ uv run ruff check apps/web
 
 ## Limites actuelles
 
-- pas encore de liste paginée, dashboard, lot navigateur ou retry opérateur ;
 - pas d'authentification applicative ;
+- pas encore d'alertes sur les heartbeats périmés ou les jobs en retard ;
 - pas de détection du format réel de l'audio ;
 - la limite applicative est vérifiée pendant la lecture de `UploadFile`, donc
   après le parsing multipart de Starlette ; une exposition réseau doit imposer
@@ -203,5 +238,6 @@ uv run ruff check apps/web
 - pas d'idempotence HTTP : un retry après perte de la réponse peut créer un
   second UUID ;
 - pas encore de suppression des orphelins ;
-- téléchargement après purge non distingué de `404` avant l'itération 4 ;
+- pas encore de test E2E dans un navigateur réel ; les contrats JavaScript sont
+  vérifiés statiquement et l'API est testée avec FastAPI ;
 - Compose MVP PostgreSQL non encore assemblé.
