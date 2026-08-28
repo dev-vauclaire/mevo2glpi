@@ -13,6 +13,7 @@ from glpi_ticketing_database.models import (
     DeletionReason,
     ErrorScope,
     JobEventActor,
+    JobEventType,
     JobStage,
     JobStatus,
     RetentionPolicy,
@@ -70,6 +71,21 @@ from glpi_ticketing_database.models import (
         (
             JobEventActor,
             {"web", "worker_automation", "worker_retention"},
+        ),
+        (
+            JobEventType,
+            {
+                "job_created",
+                "processing_started",
+                "processing_resumed",
+                "transcription_submitted",
+                "transcription_succeeded",
+                "retry_scheduled",
+                "ticket_confirmed",
+                "job_completed",
+                "job_failed",
+                "job_blocked",
+            },
         ),
         (WorkerServiceName, {"worker_automation", "worker_retention"}),
         (
@@ -148,7 +164,7 @@ def test_metadata_uses_deterministic_constraint_names() -> None:
         ("audio_retentions", {"policy", "status", "deletion_reason"}),
         (
             "ticket_creation_job_events",
-            {"status", "stage", "error_scope", "actor"},
+            {"status", "stage", "event_type", "error_scope", "actor"},
         ),
         ("worker_runtime_status", {"service_name", "state"}),
     ],
@@ -234,6 +250,17 @@ def test_retention_invariants_have_database_checks() -> None:
         "ck_audio_retentions_error_fields",
         "ck_audio_retentions_error_for_status",
     }
+
+
+def test_event_type_is_constrained_to_the_public_enum() -> None:
+    events = Base.metadata.tables["ticket_creation_job_events"]
+    check_names = {
+        constraint.name
+        for constraint in events.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert "ck_ticket_creation_job_events_event_type" in check_names
 
 
 def test_audit_foreign_keys_restrict_job_deletion() -> None:

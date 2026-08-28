@@ -34,8 +34,10 @@ AUDIO_BYTES = b"RIFFsynthetic-audio"
 @dataclass
 class FakeSession:
     add_error: Exception | None = None
+    event_error: Exception | None = None
     commit_error: Exception | None = None
     get_error: Exception | None = None
+    event_exists: bool = True
     snapshot: JobSnapshot | None = None
     pending_job: PendingJob | None = None
     calls: list[str] = field(default_factory=list)
@@ -67,7 +69,7 @@ class FakeSessionFactory:
         return self.sessions.pop(0)
 
 
-class FakeJobRepository:
+class FakeTicketCreationJobRepository:
     def __init__(self, session: FakeSession) -> None:
         self._session = session
 
@@ -85,9 +87,34 @@ class FakeJobRepository:
         return self._session.snapshot
 
 
+class FakeTicketCreationJobEventRepository:
+    def __init__(self, session: FakeSession) -> None:
+        self._session = session
+
+    def append(self, *_args: object, **_kwargs: object) -> None:
+        self._session.calls.append("append_event")
+        if self._session.event_error is not None:
+            raise self._session.event_error
+
+    def exists(self, *_args: object, **_kwargs: object) -> bool:
+        self._session.calls.append("event_exists")
+        if self._session.get_error is not None:
+            raise self._session.get_error
+        return self._session.event_exists
+
+
 @pytest.fixture(autouse=True)
 def fake_repository(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(jobs, "JobRepository", FakeJobRepository)
+    monkeypatch.setattr(
+        jobs,
+        "TicketCreationJobRepository",
+        FakeTicketCreationJobRepository,
+    )
+    monkeypatch.setattr(
+        jobs,
+        "TicketCreationJobEventRepository",
+        FakeTicketCreationJobEventRepository,
+    )
 
 
 def test_success_publishes_audio_before_transaction_and_persists_exact_metadata(
@@ -97,21 +124,27 @@ def test_success_publishes_audio_before_transaction_and_persists_exact_metadata(
     session = FakeSession()
     factory = FakeSessionFactory([session])
 
-    class OrderingRepository(FakeJobRepository):
+    class OrderingRepository(FakeTicketCreationJobRepository):
         def add_pending(self, pending_job: PendingJob) -> JobSnapshot:
             audio_path = audio_root / pending_job.storage_key
             assert audio_path.read_bytes() == AUDIO_BYTES
             assert not list(audio_root.glob("*.part"))
             return super().add_pending(pending_job)
 
-    jobs.JobRepository = OrderingRepository  # type: ignore[misc]
+    jobs.TicketCreationJobRepository = OrderingRepository  # type: ignore[misc]
     service = _service(audio_root, factory)
 
     result = service.execute("patient recording.WAV", BytesIO(AUDIO_BYTES))
 
     assert result.audio_uuid == AUDIO_UUID
     assert result.state is JobStatus.PENDING
-    assert session.calls == ["begin", "add_pending", "commit", "close"]
+    assert session.calls == [
+        "begin",
+        "add_pending",
+        "append_event",
+        "commit",
+        "close",
+    ]
     assert session.pending_job == PendingJob(
         uuid=AUDIO_UUID,
         storage_key=f"{AUDIO_UUID}.wav",
@@ -201,6 +234,27 @@ def test_failure_before_commit_rolls_back_and_compensates_audio(
     assert not list(audio_root.iterdir())
 
 
+def test_initial_event_failure_rolls_back_job_and_compensates_audio(
+    tmp_path: Path,
+) -> None:
+    audio_root = _audio_root(tmp_path)
+    session = FakeSession(event_error=RuntimeError("event insert failed"))
+    service = _service(audio_root, FakeSessionFactory([session]))
+
+    with pytest.raises(JobPersistenceUnavailableError) as captured_error:
+        service.execute("recording.wav", BytesIO(AUDIO_BYTES))
+
+    assert captured_error.value.technical_code == "database_write_failed"
+    assert session.calls == [
+        "begin",
+        "add_pending",
+        "append_event",
+        "rollback",
+        "close",
+    ]
+    assert not list(audio_root.iterdir())
+
+
 def test_uncertain_commit_with_matching_job_keeps_audio_and_succeeds(
     tmp_path: Path,
 ) -> None:
@@ -217,8 +271,36 @@ def test_uncertain_commit_with_matching_job_keeps_audio_and_succeeds(
 
     assert result.state is JobStatus.PENDING
     assert (audio_root / pending.storage_key).read_bytes() == AUDIO_BYTES
-    assert write_session.calls == ["begin", "add_pending", "commit", "close"]
-    assert read_session.calls == ["get_by_uuid", "close"]
+    assert write_session.calls == [
+        "begin",
+        "add_pending",
+        "append_event",
+        "commit",
+        "close",
+    ]
+    assert read_session.calls == ["get_by_uuid", "event_exists", "close"]
+
+
+def test_uncertain_commit_requires_the_initial_event_to_reconcile(
+    tmp_path: Path,
+) -> None:
+    audio_root = _audio_root(tmp_path)
+    pending = _pending_job()
+    write_session = FakeSession(commit_error=RuntimeError("connection lost"))
+    read_session = FakeSession(
+        snapshot=_snapshot(pending),
+        event_exists=False,
+    )
+    service = _service(
+        audio_root,
+        FakeSessionFactory([write_session, read_session]),
+    )
+
+    with pytest.raises(JobPersistenceUnavailableError) as captured_error:
+        service.execute("recording.wav", BytesIO(AUDIO_BYTES))
+
+    assert captured_error.value.technical_code == "database_commit_conflict"
+    assert (audio_root / pending.storage_key).read_bytes() == AUDIO_BYTES
 
 
 def test_uncertain_commit_with_no_visible_job_keeps_audio(

@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from glpi_ticketing_database import (
     AudioRetention,
+    JobEventType,
     TicketCreationJob,
     TicketCreationJobEvent,
     WorkerRuntimeStatus,
@@ -181,6 +182,20 @@ def test_persisted_state_checks_reject_unknown_values(
         EVENTS,
         _event_values(parent_uuid, status="unknown"),
         "ck_ticket_creation_job_events_status",
+    )
+    _assert_insert_rejected(
+        migrated_engine,
+        EVENTS,
+        _event_values(parent_uuid, event_type="unknown"),
+        "ck_ticket_creation_job_events_event_type",
+    )
+    _insert_rows(
+        migrated_engine,
+        EVENTS,
+        *(
+            _event_values(parent_uuid, event_type=event_type.value)
+            for event_type in JobEventType
+        ),
     )
     _assert_insert_rejected(
         migrated_engine,

@@ -6,8 +6,8 @@ migration du MVP.
 
 Le package ne contient ni point d'entrée ni historique Alembic. L'application
 one-shot `apps/database-migrations` est seule responsable de l'exécution des
-migrations. Le repository de jobs est partagé avec ses consommateurs ; les
-verrous advisory seront introduits avec les workers persistants.
+migrations. Les repositories sont partagés avec leurs consommateurs, séparés
+par modèle, et les verrous advisory protègent l'unicité des workers persistants.
 
 ## Responsabilités
 
@@ -15,8 +15,14 @@ verrous advisory seront introduits avec les workers persistants.
 - exposer `Base.metadata` à Alembic ;
 - fournir un moteur SQLAlchemy synchrone limité à PostgreSQL avec Psycopg 3 ;
 - fournir une fabrique de sessions synchrones ;
-- créer un job `pending` et son événement initial dans une session appartenant
-  à l'appelant ;
+- créer et faire évoluer un job sans modifier implicitement un autre modèle ;
+- ajouter séparément des événements append-only et des politiques de
+  rétention dans la transaction appartenant à l'application ;
+- persister l'identifiant Transcribe AI dès la soumission et l'identifiant
+  GLPI avant la finalisation ;
+- exposer le heartbeat expurgé des workers singleton ;
+- conserver un verrou advisory PostgreSQL sur une connexion dédiée pendant la
+  durée de vie d'un worker ;
 - retourner des snapshots immuables et typés plutôt que des objets ORM liés à
   une session ;
 - centraliser les valeurs persistées et les contraintes structurelles.
@@ -50,6 +56,54 @@ GLPI qu'une reprise de purge locale. Elle possède donc toujours une date de
 reprise, y compris avec la politique `deadline_only`. Seul l'état `checking`
 est réservé à la politique `ticket_or_deadline`.
 
+## Cycle de vie du worker d'automatisation
+
+`TicketCreationJobRepository.resume_or_claim_next()` sélectionne atomiquement
+un seul job dans cet ordre :
+
+1. le job `processing` à reprendre après un arrêt ;
+2. le plus ancien `retry_scheduled` arrivé à échéance ;
+3. le plus ancien `pending`.
+
+Un retry de portée `system` non encore échu suspend la réclamation de nouveaux
+jobs `pending`, afin de ne pas propager une même indisponibilité globale à
+toute la file. Ce repository ne crée ni événement ni rétention. Le service
+applicatif du worker coordonne `TicketCreationJobRepository`,
+`TicketCreationJobEventRepository` et `AudioRetentionRepository` dans une même
+transaction.
+
+Le repository ne déplace aucun fichier et ne scanne aucun répertoire. Il
+persiste uniquement la `storage_key` canonique ; le consommateur résout ensuite
+le chemin exact avec le package commun.
+
+Les repositories n'appellent jamais `commit()`. Ils valident et `flush()` les
+mutations dans la session fournie, ce qui laisse la frontière transactionnelle
+au service appelant.
+
+## Verrous advisory et runtime
+
+`try_acquire_advisory_lock()` réserve une clé stable par
+`WorkerServiceName` sur une connexion dédiée. Le handle retourné permet de
+vérifier que la même session PostgreSQL détient toujours le verrou et de le
+libérer explicitement. Si le verrou est déjà pris, la fonction retourne
+`None` ; aucune attente implicite n'est effectuée.
+
+Le worker revalide ce handle aux frontières transactionnelles et externes. Une
+connexion perdue ou un backend PostgreSQL différent invalide la propriété : le
+processus échoue alors en mode fail-closed au lieu de poursuivre sous une
+unicité devenue incertaine. `AdvisoryLock.open_session()` lie en plus les
+transactions métier à cette connexion propriétaire : perdre le verrou fait
+également échouer le commit, avant qu'une instance obsolète puisse publier une
+transition locale.
+
+`WorkerRuntimeStatusRepository.record_heartbeat()` remplace la ligne du
+service singleton avec son instance, son état, son job courant éventuel et des
+codes d'erreur expurgés. Les états `degraded` et `blocked` exigent une erreur ;
+les autres états ne peuvent pas en stocker. Seul un heartbeat `starting`, écrit
+après acquisition du verrou advisory, peut remplacer l'identifiant d'une
+ancienne instance. Tout heartbeat ultérieur portant un autre identifiant est
+refusé afin qu'un processus supplanté ne puisse pas écraser l'état du nouveau.
+
 ## Transactions
 
 Une `Session` SQLAlchemy constitue l'unité de travail. Les applications ouvrent
@@ -57,7 +111,10 @@ des transactions courtes avec la fabrique exposée :
 
 ```python
 from glpi_ticketing_database import (
-    JobRepository,
+    JobEventActor,
+    JobEventType,
+    TicketCreationJobEventRepository,
+    TicketCreationJobRepository,
     create_database_engine,
     create_session_factory,
 )
@@ -66,8 +123,15 @@ engine = create_database_engine(database_url)
 session_factory = create_session_factory(engine)
 
 with session_factory.begin() as session:
-    repository = JobRepository(session)
-    repository.add_pending(pending_job)
+    snapshot = TicketCreationJobRepository(session).add_pending(pending_job)
+    TicketCreationJobEventRepository(session).append(
+        snapshot.uuid,
+        occurred_at=snapshot.created_at,
+        status=snapshot.status,
+        stage=snapshot.stage,
+        event_type=JobEventType.JOB_CREATED,
+        actor=JobEventActor.WEB,
+    )
 ```
 
 Aucune transaction ne doit rester ouverte pendant un appel GLPI, Transcribe AI
@@ -95,8 +159,15 @@ packages/database/
 ├── README.md
 ├── src/glpi_ticketing_database/
 │   ├── __init__.py
+│   ├── advisory_locks.py
 │   ├── engine.py
-│   ├── repositories.py
+│   ├── repositories/
+│   │   ├── __init__.py
+│   │   ├── _validation.py
+│   │   ├── ticket_creation_job.py
+│   │   ├── ticket_creation_job_event.py
+│   │   ├── audio_retention.py
+│   │   └── worker_runtime_status.py
 │   └── models/
 │       ├── __init__.py
 │       ├── base.py
@@ -105,20 +176,30 @@ packages/database/
 │       ├── audio_retention.py
 │       ├── ticket_creation_job_event.py
 │       └── worker_runtime_status.py
-└── tests/unit/
-    ├── test_engine.py
-    ├── test_models.py
-    └── test_repositories.py
+└── tests/
+    ├── unit/
+    │   ├── test_advisory_locks.py
+    │   ├── test_audio_retention_repository.py
+    │   ├── test_engine.py
+    │   ├── test_models.py
+    │   ├── test_repository_boundaries.py
+    │   ├── test_ticket_creation_job_event_repository.py
+    │   ├── test_ticket_creation_job_repository.py
+    │   ├── test_ticket_creation_job_transitions.py
+    │   └── test_worker_runtime_status_repository.py
+    └── integration/
+        └── test_ticket_creation_job_repository.py
 ```
 
 ## Validation depuis la racine
 
 ```bash
 uv run pytest packages/database/tests/unit
+uv run pytest -m database packages/database/tests/integration -vv --maxfail=1
 uv run ruff format --check packages/database
 uv run ruff check packages/database
 ```
 
-Les contraintes réellement dépendantes de PostgreSQL sont couvertes par la
-fixture commune `tests/integration/postgres` et par les suites d'intégration de
-l'application de migration et du web.
+Les contraintes réellement dépendantes de PostgreSQL, les verrous session et
+les transitions atomiques sont couverts par la fixture commune
+`tests/integration/postgres` et par les suites d'intégration des applications.

@@ -74,6 +74,21 @@ class JobEventActor(StrEnum):
     WORKER_RETENTION = "worker_retention"
 
 
+class JobEventType(StrEnum):
+    """Stable event labels emitted by application lifecycle services."""
+
+    JOB_CREATED = "job_created"
+    PROCESSING_STARTED = "processing_started"
+    PROCESSING_RESUMED = "processing_resumed"
+    TRANSCRIPTION_SUBMITTED = "transcription_submitted"
+    TRANSCRIPTION_SUCCEEDED = "transcription_succeeded"
+    RETRY_SCHEDULED = "retry_scheduled"
+    TICKET_CONFIRMED = "ticket_confirmed"
+    JOB_COMPLETED = "job_completed"
+    JOB_FAILED = "job_failed"
+    JOB_BLOCKED = "job_blocked"
+
+
 class WorkerServiceName(StrEnum):
     """Singleton worker services represented in the runtime table."""
 
@@ -102,6 +117,7 @@ __all__ = [
     "DeletionReason",
     "ErrorScope",
     "JobEventActor",
+    "JobEventType",
     "JobStage",
     "JobStatus",
     "RetentionPolicy",

@@ -24,10 +24,13 @@ from glpi_ticketing_common.audio_files import (
 )
 from glpi_ticketing_database import (
     AudioExtension,
-    JobRepository,
+    JobEventActor,
+    JobEventType,
     JobSnapshot,
     JobStatus,
     PendingJob,
+    TicketCreationJobEventRepository,
+    TicketCreationJobRepository,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -223,7 +226,15 @@ class SubmitAudioJob:
         try:
             session = self._session_factory()
             session.begin()
-            JobRepository(session).add_pending(pending_job)
+            snapshot = TicketCreationJobRepository(session).add_pending(pending_job)
+            TicketCreationJobEventRepository(session).append(
+                snapshot.uuid,
+                occurred_at=snapshot.created_at,
+                status=snapshot.status,
+                stage=snapshot.stage,
+                event_type=JobEventType.JOB_CREATED,
+                actor=JobEventActor.WEB,
+            )
         except Exception as error:
             _rollback_and_close(session)
             self._compensate_confirmed_failure(storage, pending_job.uuid, error)
@@ -245,8 +256,15 @@ class SubmitAudioJob:
         reconciliation_session: Session | None = None
         try:
             reconciliation_session = self._session_factory()
-            snapshot = JobRepository(reconciliation_session).get_by_uuid(
+            snapshot = TicketCreationJobRepository(reconciliation_session).get_by_uuid(
                 pending_job.uuid
+            )
+            created_event_exists = TicketCreationJobEventRepository(
+                reconciliation_session
+            ).exists(
+                pending_job.uuid,
+                event_type=JobEventType.JOB_CREATED,
+                actor=JobEventActor.WEB,
             )
         except Exception:
             LOGGER.error(
@@ -260,7 +278,11 @@ class SubmitAudioJob:
         finally:
             _close_session(reconciliation_session)
 
-        if snapshot is not None and _snapshot_matches(snapshot, pending_job):
+        if (
+            snapshot is not None
+            and created_event_exists
+            and _snapshot_matches(snapshot, pending_job)
+        ):
             LOGGER.warning(
                 "job commit reconciled audio_uuid=%s "
                 "event_code=database_commit_reconciled",
@@ -325,7 +347,7 @@ class GetAudioJob:
         session: Session | None = None
         try:
             session = self._session_factory()
-            return JobRepository(session).get_by_uuid(audio_uuid)
+            return TicketCreationJobRepository(session).get_by_uuid(audio_uuid)
         except Exception as error:
             raise JobQueryUnavailableError("Job persistence is unavailable") from error
         finally:

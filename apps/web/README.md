@@ -141,8 +141,9 @@ Conventions :
 - une réponse de streaming ferme son descripteur dans un `finally` couvrant
   l'intégralité de son appel ASGI, y compris avant le premier octet ;
 - une `Session` SQLAlchemy est l'unité de travail, sans classe `UnitOfWork` ;
-- `JobRepository` fait `flush()`, mais jamais `commit()`, `rollback()` ou
-  `close()` ;
+- `TicketCreationJobRepository` et `TicketCreationJobEventRepository` ne
+  manipulent chacun que leur modèle et font `flush()`, jamais `commit()`,
+  `rollback()` ou `close()` ;
 - aucun accès fichier n'est exécuté pendant la transaction SQL ;
 - le nom original n'entre jamais dans `storage_key`.
 

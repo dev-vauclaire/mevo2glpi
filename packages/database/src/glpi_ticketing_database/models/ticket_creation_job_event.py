@@ -19,7 +19,14 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
-from .enums import ErrorScope, JobEventActor, JobStage, JobStatus, sql_values
+from .enums import (
+    ErrorScope,
+    JobEventActor,
+    JobEventType,
+    JobStage,
+    JobStatus,
+    sql_values,
+)
 
 
 class TicketCreationJobEvent(Base):
@@ -66,6 +73,10 @@ class TicketCreationJobEvent(Base):
         CheckConstraint(
             f"actor IN ({sql_values(JobEventActor)})",
             name="actor",
+        ),
+        CheckConstraint(
+            f"event_type IN ({sql_values(JobEventType)})",
+            name="event_type",
         ),
         CheckConstraint(
             "(error_scope IS NULL AND error_category IS NULL "

@@ -12,17 +12,16 @@ import glpi_ticketing_database as database_api
 from glpi_ticketing_database import (
     AudioExtension,
     ErrorScope,
-    JobRepository,
     JobSnapshot,
     JobStage,
     JobStatus,
     PendingJob,
     TicketCreationJob,
-    TicketCreationJobEvent,
+    TicketCreationJobRepository,
 )
 
 
-def test_add_pending_flushes_job_and_initial_event_in_same_session() -> None:
+def test_add_pending_flushes_only_the_job_model() -> None:
     session = create_autospec(Session, instance=True)
     pending_job = _pending_job()
     now = datetime(2026, 8, 27, 12, tzinfo=UTC)
@@ -36,9 +35,9 @@ def test_add_pending_flushes_job_and_initial_event_in_same_session() -> None:
 
     session.flush.side_effect = populate_server_defaults
 
-    snapshot = JobRepository(session).add_pending(pending_job)
+    snapshot = TicketCreationJobRepository(session).add_pending(pending_job)
 
-    job, event = _added_entities(session)
+    (job,) = _added_entities(session)
     assert isinstance(job, TicketCreationJob)
     assert job.uuid == pending_job.uuid
     assert job.status == JobStatus.PENDING.value
@@ -46,12 +45,6 @@ def test_add_pending_flushes_job_and_initial_event_in_same_session() -> None:
     assert job.storage_key == pending_job.storage_key
     assert job.audio_extension == AudioExtension.WAV.value
     assert job.audio_size_bytes == 42
-    assert isinstance(event, TicketCreationJobEvent)
-    assert event.job_uuid == pending_job.uuid
-    assert event.status == JobStatus.PENDING.value
-    assert event.stage is None
-    assert event.event_type == "job_created"
-    assert event.actor == "web"
     assert snapshot == _expected_pending_snapshot(pending_job, now)
     session.flush.assert_called_once_with()
 
@@ -69,7 +62,7 @@ def test_add_pending_does_not_own_the_transaction() -> None:
 
     session.flush.side_effect = populate_server_defaults
 
-    JobRepository(session).add_pending(_pending_job())
+    TicketCreationJobRepository(session).add_pending(_pending_job())
 
     session.commit.assert_not_called()
     session.rollback.assert_not_called()
@@ -81,7 +74,7 @@ def test_add_pending_propagates_flush_error_without_rolling_back() -> None:
     session.flush.side_effect = RuntimeError("database failure")
 
     with pytest.raises(RuntimeError, match="database failure"):
-        JobRepository(session).add_pending(_pending_job())
+        TicketCreationJobRepository(session).add_pending(_pending_job())
 
     session.commit.assert_not_called()
     session.rollback.assert_not_called()
@@ -111,9 +104,9 @@ def test_add_pending_rejects_inconsistent_values_before_session_mutation(
     session = create_autospec(Session, instance=True)
 
     with pytest.raises(ValueError):
-        JobRepository(session).add_pending(pending_job)
+        TicketCreationJobRepository(session).add_pending(pending_job)
 
-    session.add_all.assert_not_called()
+    session.add.assert_not_called()
     session.flush.assert_not_called()
 
 
@@ -128,9 +121,9 @@ def test_add_pending_requires_typed_audio_extension() -> None:
     )
 
     with pytest.raises(TypeError, match="AudioExtension"):
-        JobRepository(session).add_pending(pending_job)
+        TicketCreationJobRepository(session).add_pending(pending_job)
 
-    session.add_all.assert_not_called()
+    session.add.assert_not_called()
 
 
 def test_get_by_uuid_returns_typed_immutable_snapshot() -> None:
@@ -140,7 +133,7 @@ def test_get_by_uuid_returns_typed_immutable_snapshot() -> None:
     job = _persisted_job(job_uuid, now)
     session.get.return_value = job
 
-    snapshot = JobRepository(session).get_by_uuid(job_uuid)
+    snapshot = TicketCreationJobRepository(session).get_by_uuid(job_uuid)
 
     assert snapshot == JobSnapshot(
         uuid=job_uuid,
@@ -171,13 +164,13 @@ def test_get_by_uuid_returns_none_for_an_unknown_job() -> None:
     job_uuid = uuid4()
     session.get.return_value = None
 
-    assert JobRepository(session).get_by_uuid(job_uuid) is None
+    assert TicketCreationJobRepository(session).get_by_uuid(job_uuid) is None
 
     session.get.assert_called_once_with(TicketCreationJob, job_uuid)
 
 
 def test_repository_contracts_are_exposed_by_the_package() -> None:
-    assert database_api.JobRepository is JobRepository
+    assert database_api.TicketCreationJobRepository is TicketCreationJobRepository
     assert database_api.JobSnapshot is JobSnapshot
     assert database_api.PendingJob is PendingJob
 
@@ -192,9 +185,8 @@ def _pending_job() -> PendingJob:
     )
 
 
-def _added_entities(session: Any) -> tuple[Any, Any]:
-    entities = session.add_all.call_args.args[0]
-    return tuple(entities)
+def _added_entities(session: Any) -> tuple[Any, ...]:
+    return tuple(call.args[0] for call in session.add.call_args_list)
 
 
 def _expected_pending_snapshot(

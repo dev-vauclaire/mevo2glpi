@@ -374,6 +374,13 @@ def upgrade() -> None:
             name=op.f("ck_ticket_creation_job_events_actor"),
         ),
         sa.CheckConstraint(
+            "event_type IN ('job_created', 'processing_started', "
+            "'processing_resumed', 'transcription_submitted', "
+            "'transcription_succeeded', 'retry_scheduled', "
+            "'ticket_confirmed', 'job_completed', 'job_failed', 'job_blocked')",
+            name=op.f("ck_ticket_creation_job_events_event_type"),
+        ),
+        sa.CheckConstraint(
             "(error_scope IS NULL AND error_category IS NULL "
             "AND technical_code IS NULL) OR "
             "(error_scope IS NOT NULL AND error_category IS NOT NULL "

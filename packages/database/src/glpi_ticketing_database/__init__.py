@@ -1,5 +1,11 @@
 """Shared persistence contracts for the GLPI ticketing MVP."""
 
+from .advisory_locks import (
+    AdvisoryLock,
+    AdvisoryLockConnectionLostError,
+    AdvisoryLockReleasedError,
+    try_acquire_advisory_lock,
+)
 from .engine import (
     DatabaseConfigurationError,
     create_database_engine,
@@ -12,6 +18,7 @@ from .models import (
     DeletionReason,
     ErrorScope,
     JobEventActor,
+    JobEventType,
     JobStage,
     JobStatus,
     RetentionPolicy,
@@ -22,28 +29,55 @@ from .models import (
     WorkerRuntimeStatus,
     WorkerServiceName,
 )
-from .repositories import JobRepository, JobSnapshot, PendingJob
+from .repositories import (
+    AudioRetentionRepository,
+    InvalidJobTransitionError,
+    JobAcquisition,
+    JobMutation,
+    JobNotFoundError,
+    JobSnapshot,
+    PendingJob,
+    StaleWorkerInstanceError,
+    TicketCreationJobEventRepository,
+    TicketCreationJobRepository,
+    WorkerRuntimeSnapshot,
+    WorkerRuntimeStatusRepository,
+)
 
 __all__ = [
+    "AdvisoryLock",
+    "AdvisoryLockConnectionLostError",
+    "AdvisoryLockReleasedError",
     "AudioExtension",
     "AudioRetention",
+    "AudioRetentionRepository",
     "Base",
     "DatabaseConfigurationError",
     "DeletionReason",
     "ErrorScope",
     "JobEventActor",
-    "JobRepository",
+    "JobEventType",
+    "InvalidJobTransitionError",
+    "JobAcquisition",
+    "JobMutation",
+    "JobNotFoundError",
     "JobSnapshot",
     "JobStage",
     "JobStatus",
     "RetentionPolicy",
     "RetentionStatus",
     "PendingJob",
+    "StaleWorkerInstanceError",
     "TicketCreationJob",
     "TicketCreationJobEvent",
+    "TicketCreationJobEventRepository",
+    "TicketCreationJobRepository",
     "WorkerRuntimeState",
+    "WorkerRuntimeSnapshot",
     "WorkerRuntimeStatus",
+    "WorkerRuntimeStatusRepository",
     "WorkerServiceName",
     "create_database_engine",
     "create_session_factory",
+    "try_acquire_advisory_lock",
 ]
