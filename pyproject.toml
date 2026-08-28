@@ -16,11 +16,13 @@ members = [
     "apps/worker-automation",
     "packages/common",
     "packages/database",
+    "packages/glpi-client",
 ]
 
 [tool.uv.sources]
 glpi-ticketing-common = { workspace = true }
 glpi-ticketing-database = { workspace = true }
+glpi-ticketing-glpi = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -56,6 +58,7 @@ src = [
     "apps/worker-automation/src",
     "packages/common/src",
     "packages/database/src",
+    "packages/glpi-client/src",
 ]
 
 [tool.ruff.lint]

@@ -10,8 +10,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from glpi_ticketing_database import ErrorScope, JobStage, JobStatus
-
-from ..glpi.models import TicketId
+from glpi_ticketing_glpi import TicketId
 
 _SAFE_IDENTIFIER = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 

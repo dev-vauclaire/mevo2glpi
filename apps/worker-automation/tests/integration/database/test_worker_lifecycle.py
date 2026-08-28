@@ -30,6 +30,7 @@ from glpi_ticketing_database import (
     TicketCreationJobRepository,
     create_session_factory,
 )
+from glpi_ticketing_glpi import GlpiTicketDefaults, TicketLevel, TicketType
 from glpi_ticketing_worker_automation.transcription import (
     JobUuid,
     TranscriptionResult,
@@ -635,6 +636,12 @@ def _worker(
             lifecycle=lifecycle,
             transitions=transitions,
             audio_url_for=lambda audio_uuid: f"https://audio.test/audios/{audio_uuid}",
+            ticket_defaults=GlpiTicketDefaults(
+                title="Demande issue d'un appel audio",
+                ticket_type=TicketType.REQUEST,
+                urgency=TicketLevel.LOW,
+                impact=TicketLevel.MEDIUM,
+            ),
         ),
         transitions=transitions,
         idle_wait_seconds=1,

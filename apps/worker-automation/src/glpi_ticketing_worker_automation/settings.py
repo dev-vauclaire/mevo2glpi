@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
-from .glpi.models import TicketLevel, TicketType
+from glpi_ticketing_glpi import TicketLevel, TicketType
 
 
 class WorkerSettings(BaseSettings):

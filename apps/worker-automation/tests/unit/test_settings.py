@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from glpi_ticketing_worker_automation.glpi.models import TicketLevel, TicketType
+from glpi_ticketing_glpi import TicketLevel, TicketType
 from glpi_ticketing_worker_automation.settings import WorkerSettings
 
 TRANSCRIPTION_BASE_URL = "https://transcription.example.test"

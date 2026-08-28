@@ -195,6 +195,11 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     assert ticket_stage_arguments["audio_url_for"](AUDIO_UUID) == (
         f"https://web.example.test/base/audios/{AUDIO_UUID}"
     )
+    ticket_defaults = ticket_stage_arguments["ticket_defaults"]
+    assert ticket_defaults.title == settings.glpi_ticket_title
+    assert ticket_defaults.ticket_type is settings.glpi_ticket_type
+    assert ticket_defaults.urgency is settings.glpi_ticket_urgency
+    assert ticket_defaults.impact is settings.glpi_ticket_impact
 
     worker_arguments = captured["worker"]["kwargs"]
     assert worker_arguments["lifecycle"] is captured["lifecycle_instance"]

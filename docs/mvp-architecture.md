@@ -162,13 +162,13 @@ pour le MVP.
 │   │   │   └── advisory_locks.py                      🟦 singleton par service
 │   │   └── tests/
 │   │
-│   └── glpi-client/                                   ⬜ extraction du client
-│       ├── pyproject.toml
-│       ├── src/glpi_ticketing_glpi/
-│       │   ├── client.py
-│       │   ├── contracts.py
-│       │   └── models.py
-│       └── tests/
+│   └── glpi-client/                                   🟦 client partagé GLPI V2.3.0
+│       ├── pyproject.toml                              🟦
+│       ├── src/glpi_ticketing_glpi/                   🟦
+│       │   ├── client.py                              🟦 création et lecture par ID
+│       │   ├── contracts.py                           🟦 ports et erreurs expurgées
+│       │   └── models.py                              🟦 commandes et statuts épinglés
+│       └── tests/                                     🟦 unités + stack GLPI jetable
 │
 ├── docs/
 │   └── mvp-architecture.md                            🟦
@@ -919,6 +919,12 @@ l'authentification applicative est reportée avant toute exposition élargie.
 
 Périmètre : extraction de `packages/glpi-client`, lecture du statut du ticket,
 application `worker-retention`, deadlines et purge crash-safe.
+
+État : 🟦 sous-jalon 5A implémenté sur la branche. Le client GLPI, ses contrats
+et sa stack Testcontainers appartiennent désormais au package partagé. La
+lecture directe par identifiant est épinglée sur l'API V2.3.0 et retourne le
+statut numérique GLPI 11.0.8. Le worker de rétention, ses transitions et la
+purge restent à implémenter dans les sous-jalons suivants.
 
 - Tests unitaires : statuts GLPI, correspondance `external_id`, planification,
   priorité de deadline, quarantaine `.purge` et reprise de chaque point de

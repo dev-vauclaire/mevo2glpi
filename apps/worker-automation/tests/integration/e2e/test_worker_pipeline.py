@@ -32,10 +32,9 @@ from glpi_ticketing_database import (
     create_database_engine,
     create_session_factory,
 )
-from glpi_ticketing_worker_automation.glpi import (
+from glpi_ticketing_glpi import (
     GLPI_API_VERSION,
     GlpiClient,
-    GlpiTicketDefaults,
     TicketLevel,
     TicketType,
 )
@@ -254,12 +253,6 @@ def _contains_ordered_subsequence(
 
 def _find_ticket(*, glpi_environment, audio_uuid: UUID) -> Mapping[str, object]:
     credentials = glpi_environment.credentials
-    defaults = GlpiTicketDefaults(
-        title=TICKET_TITLE,
-        ticket_type=TicketType.REQUEST,
-        urgency=TicketLevel.LOW,
-        impact=TicketLevel.MEDIUM,
-    )
     with httpx.Client() as http_client:
         client = GlpiClient(
             base_url=glpi_environment.base_url,
@@ -267,7 +260,6 @@ def _find_ticket(*, glpi_environment, audio_uuid: UUID) -> Mapping[str, object]:
             password=SecretStr(credentials.password),
             client_id=credentials.client_id,
             client_secret=SecretStr(credentials.client_secret),
-            ticket_defaults=defaults,
             http_client=http_client,
             timeout=GLPI_HTTP_TIMEOUT_SECONDS,
         )

@@ -8,14 +8,15 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from glpi_ticketing_database import ErrorScope, JobStage
-
-from ...glpi import (
+from glpi_ticketing_glpi import (
     GlpiClientError,
-    GlpiClientProtocol,
     GlpiDuplicateExternalIdError,
-    GlpiTicketInput,
+    GlpiTicketCreateCommand,
+    GlpiTicketCreationProtocol,
+    GlpiTicketDefaults,
     GlpiTicketRejectedError,
 )
+
 from ..outcomes import FailureDetails, RunOutcome
 from ..ports import JobLifecycleProtocol, JobSnapshotProtocol
 from ..transitions import JobTransitionService
@@ -39,10 +40,11 @@ class TicketCreationStage:
     def __init__(
         self,
         *,
-        glpi_client: GlpiClientProtocol,
+        glpi_client: GlpiTicketCreationProtocol,
         lifecycle: JobLifecycleProtocol,
         transitions: JobTransitionService,
         audio_url_for: Callable[[UUID], str],
+        ticket_defaults: GlpiTicketDefaults,
         ownership_guard: Callable[[], None] | None = None,
     ) -> None:
         if not callable(getattr(glpi_client, "ensure_ticket", None)):
@@ -53,6 +55,8 @@ class TicketCreationStage:
             raise TypeError("transitions must be a JobTransitionService")
         if not callable(audio_url_for):
             raise TypeError("audio_url_for must be callable")
+        if not isinstance(ticket_defaults, GlpiTicketDefaults):
+            raise TypeError("ticket_defaults must be a GlpiTicketDefaults")
         if ownership_guard is not None and not callable(ownership_guard):
             raise TypeError("ownership_guard must be callable")
 
@@ -60,6 +64,7 @@ class TicketCreationStage:
         self._lifecycle = lifecycle
         self._transitions = transitions
         self._audio_url_for = audio_url_for
+        self._ticket_defaults = ticket_defaults
         self._ownership_guard = ownership_guard or _no_op
 
     def execute(
@@ -73,11 +78,6 @@ class TicketCreationStage:
         audio_uuid = job.uuid
         try:
             audio_url = self._audio_url_for(audio_uuid)
-            ticket_input = GlpiTicketInput(
-                audio_uuid=audio_uuid,
-                transcription=transcription,
-                audio_url=audio_url,
-            )
         except (TypeError, ValueError):
             return self._transitions.block(
                 audio_uuid,
@@ -91,8 +91,27 @@ class TicketCreationStage:
             )
 
         try:
+            command = GlpiTicketCreateCommand(
+                audio_uuid=audio_uuid,
+                transcription=transcription,
+                audio_url=audio_url,
+                defaults=self._ticket_defaults,
+            )
+        except (TypeError, ValueError):
+            return self._transitions.block(
+                audio_uuid,
+                stage=JobStage.GLPI_CREATION,
+                failure=FailureDetails(
+                    scope=ErrorScope.SYSTEM,
+                    category="configuration",
+                    technical_code="invalid_ticket_command",
+                ),
+                automatic_probe=False,
+            )
+
+        try:
             ticket_id = self._guarded_external_call(
-                lambda: self._glpi_client.ensure_ticket(ticket_input)
+                lambda: self._glpi_client.ensure_ticket(command)
             )
         except GlpiClientError as error:
             if error.retryable or error.outcome_unknown:

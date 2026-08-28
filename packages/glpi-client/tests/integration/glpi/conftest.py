@@ -16,11 +16,17 @@ import pytest
 from testcontainers.compose import DockerCompose
 from testcontainers.core.docker_client import DockerClient
 
+from glpi_ticketing_glpi import TicketStatus
+
 GLPI_TEST_DIRECTORY = Path(__file__).resolve().parent
 GLPI_HTTP_READY_TIMEOUT_SECONDS = 300.0
 GLPI_API_READY_TIMEOUT_SECONDS = 60.0
 GLPI_HTTP_POLL_INTERVAL_SECONDS = 1.0
 GLPI_BOOTSTRAP_COMMAND = ["php", "/opt/glpi-test/bootstrap_oauth.php"]
+GLPI_SET_TICKET_STATUS_COMMAND = [
+    "php",
+    "/opt/glpi-test/set_ticket_status.php",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +57,14 @@ class OAuthBootstrapResult:
 
 
 @dataclass(frozen=True, slots=True)
+class TicketStatusTransitionResult:
+    """Minimal result returned by the test-only GLPI transition helper."""
+
+    ticket_id: int
+    status: TicketStatus
+
+
+@dataclass(frozen=True, slots=True)
 class GlpiTestEnvironment:
     """Session-scoped handle to the disposable GLPI integration stack."""
 
@@ -70,6 +84,41 @@ class GlpiTestEnvironment:
     def exec_glpi(self, command: list[str]) -> tuple[str, str, int]:
         """Run a diagnostic command in the already-running GLPI container."""
         return _exec_glpi(self._compose, self._docker_client, command)
+
+    def set_ticket_status(
+        self,
+        ticket_id: int,
+        status: TicketStatus,
+    ) -> TicketStatusTransitionResult:
+        """Apply one allowlisted status transition through GLPI business classes."""
+        if (
+            isinstance(ticket_id, bool)
+            or not isinstance(ticket_id, int)
+            or ticket_id <= 0
+        ):
+            raise ValueError("ticket_id must be a positive integer")
+        if not isinstance(status, TicketStatus) or status not in {
+            TicketStatus.SOLVED,
+            TicketStatus.CLOSED,
+        }:
+            raise ValueError("status must be SOLVED or CLOSED")
+
+        stdout, _, exit_code = _exec_glpi(
+            self._compose,
+            self._docker_client,
+            GLPI_SET_TICKET_STATUS_COMMAND,
+            environment={
+                "GLPI_TEST_TICKET_ID": str(ticket_id),
+                "GLPI_TEST_TICKET_STATUS": str(int(status)),
+                "GLPI_TEST_USER_ID": str(self.credentials.user_id),
+            },
+        )
+        if exit_code != 0:
+            raise RuntimeError("The GLPI test ticket transition helper failed")
+        result = _parse_ticket_status_transition(stdout)
+        if result.ticket_id != ticket_id or result.status is not status:
+            raise RuntimeError("The GLPI test ticket transition result is inconsistent")
+        return result
 
 
 def _new_environment() -> dict[str, str]:
@@ -151,6 +200,41 @@ def _parse_bootstrap_result(stdout: str) -> OAuthBootstrapResult:
     return OAuthBootstrapResult(**payload)
 
 
+def _parse_ticket_status_transition(stdout: str) -> TicketStatusTransitionResult:
+    try:
+        payload = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError) as exception:
+        raise RuntimeError(
+            "The GLPI test ticket transition did not return valid JSON"
+        ) from exception
+
+    if not isinstance(payload, dict) or set(payload) != {"ticket_id", "status"}:
+        raise RuntimeError(
+            "The GLPI test ticket transition returned an invalid contract"
+        )
+    ticket_id = payload["ticket_id"]
+    status_id = payload["status"]
+    if (
+        isinstance(ticket_id, bool)
+        or not isinstance(ticket_id, int)
+        or ticket_id <= 0
+        or isinstance(status_id, bool)
+        or not isinstance(status_id, int)
+    ):
+        raise RuntimeError("The GLPI test ticket transition returned invalid values")
+    try:
+        status = TicketStatus(status_id)
+    except ValueError:
+        raise RuntimeError(
+            "The GLPI test ticket transition returned an unsupported status"
+        ) from None
+    if status not in {TicketStatus.SOLVED, TicketStatus.CLOSED}:
+        raise RuntimeError(
+            "The GLPI test ticket transition returned a forbidden status"
+        )
+    return TicketStatusTransitionResult(ticket_id=ticket_id, status=status)
+
+
 def _run_bootstrap(
     compose: DockerCompose,
     docker_client: DockerClient,
@@ -214,9 +298,11 @@ def _exec_glpi(
     compose: DockerCompose,
     docker_client: DockerClient,
     command: list[str],
+    *,
+    environment: Mapping[str, str] | None = None,
 ) -> tuple[str, str, int]:
     container = _get_glpi_docker_container(compose, docker_client)
-    result = container.exec_run(command, demux=True)
+    result = container.exec_run(command, demux=True, environment=environment)
     stdout_bytes, stderr_bytes = result.output
     stdout = "" if stdout_bytes is None else stdout_bytes.decode(errors="replace")
     stderr = "" if stderr_bytes is None else stderr_bytes.decode(errors="replace")

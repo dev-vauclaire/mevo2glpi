@@ -7,16 +7,25 @@ from typing import Protocol
 from .models import (
     GlpiErrorCategory,
     GlpiOperation,
-    GlpiTicketInput,
+    GlpiTicketCreateCommand,
+    GlpiTicketSnapshot,
     TicketId,
 )
 
 
-class GlpiClientProtocol(Protocol):
-    """Expose idempotent ticket creation to the worker."""
+class GlpiTicketCreationProtocol(Protocol):
+    """Narrow port used by the automation worker."""
 
-    def ensure_ticket(self, ticket: GlpiTicketInput) -> TicketId:
+    def ensure_ticket(self, command: GlpiTicketCreateCommand) -> TicketId:
         """Return the existing ticket or create it exactly once when possible."""
+        ...
+
+
+class GlpiTicketReaderProtocol(Protocol):
+    """Narrow port used by consumers that inspect an already known ticket."""
+
+    def get_ticket(self, ticket_id: TicketId) -> GlpiTicketSnapshot:
+        """Load one ticket directly from its persisted GLPI identifier."""
         ...
 
 
@@ -104,6 +113,19 @@ class GlpiDuplicateExternalIdError(GlpiClientError):
             operation=GlpiOperation.FIND_TICKET,
             category=GlpiErrorCategory.CONFLICT,
             technical_code="duplicate_external_id",
+            retryable=False,
+            outcome_unknown=False,
+        )
+
+
+class GlpiTicketNotFoundError(GlpiClientError):
+    """Raised when a direct ticket lookup returns HTTP 404."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            operation=GlpiOperation.GET_TICKET,
+            category=GlpiErrorCategory.NOT_FOUND,
+            technical_code="ticket_not_found",
             retryable=False,
             outcome_unknown=False,
         )

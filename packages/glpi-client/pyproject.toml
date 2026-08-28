@@ -1,0 +1,13 @@
+[project]
+name = "glpi-ticketing-glpi"
+version = "0.1.0"
+description = "Client HTTP partagé pour le contrat GLPI API V2"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28,<1",
+    "pydantic>=2.11,<3",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"

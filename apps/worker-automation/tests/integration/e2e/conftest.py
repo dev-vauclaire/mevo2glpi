@@ -11,7 +11,7 @@ import pytest
 # The service-specific conftests remain the single owners of stack startup,
 # readiness and cleanup.  Importing their fixture functions here makes both
 # sibling fixtures available without copying either bootstrap implementation.
-_glpi_fixtures = import_module("apps.worker-automation.tests.integration.glpi.conftest")
+_glpi_fixtures = import_module("packages.glpi-client.tests.integration.glpi.conftest")
 _transcribe_ai_fixtures = import_module(
     "apps.worker-automation.tests.integration.transcribe-ai.conftest"
 )

@@ -4,7 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from glpi_ticketing_database import ErrorScope, JobStage
-from glpi_ticketing_worker_automation.glpi import (
+from glpi_ticketing_glpi import (
     GlpiOperation,
     GlpiTransportError,
 )

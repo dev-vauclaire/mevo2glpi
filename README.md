@@ -125,12 +125,13 @@ explicitement ses dépendances d'exécution.
 | `apps/worker-automation` | `glpi-ticketing-worker-automation` | Sélection et orchestration persistantes, transcription, ticket GLPI et finalisation | [Worker d'automatisation](apps/worker-automation/README.md) |
 | `packages/common` | `glpi-ticketing-common` | Publication et résolution du stockage audio canonique unique | [Package commun](packages/common/README.md) |
 | `packages/database` | `glpi-ticketing-database` | Modèles, sessions, repositories de cycle de vie/runtime et verrous advisory | [Package database](packages/database/README.md) |
+| `packages/glpi-client` | `glpi-ticketing-glpi` | Contrats étroits de création/lecture et adaptateur HTTP GLPI V2.3.0 | [Client GLPI](packages/glpi-client/README.md) |
 
-Le web et le worker dépendent des packages commun et database. L'application
-de migration dépend du package database pour importer `Base.metadata`. Ces
-dépendances sont déclarées comme sources workspace à la racine. Une
-application ne doit pas importer directement les modules internes d'une autre
-application.
+Le web et le worker dépendent des packages commun et database. Le worker
+d'automatisation dépend en plus du client GLPI partagé. L'application de
+migration dépend du package database pour importer `Base.metadata`. Ces
+dépendances sont déclarées comme sources workspace à la racine. Une application
+ne doit pas importer directement les modules internes d'une autre application.
 
 Les artefacts sous [`infra/docker/`](infra/docker/README.md) ne constituent pas
 un membre Python supplémentaire. Le déploiement complet du POC reste figé par
@@ -287,7 +288,7 @@ vérité ; `uv.lock` fixe les versions exactes installées pour le dépôt.
 
 | Technologie | Contrainte déclarée | Utilisation |
 | --- | --- | --- |
-| Python | `>=3.12` | Langage commun aux cinq membres |
+| Python | `>=3.12` | Langage commun aux six membres |
 | uv | workspace et lock partagé | Résolution, environnement, exécution et build |
 | FastAPI | `>=0.116,<1` | Routes HTTP et validation de l'application web |
 | Uvicorn | `>=0.35,<1` | Serveur ASGI composé par le point d'entrée web |
@@ -304,7 +305,7 @@ vérité ; `uv.lock` fixe les versions exactes installées pour le dépôt.
 | Nginx | `1.30.4-alpine3.24`, image épinglée par digest | Terminaison TLS, authentification Basic et reverse proxy du POC |
 | Docker Engine / Compose | `28.3.3+` / `2.24+`, hors workspace Python | Images Nginx/web/worker et déploiement mono-serveur du POC |
 
-Les cinq distributions du projet utilisent `uv_build` comme backend de
+Les six distributions du projet utilisent `uv_build` comme backend de
 construction et portent actuellement la version `0.1.0`.
 
 ## Prérequis
@@ -518,8 +519,9 @@ GLPI 11.0.8, épinglé par digest, et utilise une image MySQL 8.4.11 également
 `127.0.0.1`, attend sa disponibilité HTTP, puis crée avec les classes métier
 GLPI un utilisateur et un client OAuth Password limités au scope `api`. Tous
 les identifiants sont éphémères et transmis par variables d'environnement. La
-suite récupère le token par `GlpiClient`, crée réellement un ticket et vérifie
-sa corrélation par `external_id`. Elle ne doit pas être parallélisée ; son
+suite récupère le token par `GlpiClient`, crée réellement un ticket, le relit
+directement par son ID et vérifie sa corrélation par `external_id`. Elle ne doit
+pas être parallélisée ; son
 teardown supprime les conteneurs, le réseau, les volumes Compose et l'image
 custom construite pour la session.
 
@@ -563,8 +565,8 @@ uv run pytest -m deployment tests/deployment -vv --maxfail=1
 Intégration GLPI jetable, à exécuter séparément et sans parallélisation :
 
 ```bash
-uv run pytest -m glpi \
-apps/worker-automation/tests/integration/glpi -vv --maxfail=1
+uv run --package glpi-ticketing-glpi pytest -m glpi \
+  packages/glpi-client/tests/integration/glpi -vv --maxfail=1
 ```
 
 Tests ciblés par membre :
@@ -574,6 +576,7 @@ uv run --all-packages pytest apps/web/tests
 uv run --all-packages pytest apps/worker-automation/tests/unit
 uv run --all-packages pytest packages/common/tests
 uv run --all-packages pytest packages/database/tests/unit
+uv run --package glpi-ticketing-glpi pytest packages/glpi-client/tests/unit
 uv run --all-packages pytest apps/database-migrations/tests/unit
 ```
 

@@ -10,4 +10,5 @@ LABEL org.opencontainers.image.title="GLPI integration-test image" \
 USER root
 RUN install --directory --mode=0750 --owner=www-data --group=www-data /opt/glpi-test
 COPY --chown=www-data:www-data --chmod=0440 bootstrap_oauth.php /opt/glpi-test/bootstrap_oauth.php
+COPY --chown=www-data:www-data --chmod=0440 set_ticket_status.php /opt/glpi-test/set_ticket_status.php
 USER www-data

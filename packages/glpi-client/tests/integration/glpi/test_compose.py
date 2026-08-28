@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 import pytest
 
-from glpi_ticketing_worker_automation.glpi import GLPI_API_VERSION
+from glpi_ticketing_glpi import GLPI_API_VERSION
 
 pytestmark = pytest.mark.glpi
 
@@ -17,12 +17,24 @@ GLPI_TEST_DIRECTORY = Path(__file__).resolve().parent
 GLPI_COMPOSE_FILE = GLPI_TEST_DIRECTORY / "compose.yml"
 GLPI_DOCKERFILE = GLPI_TEST_DIRECTORY / "image" / "Dockerfile"
 GLPI_BOOTSTRAP = GLPI_TEST_DIRECTORY / "image" / "bootstrap_oauth.php"
+GLPI_STATUS_HELPER = GLPI_TEST_DIRECTORY / "image" / "set_ticket_status.php"
 PINNED_GLPI_API_VERSION = "2.3.0"
 PINNED_OPENAPI_VERSION = "3.0.0"
 GLPI_API_ROOT = f"/api.php/v{PINNED_GLPI_API_VERSION}"
 GLPI_OPENAPI_PATH = f"{GLPI_API_ROOT}/doc.json"
 GLPI_TICKET_OPENAPI_PATH = "/Assistance/Ticket"
+GLPI_TICKET_BY_ID_OPENAPI_PATH = "/Assistance/Ticket/{id}"
 GLPI_HTTP_TIMEOUT_SECONDS = 10.0
+
+
+def _require_mapping(
+    parent: Mapping[str, object],
+    key: str,
+) -> Mapping[str, object]:
+    value = parent.get(key)
+    if not isinstance(value, Mapping):
+        pytest.fail(f"The pinned GLPI OpenAPI document has no mapping at {key}")
+    return value
 
 
 def test_glpi_container_reports_version_11(glpi_environment) -> None:
@@ -76,13 +88,36 @@ def test_glpi_api_contract_is_pinned_to_v2_3_0(glpi_environment) -> None:
         pytest.fail("The pinned GLPI OpenAPI document is missing required sections")
 
     ticket_path = paths.get(GLPI_TICKET_OPENAPI_PATH)
+    ticket_by_id_path = paths.get(GLPI_TICKET_BY_ID_OPENAPI_PATH)
     if not isinstance(ticket_path, Mapping):
         pytest.fail("The pinned GLPI OpenAPI document is missing the ticket resource")
+    if not isinstance(ticket_by_id_path, Mapping):
+        pytest.fail("The pinned GLPI OpenAPI document is missing direct ticket lookup")
 
     assert GLPI_API_VERSION == PINNED_GLPI_API_VERSION
     assert document.get("openapi") == PINNED_OPENAPI_VERSION
     assert info.get("version") == PINNED_GLPI_API_VERSION
     assert isinstance(ticket_path.get("post"), Mapping)
+    get_by_id = _require_mapping(ticket_by_id_path, "get")
+    responses = _require_mapping(get_by_id, "responses")
+    success_response = _require_mapping(responses, "200")
+    content = _require_mapping(success_response, "content")
+    json_content = _require_mapping(content, "application/json")
+    response_schema = _require_mapping(json_content, "schema")
+    assert response_schema.get("$ref") == "#/components/schemas/Ticket"
+
+    components = _require_mapping(document, "components")
+    schemas = _require_mapping(components, "schemas")
+    ticket_schema = _require_mapping(schemas, "Ticket")
+    ticket_properties = _require_mapping(ticket_schema, "properties")
+    status_schema = _require_mapping(ticket_properties, "status")
+    status_properties = _require_mapping(status_schema, "properties")
+    status_id_schema = _require_mapping(status_properties, "id")
+
+    assert status_schema.get("type") == "object"
+    assert status_id_schema.get("type") == "integer"
+    assert status_id_schema.get("format") == "int64"
+    assert status_id_schema.get("enum") == [1, 10, 2, 3, 4, 5, 6]
 
 
 def test_oauth_bootstrap_is_idempotent(glpi_environment) -> None:
@@ -95,8 +130,15 @@ def test_custom_image_contains_no_real_secret(glpi_environment) -> None:
     compose_file = GLPI_COMPOSE_FILE.read_text(encoding="utf-8")
     dockerfile = GLPI_DOCKERFILE.read_text(encoding="utf-8")
     bootstrap = GLPI_BOOTSTRAP.read_text(encoding="utf-8")
+    status_helper = GLPI_STATUS_HELPER.read_text(encoding="utf-8")
     source_and_metadata = "\n".join(
-        (compose_file, dockerfile, bootstrap, glpi_environment.image_metadata)
+        (
+            compose_file,
+            dockerfile,
+            bootstrap,
+            status_helper,
+            glpi_environment.image_metadata,
+        )
     )
 
     if any(
@@ -120,3 +162,9 @@ def test_custom_image_contains_no_real_secret(glpi_environment) -> None:
     assert ":latest" not in glpi_environment.image_metadata.lower()
     assert "-glpi-test:11.0.8" in glpi_environment.image_metadata.lower()
     assert "env glpi_test_" not in normalized_dockerfile
+    assert "set_ticket_status.php" in normalized_dockerfile
+    assert "INSERT " not in status_helper
+    assert "UPDATE " not in status_helper
+    assert "DELETE " not in status_helper
+    assert "Ticket::isAllowedStatus" in status_helper
+    assert "$ticket->update" in status_helper

@@ -13,7 +13,8 @@ import httpx
 from pydantic import HttpUrl
 from sqlalchemy.orm import Session
 
-from .glpi import GlpiClient, GlpiTicketDefaults
+from glpi_ticketing_glpi import GlpiClient, GlpiTicketDefaults
+
 from .settings import WorkerSettings
 from .transcription import TranscriptionClient, TranscriptionPoller
 from .worker import (
@@ -111,12 +112,6 @@ def build_automation_worker(
         password=settings.glpi_password,
         client_id=settings.glpi_client_id,
         client_secret=settings.glpi_client_secret,
-        ticket_defaults=GlpiTicketDefaults(
-            title=settings.glpi_ticket_title,
-            ticket_type=settings.glpi_ticket_type,
-            urgency=settings.glpi_ticket_urgency,
-            impact=settings.glpi_ticket_impact,
-        ),
         http_client=http_client,
         timeout=settings.glpi_http_timeout_seconds,
         ownership_guard=ownership_guard,
@@ -154,6 +149,12 @@ def build_automation_worker(
             lifecycle=lifecycle,
             transitions=transitions,
             audio_url_for=partial(build_public_audio_url, settings.public_base_url),
+            ticket_defaults=GlpiTicketDefaults(
+                title=settings.glpi_ticket_title,
+                ticket_type=settings.glpi_ticket_type,
+                urgency=settings.glpi_ticket_urgency,
+                impact=settings.glpi_ticket_impact,
+            ),
             ownership_guard=ownership_guard,
         ),
         transitions=transitions,

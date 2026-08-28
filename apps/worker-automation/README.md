@@ -17,7 +17,7 @@ instance est refusée avant de traiter un job.
 - une base PostgreSQL migrée contenant les jobs et leurs événements ;
 - une racine audio canonique, `/data/audios` par défaut ;
 - un objet respectant `TranscriberProtocol` ;
-- un objet respectant `GlpiClientProtocol` ;
+- un objet respectant `GlpiTicketCreationProtocol` ;
 - une fonction construisant l'URL publique d'un audio à partir de son UUID ;
 - les politiques configurables de retry, de rétention et de sommeil.
 
@@ -210,7 +210,8 @@ gardée uniquement en mémoire le temps de construire le ticket GLPI.
 
 ## GLPI
 
-La couche `glpi` adapte l'API GLPI V2.3.0. `GlpiClient.ensure_ticket()` cherche
+Le package partage `glpi-ticketing-glpi` adapte l'API GLPI V2.3.0.
+`GlpiClient.ensure_ticket()` cherche
 d'abord l'UUID audio dans `external_id`, puis crée le ticket uniquement si
 aucun résultat exact n'existe. Le titre et les niveaux du ticket proviennent de
 la configuration ; la description contient la transcription et l'URL audio.
@@ -309,7 +310,6 @@ apps/worker-automation/
 │   │   ├── heartbeat.py     # outcomes vers état runtime
 │   │   └── signals.py       # arrêt coopératif SIGINT/SIGTERM
 │   ├── transcription/       # client HTTP, polling et contrats
-│   ├── glpi/                # client HTTP, modèles et classification
 │   └── worker/
 │       ├── audio.py         # inspection du stockage canonique
 │       ├── lifecycle.py     # transactions et coordination des repositories
@@ -327,9 +327,11 @@ apps/worker-automation/
     └── integration/
         ├── database/        # PostgreSQL migré + stockage réel
         ├── transcribe-ai/   # contrat provider CPU/GPU
-        ├── glpi/            # contrat GLPI V2.3.0
         └── e2e/             # pipeline complet persistant
 ```
+
+Le client HTTP, les modèles, les contrats et la stack d'intégration GLPI sont
+regroupés dans [`packages/glpi-client`](../../packages/glpi-client/README.md).
 
 Les dépendances suivent la direction suivante :
 
@@ -427,8 +429,8 @@ uv run pytest -m transcribe_ai \
 Contrat GLPI et pipeline E2E :
 
 ```bash
-uv run pytest -m glpi \
-  apps/worker-automation/tests/integration/glpi -vv --maxfail=1
+uv run --package glpi-ticketing-glpi pytest -m glpi \
+  packages/glpi-client/tests/integration/glpi -vv --maxfail=1
 
 uv run pytest -m e2e \
   apps/worker-automation/tests/integration/e2e -vv --maxfail=1

@@ -18,16 +18,18 @@ from .contracts import (
     GlpiDuplicateExternalIdError,
     GlpiHttpError,
     GlpiProtocolError,
+    GlpiTicketNotFoundError,
     GlpiTicketRejectedError,
     GlpiTransportError,
 )
 from .models import (
     GlpiErrorCategory,
     GlpiOperation,
-    GlpiTicketDefaults,
-    GlpiTicketInput,
+    GlpiTicketCreateCommand,
+    GlpiTicketSnapshot,
     OAuthToken,
     TicketId,
+    TicketStatus,
 )
 
 GLPI_API_VERSION = "2.3.0"
@@ -67,7 +69,6 @@ class GlpiClient:
         password: SecretStr,
         client_id: str,
         client_secret: SecretStr,
-        ticket_defaults: GlpiTicketDefaults,
         http_client: httpx.Client,
         timeout: float | httpx.Timeout,
         monotonic: Callable[[], float] = time.monotonic,
@@ -78,8 +79,6 @@ class GlpiClient:
         self._password = _validate_secret(password, "password")
         self._client_id = _validate_identifier(client_id, "client_id")
         self._client_secret = _validate_secret(client_secret, "client_secret")
-        if not isinstance(ticket_defaults, GlpiTicketDefaults):
-            raise TypeError("ticket_defaults must be a GlpiTicketDefaults")
         if not isinstance(http_client, httpx.Client):
             raise TypeError("http_client must be an httpx.Client")
         if not callable(monotonic):
@@ -87,7 +86,6 @@ class GlpiClient:
         if not callable(ownership_guard):
             raise TypeError("ownership_guard must be callable")
 
-        self._ticket_defaults = ticket_defaults
         self._http_client = http_client
         self._timeout = _validate_timeout(timeout)
         self._monotonic = monotonic
@@ -160,20 +158,33 @@ class GlpiClient:
         )
         return token
 
-    def ensure_ticket(self, ticket: GlpiTicketInput) -> TicketId:
+    def ensure_ticket(self, command: GlpiTicketCreateCommand) -> TicketId:
         """Return a ticket correlated to the audio UUID, creating it if absent."""
-        if not isinstance(ticket, GlpiTicketInput):
-            raise TypeError("ticket must be a GlpiTicketInput")
-        return self._ensure_ticket(ticket, authentication_retry_available=True)
+        if not isinstance(command, GlpiTicketCreateCommand):
+            raise TypeError("command must be a GlpiTicketCreateCommand")
+        return self._ensure_ticket(command, authentication_retry_available=True)
+
+    def get_ticket(self, ticket_id: TicketId) -> GlpiTicketSnapshot:
+        """Load one ticket directly from its persisted GLPI identifier."""
+        if (
+            isinstance(ticket_id, bool)
+            or not isinstance(ticket_id, int)
+            or ticket_id <= 0
+        ):
+            raise ValueError("ticket_id must be a positive integer")
+        return self._get_ticket(
+            TicketId(ticket_id),
+            authentication_retry_available=True,
+        )
 
     def _ensure_ticket(
         self,
-        ticket: GlpiTicketInput,
+        command: GlpiTicketCreateCommand,
         *,
         authentication_retry_available: bool,
     ) -> TicketId:
         token = self.authenticate()
-        external_id = str(ticket.audio_uuid)
+        external_id = str(command.audio_uuid)
 
         try:
             existing_ticket_id = self._find_ticket(external_id, token)
@@ -181,7 +192,7 @@ class GlpiClient:
             if _is_unauthorized(error) and authentication_retry_available:
                 self._invalidate_token()
                 return self._ensure_ticket(
-                    ticket,
+                    command,
                     authentication_retry_available=False,
                 )
             raise
@@ -190,17 +201,69 @@ class GlpiClient:
             return existing_ticket_id
 
         try:
-            return self._create_ticket(ticket, external_id, token)
+            return self._create_ticket(command, external_id, token)
         except GlpiHttpError as error:
             if _is_unauthorized(error) and authentication_retry_available:
                 self._invalidate_token()
                 return self._ensure_ticket(
-                    ticket,
+                    command,
                     authentication_retry_available=False,
                 )
             raise
         except GlpiCreateOutcomeUnknownError as error:
             return self._reconcile_unknown_creation(external_id, error)
+
+    def _get_ticket(
+        self,
+        ticket_id: TicketId,
+        *,
+        authentication_retry_available: bool,
+    ) -> GlpiTicketSnapshot:
+        operation = GlpiOperation.GET_TICKET
+        token = self.authenticate()
+        try:
+            response = self._guarded_request(
+                lambda: self._http_client.get(
+                    self._url(f"{TICKET_PATH}/{int(ticket_id)}"),
+                    headers=self._bearer_headers(token),
+                    timeout=self._timeout,
+                    follow_redirects=False,
+                )
+            )
+        except httpx.RequestError:
+            raise GlpiTransportError(operation) from None
+
+        if response.status_code == httpx.codes.UNAUTHORIZED:
+            if authentication_retry_available:
+                self._invalidate_token()
+                return self._get_ticket(
+                    ticket_id,
+                    authentication_retry_available=False,
+                )
+            raise _http_error(operation, response.status_code)
+        if response.status_code == httpx.codes.NOT_FOUND:
+            raise GlpiTicketNotFoundError
+        if response.status_code != httpx.codes.OK:
+            if 200 <= response.status_code < 400:
+                raise GlpiProtocolError(operation, "unexpected_get_status")
+            raise _http_error(operation, response.status_code)
+
+        payload = _decode_object(response, operation)
+        returned_ticket_id = _require_positive_id(payload, operation)
+        if returned_ticket_id != int(ticket_id):
+            raise GlpiProtocolError(operation, "mismatched_ticket_id")
+        external_id = _require_non_empty_string(
+            payload,
+            "external_id",
+            operation,
+            "invalid_ticket_external_id",
+        )
+        status = _require_ticket_status(payload, operation)
+        return GlpiTicketSnapshot(
+            ticket_id=TicketId(returned_ticket_id),
+            external_id=external_id,
+            status=status,
+        )
 
     def _find_ticket(
         self,
@@ -242,7 +305,7 @@ class GlpiClient:
 
     def _create_ticket(
         self,
-        ticket: GlpiTicketInput,
+        command: GlpiTicketCreateCommand,
         external_id: str,
         token: OAuthToken,
     ) -> TicketId:
@@ -253,12 +316,12 @@ class GlpiClient:
                     self._url(TICKET_PATH),
                     headers=self._bearer_headers(token),
                     json={
-                        "name": self._ticket_defaults.title,
-                        "content": _build_ticket_content(ticket),
+                        "name": command.defaults.title,
+                        "content": _build_ticket_content(command),
                         "external_id": external_id,
-                        "type": int(self._ticket_defaults.ticket_type),
-                        "urgency": int(self._ticket_defaults.urgency),
-                        "impact": int(self._ticket_defaults.impact),
+                        "type": int(command.defaults.ticket_type),
+                        "urgency": int(command.defaults.urgency),
+                        "impact": int(command.defaults.impact),
                     },
                     timeout=self._timeout,
                     follow_redirects=False,
@@ -363,10 +426,10 @@ def _token_is_reusable(cached_token: _CachedOAuthToken, now: float) -> bool:
     return now < cached_token.expires_at - renewal_skew
 
 
-def _build_ticket_content(ticket: GlpiTicketInput) -> str:
-    transcription = html.escape(ticket.transcription, quote=True)
+def _build_ticket_content(command: GlpiTicketCreateCommand) -> str:
+    transcription = html.escape(command.transcription, quote=True)
     transcription = "<br>\n".join(transcription.splitlines())
-    audio_url = html.escape(ticket.audio_url, quote=True)
+    audio_url = html.escape(command.audio_url, quote=True)
     return f'<p>{transcription}</p><p>Audio : <a href="{audio_url}">{audio_url}</a></p>'
 
 
@@ -421,6 +484,23 @@ def _require_positive_id(
     if isinstance(ticket_id, bool) or not isinstance(ticket_id, int) or ticket_id <= 0:
         raise GlpiProtocolError(operation, "invalid_ticket_id")
     return ticket_id
+
+
+def _require_ticket_status(
+    payload: Mapping[str, object],
+    operation: GlpiOperation,
+) -> TicketStatus:
+    status_payload = payload.get("status")
+    if not isinstance(status_payload, Mapping):
+        raise GlpiProtocolError(operation, "invalid_ticket_status")
+
+    status_id = status_payload.get("id")
+    if isinstance(status_id, bool) or not isinstance(status_id, int):
+        raise GlpiProtocolError(operation, "invalid_ticket_status")
+    try:
+        return TicketStatus(status_id)
+    except ValueError:
+        raise GlpiProtocolError(operation, "unsupported_ticket_status") from None
 
 
 def _http_error(operation: GlpiOperation, status_code: int) -> GlpiHttpError:

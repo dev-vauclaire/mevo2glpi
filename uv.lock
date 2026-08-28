@@ -8,6 +8,7 @@ members = [
     "glpi-ticketing-common",
     "glpi-ticketing-database",
     "glpi-ticketing-database-migrations",
+    "glpi-ticketing-glpi",
     "glpi-ticketing-web",
     "glpi-ticketing-worker-automation",
 ]
@@ -319,6 +320,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "glpi-ticketing-glpi"
+version = "0.1.0"
+source = { editable = "packages/glpi-client" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28,<1" },
+    { name = "pydantic", specifier = ">=2.11,<3" },
+]
+
+[[package]]
 name = "glpi-ticketing-web"
 version = "0.1.0"
 source = { editable = "apps/web" }
@@ -350,6 +366,7 @@ source = { editable = "apps/worker-automation" }
 dependencies = [
     { name = "glpi-ticketing-common" },
     { name = "glpi-ticketing-database" },
+    { name = "glpi-ticketing-glpi" },
     { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
@@ -359,6 +376,7 @@ dependencies = [
 requires-dist = [
     { name = "glpi-ticketing-common", editable = "packages/common" },
     { name = "glpi-ticketing-database", editable = "packages/database" },
+    { name = "glpi-ticketing-glpi", editable = "packages/glpi-client" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },

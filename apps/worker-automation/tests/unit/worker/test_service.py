@@ -8,8 +8,9 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_worker_automation.glpi import (
+from glpi_ticketing_glpi import (
     GlpiOperation,
+    GlpiTicketCreateCommand,
     GlpiTransportError,
 )
 from glpi_ticketing_worker_automation.worker import (
@@ -22,6 +23,7 @@ from ._pipeline_fakes import (
     AUDIO_UUID,
     SECRET,
     SYNTHETIC_AUDIO,
+    TICKET_DEFAULTS,
     TRANSCRIPTION,
     FailOwnershipGuardOnCall,
     FakeGlpiClient,
@@ -55,6 +57,14 @@ def test_success_persists_ticket_before_completion_and_keeps_audio(
         "mark_completed",
     ]
     assert state.transaction_outcomes == ["commit"] * 4
+    assert glpi_client.calls == [
+        GlpiTicketCreateCommand(
+            audio_uuid=AUDIO_UUID,
+            transcription=TRANSCRIPTION,
+            audio_url=f"https://audio.test/audios/{AUDIO_UUID}",
+            defaults=TICKET_DEFAULTS,
+        )
+    ]
 
 
 def test_ownership_loss_after_transcription_prevents_glpi_and_transitions(

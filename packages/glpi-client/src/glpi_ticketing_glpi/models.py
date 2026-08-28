@@ -30,12 +30,25 @@ class TicketLevel(IntEnum):
     VERY_HIGH = 5
 
 
+class TicketStatus(IntEnum):
+    """Ticket statuses exposed by the pinned GLPI 11.0.8 API contract."""
+
+    INCOMING = 1
+    ASSIGNED = 2
+    PLANNED = 3
+    WAITING = 4
+    SOLVED = 5
+    CLOSED = 6
+    APPROVAL = 10
+
+
 class GlpiOperation(StrEnum):
     """Operation performed against GLPI."""
 
     AUTHENTICATE = "authenticate"
     FIND_TICKET = "find_ticket"
     CREATE_TICKET = "create_ticket"
+    GET_TICKET = "get_ticket"
 
 
 class GlpiErrorCategory(StrEnum):
@@ -47,6 +60,7 @@ class GlpiErrorCategory(StrEnum):
     INVALID_REQUEST = "invalid_request"
     PROTOCOL = "protocol"
     CONFLICT = "conflict"
+    NOT_FOUND = "not_found"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,12 +77,31 @@ class OAuthToken:
 
 
 @dataclass(frozen=True, slots=True)
-class GlpiTicketInput:
-    """Dynamic data used to retrieve or create one GLPI ticket."""
+class GlpiTicketDefaults:
+    """Validated ticket values supplied by application configuration."""
+
+    title: str
+    ticket_type: TicketType
+    urgency: TicketLevel
+    impact: TicketLevel
+
+    def __post_init__(self) -> None:
+        _validate_title(self.title)
+        if not isinstance(self.ticket_type, TicketType):
+            raise TypeError("ticket_type must be a TicketType")
+        for field_name in ("urgency", "impact"):
+            if not isinstance(getattr(self, field_name), TicketLevel):
+                raise TypeError(f"{field_name} must be a TicketLevel")
+
+
+@dataclass(frozen=True, slots=True)
+class GlpiTicketCreateCommand:
+    """Complete application command used to retrieve or create one ticket."""
 
     audio_uuid: UUID
     transcription: str = field(repr=False)
     audio_url: str
+    defaults: GlpiTicketDefaults
 
     def __post_init__(self) -> None:
         if not isinstance(self.audio_uuid, UUID):
@@ -83,24 +116,34 @@ class GlpiTicketInput:
         ):
             raise ValueError("transcription contains unsupported control characters")
         _validate_audio_url(self.audio_url)
+        if not isinstance(self.defaults, GlpiTicketDefaults):
+            raise TypeError("defaults must be a GlpiTicketDefaults")
 
 
 @dataclass(frozen=True, slots=True)
-class GlpiTicketDefaults:
-    """Fixed ticket values supplied by worker configuration."""
+class GlpiTicketSnapshot:
+    """Minimal ticket state required by lifecycle and retention policies."""
 
-    title: str
-    ticket_type: TicketType
-    urgency: TicketLevel
-    impact: TicketLevel
+    ticket_id: TicketId
+    external_id: str
+    status: TicketStatus
 
     def __post_init__(self) -> None:
-        _validate_title(self.title)
-        if not isinstance(self.ticket_type, TicketType):
-            raise TypeError("ticket_type must be a TicketType")
-        for field_name in ("urgency", "impact"):
-            if not isinstance(getattr(self, field_name), TicketLevel):
-                raise TypeError(f"{field_name} must be a TicketLevel")
+        if (
+            isinstance(self.ticket_id, bool)
+            or not isinstance(self.ticket_id, int)
+            or self.ticket_id <= 0
+        ):
+            raise ValueError("ticket_id must be a positive integer")
+        if (
+            not isinstance(self.external_id, str)
+            or not self.external_id
+            or self.external_id != self.external_id.strip()
+            or any(not character.isprintable() for character in self.external_id)
+        ):
+            raise ValueError("external_id must be non-empty, trimmed and printable")
+        if not isinstance(self.status, TicketStatus):
+            raise TypeError("status must be a TicketStatus")
 
 
 def _validate_title(title: object) -> None:

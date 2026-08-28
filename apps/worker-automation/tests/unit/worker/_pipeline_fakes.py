@@ -17,6 +17,7 @@ from glpi_ticketing_database import (
     JobStage,
     JobStatus,
 )
+from glpi_ticketing_glpi import GlpiTicketDefaults, TicketLevel, TicketType
 from glpi_ticketing_worker_automation.transcription import (
     JobUuid,
     TranscriptionResult,
@@ -38,6 +39,12 @@ NOW = datetime(2026, 8, 28, 10, 0, tzinfo=UTC)
 TRANSCRIPTION = "Contenu confidentiel de la transcription"
 SECRET = "temporary-secret-must-not-be-logged"
 SYNTHETIC_AUDIO = b"RIFF-test-audio"
+TICKET_DEFAULTS = GlpiTicketDefaults(
+    title="Demande issue d'un appel audio",
+    ticket_type=TicketType.REQUEST,
+    urgency=TicketLevel.LOW,
+    impact=TicketLevel.MEDIUM,
+)
 
 
 @dataclass(slots=True)
@@ -338,6 +345,7 @@ def build_worker(
                 if audio_url_for is not None
                 else lambda audio_uuid: f"https://audio.test/audios/{audio_uuid}"
             ),
+            ticket_defaults=TICKET_DEFAULTS,
             ownership_guard=ownership_guard,
         ),
         transitions=transitions,

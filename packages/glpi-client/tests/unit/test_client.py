@@ -1,6 +1,7 @@
 import json
 import math
 from collections.abc import Callable
+from inspect import signature
 from urllib.parse import parse_qs
 from uuid import UUID
 
@@ -8,7 +9,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from glpi_ticketing_worker_automation.glpi import (
+from glpi_ticketing_glpi import (
     GlpiClient,
     GlpiCreateOutcomeUnknownError,
     GlpiDuplicateExternalIdError,
@@ -16,12 +17,16 @@ from glpi_ticketing_worker_automation.glpi import (
     GlpiHttpError,
     GlpiOperation,
     GlpiProtocolError,
+    GlpiTicketCreateCommand,
     GlpiTicketDefaults,
-    GlpiTicketInput,
+    GlpiTicketNotFoundError,
     GlpiTicketRejectedError,
+    GlpiTicketSnapshot,
     GlpiTransportError,
     OAuthToken,
+    TicketId,
     TicketLevel,
+    TicketStatus,
     TicketType,
 )
 
@@ -41,11 +46,15 @@ AUDIO_URL = (
     "https://storage.example.test/audio/88ac95f5-e207-4aa4-a824-2bd4a3269814"
     "?download=1&origin=worker"
 )
+TICKET_TITLE = "Demande issue d'un appel audio"
+TICKET_TYPE = TicketType(1)
+TICKET_URGENCY = TicketLevel(2)
+TICKET_IMPACT = TicketLevel(3)
 DEFAULTS = GlpiTicketDefaults(
-    title="Demande issue d'un appel audio",
-    ticket_type=TicketType(1),
-    urgency=TicketLevel(2),
-    impact=TicketLevel(3),
+    title=TICKET_TITLE,
+    ticket_type=TICKET_TYPE,
+    urgency=TICKET_URGENCY,
+    impact=TICKET_IMPACT,
 )
 
 
@@ -73,16 +82,17 @@ def token_response(
     )
 
 
-def make_ticket_input(
+def make_ticket_command(
     *,
     transcription: object = TRANSCRIPTION,
     audio_url: object = AUDIO_URL,
     audio_uuid: object = AUDIO_UUID,
-) -> GlpiTicketInput:
-    return GlpiTicketInput(
+) -> GlpiTicketCreateCommand:
+    return GlpiTicketCreateCommand(
         audio_uuid=audio_uuid,  # type: ignore[arg-type]
         transcription=transcription,  # type: ignore[arg-type]
         audio_url=audio_url,  # type: ignore[arg-type]
+        defaults=DEFAULTS,
     )
 
 
@@ -99,7 +109,6 @@ def make_glpi_client(
         "password": SecretStr(PASSWORD),
         "client_id": CLIENT_ID,
         "client_secret": SecretStr(CLIENT_SECRET),
-        "ticket_defaults": DEFAULTS,
         "http_client": http_client,
         "timeout": TIMEOUT_SECONDS,
     }
@@ -169,6 +178,10 @@ def test_authenticate_uses_password_grant_on_pinned_v2_endpoint() -> None:
     assert token.expires_in_seconds == 3600
     assert ACCESS_TOKEN not in repr(token)
     assert len(requests) == 1
+
+
+def test_client_constructor_contains_no_ticket_policy_defaults() -> None:
+    assert "ticket_defaults" not in signature(GlpiClient).parameters
 
 
 def test_authenticate_reuses_a_non_expired_token() -> None:
@@ -325,6 +338,303 @@ def test_authenticate_classifies_transport_errors_without_leaking_secrets() -> N
     assert CLIENT_SECRET not in str(error)
 
 
+def test_get_ticket_uses_the_direct_id_endpoint() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        assert request.method == "GET"
+        assert request.url == httpx.URL(f"{BASE_URL}{TICKET_PATH}/73")
+        assert not request.url.params
+        assert request.headers["authorization"] == f"Bearer {ACCESS_TOKEN}"
+        assert_timeout(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": 73,
+                "external_id": str(AUDIO_UUID),
+                "status": {"id": 5, "name": "Résolu"},
+            },
+        )
+
+    client, http_client = make_glpi_client(handler)
+    with http_client:
+        snapshot = client.get_ticket(TicketId(73))
+
+    assert snapshot == GlpiTicketSnapshot(
+        ticket_id=TicketId(73),
+        external_id=str(AUDIO_UUID),
+        status=TicketStatus.SOLVED,
+    )
+    assert "Résolu" not in repr(snapshot)
+    assert len(requests) == 2
+
+
+def test_get_ticket_refreshes_an_unauthorized_token_only_once() -> None:
+    token_count = 0
+    get_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal get_count, token_count
+        if request.url.path == TOKEN_PATH:
+            token_count += 1
+            return token_response(f"token-{token_count}")
+
+        get_count += 1
+        assert request.headers["authorization"] == f"Bearer token-{get_count}"
+        if get_count == 1:
+            return httpx.Response(401)
+        return httpx.Response(
+            200,
+            json={
+                "id": 73,
+                "external_id": str(AUDIO_UUID),
+                "status": {"id": 5, "name": "localized and ignored"},
+            },
+        )
+
+    client, http_client = make_glpi_client(handler)
+    with http_client:
+        snapshot = client.get_ticket(TicketId(73))
+
+    assert snapshot.ticket_id == 73
+    assert token_count == 2
+    assert get_count == 2
+
+
+@pytest.mark.parametrize("status", list(TicketStatus))
+def test_get_ticket_maps_every_pinned_status_id(status: TicketStatus) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        return httpx.Response(
+            200,
+            json={
+                "id": 73,
+                "external_id": str(AUDIO_UUID),
+                "status": {"id": int(status), "name": "ignored"},
+            },
+        )
+
+    client, http_client = make_glpi_client(handler)
+    with http_client:
+        snapshot = client.get_ticket(TicketId(73))
+
+    assert snapshot.status is status
+
+
+def test_ticket_status_enum_is_pinned_to_glpi_11_0_8() -> None:
+    assert {status.name: status.value for status in TicketStatus} == {
+        "INCOMING": 1,
+        "ASSIGNED": 2,
+        "PLANNED": 3,
+        "WAITING": 4,
+        "SOLVED": 5,
+        "CLOSED": 6,
+        "APPROVAL": 10,
+    }
+
+
+def test_get_ticket_does_not_refresh_after_a_second_unauthorized_response() -> None:
+    token_count = 0
+    get_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal get_count, token_count
+        if request.url.path == TOKEN_PATH:
+            token_count += 1
+            return token_response(f"token-{token_count}")
+        get_count += 1
+        return httpx.Response(401)
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(GlpiHttpError) as error_info:
+        client.get_ticket(TicketId(73))
+
+    error = error_info.value
+    assert error.operation is GlpiOperation.GET_TICKET
+    assert error.category is GlpiErrorCategory.AUTHENTICATION
+    assert error.retryable is False
+    assert token_count == 2
+    assert get_count == 2
+
+
+def test_get_ticket_classifies_not_found_without_retaining_the_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        return httpx.Response(404, text=f"sensitive {CLIENT_SECRET}")
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(GlpiTicketNotFoundError) as error_info:
+        client.get_ticket(TicketId(73))
+
+    error = error_info.value
+    assert error.operation is GlpiOperation.GET_TICKET
+    assert error.category is GlpiErrorCategory.NOT_FOUND
+    assert error.technical_code == "ticket_not_found"
+    assert error.retryable is False
+    assert CLIENT_SECRET not in str(error)
+
+
+@pytest.mark.parametrize("status_code", [408, 425, 429, 500, 503])
+def test_get_ticket_classifies_service_unavailability(status_code: int) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        return httpx.Response(status_code, text=f"sensitive {PASSWORD}")
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(GlpiHttpError) as error_info:
+        client.get_ticket(TicketId(73))
+
+    error = error_info.value
+    assert error.operation is GlpiOperation.GET_TICKET
+    assert error.category is GlpiErrorCategory.UNAVAILABLE
+    assert error.retryable is True
+    assert error.outcome_unknown is False
+    assert PASSWORD not in str(error)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "category"),
+    [
+        (400, GlpiErrorCategory.INVALID_REQUEST),
+        (403, GlpiErrorCategory.AUTHORIZATION),
+    ],
+)
+def test_get_ticket_classifies_non_retryable_http_errors(
+    status_code: int,
+    category: GlpiErrorCategory,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        return httpx.Response(status_code, text=f"sensitive {CLIENT_SECRET}")
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(GlpiHttpError) as error_info:
+        client.get_ticket(TicketId(73))
+
+    error = error_info.value
+    assert error.operation is GlpiOperation.GET_TICKET
+    assert error.category is category
+    assert error.retryable is False
+    assert CLIENT_SECRET not in str(error)
+
+
+@pytest.mark.parametrize("status_code", [201, 204, 301, 302])
+def test_get_ticket_rejects_unexpected_success_or_redirect_statuses(
+    status_code: int,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        return httpx.Response(status_code)
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(GlpiProtocolError) as error_info:
+        client.get_ticket(TicketId(73))
+
+    error = error_info.value
+    assert error.operation is GlpiOperation.GET_TICKET
+    assert error.technical_code == "unexpected_get_status"
+    assert error.retryable is False
+
+
+def test_get_ticket_classifies_transport_unavailability() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        raise httpx.ReadTimeout(f"sensitive {PASSWORD}", request=request)
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(GlpiTransportError) as error_info:
+        client.get_ticket(TicketId(73))
+
+    error = error_info.value
+    assert error.operation is GlpiOperation.GET_TICKET
+    assert error.category is GlpiErrorCategory.UNAVAILABLE
+    assert error.retryable is True
+    assert error.outcome_unknown is False
+    assert PASSWORD not in str(error)
+
+
+@pytest.mark.parametrize(
+    ("response", "technical_code"),
+    [
+        (httpx.Response(200, text="not-json"), "invalid_json"),
+        (httpx.Response(200, json=[]), "expected_json_object"),
+        (
+            httpx.Response(
+                200,
+                json={
+                    "id": 74,
+                    "external_id": str(AUDIO_UUID),
+                    "status": {"id": 5},
+                },
+            ),
+            "mismatched_ticket_id",
+        ),
+        (
+            httpx.Response(
+                200,
+                json={"id": 73, "external_id": "", "status": {"id": 5}},
+            ),
+            "invalid_ticket_external_id",
+        ),
+        (
+            httpx.Response(
+                200,
+                json={"id": 73, "external_id": str(AUDIO_UUID), "status": True},
+            ),
+            "invalid_ticket_status",
+        ),
+        (
+            httpx.Response(
+                200,
+                json={
+                    "id": 73,
+                    "external_id": str(AUDIO_UUID),
+                    "status": {"id": True},
+                },
+            ),
+            "invalid_ticket_status",
+        ),
+        (
+            httpx.Response(
+                200,
+                json={
+                    "id": 73,
+                    "external_id": str(AUDIO_UUID),
+                    "status": {"id": 7, "name": "unknown"},
+                },
+            ),
+            "unsupported_ticket_status",
+        ),
+    ],
+)
+def test_get_ticket_rejects_invalid_contract_responses(
+    response: httpx.Response,
+    technical_code: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        return response
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(GlpiProtocolError) as error_info:
+        client.get_ticket(TicketId(73))
+
+    error = error_info.value
+    assert error.operation is GlpiOperation.GET_TICKET
+    assert error.technical_code == technical_code
+    assert error.retryable is False
+
+
 def test_ensure_ticket_searches_then_creates_with_the_expected_payload() -> None:
     requests: list[httpx.Request] = []
 
@@ -343,7 +653,7 @@ def test_ensure_ticket_searches_then_creates_with_the_expected_payload() -> None
         assert request.headers["content-type"].startswith("application/json")
         assert_timeout(request)
         payload = json.loads(request.content)
-        assert payload["name"] == DEFAULTS.title
+        assert payload["name"] == TICKET_TITLE
         assert str(AUDIO_UUID) not in payload["name"]
         assert payload["external_id"] == str(AUDIO_UUID)
         assert payload["type"] == 1
@@ -362,7 +672,7 @@ def test_ensure_ticket_searches_then_creates_with_the_expected_payload() -> None
 
     client, http_client = make_glpi_client(handler)
     with http_client:
-        ticket_id = client.ensure_ticket(make_ticket_input())
+        ticket_id = client.ensure_ticket(make_ticket_command())
 
     assert ticket_id == 73
     assert [request.method for request in requests] == ["POST", "GET", "POST"]
@@ -390,7 +700,7 @@ def test_ownership_loss_after_search_prevents_ticket_creation() -> None:
         ownership_guard=ownership_guard,
     )
     with http_client, pytest.raises(RuntimeError, match="ownership loss"):
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     assert [request.method for request in requests] == ["POST", "GET"]
 
@@ -410,7 +720,7 @@ def test_ensure_ticket_returns_an_existing_ticket_without_posting() -> None:
 
     client, http_client = make_glpi_client(handler)
     with http_client:
-        ticket_id = client.ensure_ticket(make_ticket_input())
+        ticket_id = client.ensure_ticket(make_ticket_command())
 
     assert ticket_id == 41
     assert request_methods == ["POST", "GET"]
@@ -433,7 +743,7 @@ def test_ensure_ticket_rejects_duplicate_external_ids_without_posting() -> None:
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiDuplicateExternalIdError) as error_info:
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     error = error_info.value
     assert error.operation is GlpiOperation.FIND_TICKET
@@ -463,7 +773,7 @@ def test_ensure_ticket_rejects_invalid_search_responses(payload: object) -> None
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiProtocolError) as error_info:
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     assert error_info.value.operation is GlpiOperation.FIND_TICKET
     assert error_info.value.category is GlpiErrorCategory.PROTOCOL
@@ -480,7 +790,7 @@ def test_search_transport_error_never_creates_a_ticket() -> None:
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiTransportError) as error_info:
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     error = error_info.value
     assert error.operation is GlpiOperation.FIND_TICKET
@@ -535,7 +845,7 @@ def test_ambiguous_create_failure_is_reconciled_without_a_second_post(
 
     client, http_client = make_glpi_client(handler)
     with http_client:
-        ticket_id = client.ensure_ticket(make_ticket_input())
+        ticket_id = client.ensure_ticket(make_ticket_command())
 
     assert ticket_id == 74
     assert get_count == 2
@@ -582,7 +892,7 @@ def test_unreconciled_create_failure_is_not_reposted_within_the_same_call(
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiCreateOutcomeUnknownError) as error_info:
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     error = error_info.value
     assert error.operation is GlpiOperation.CREATE_TICKET
@@ -624,7 +934,7 @@ def test_create_401_refreshes_token_and_restarts_with_a_lookup() -> None:
 
     client, http_client = make_glpi_client(handler)
     with http_client:
-        ticket_id = client.ensure_ticket(make_ticket_input())
+        ticket_id = client.ensure_ticket(make_ticket_command())
 
     assert ticket_id == 75
     assert token_count == 2
@@ -654,7 +964,7 @@ def test_search_401_refreshes_token_and_retries_the_lookup_once() -> None:
 
     client, http_client = make_glpi_client(handler)
     with http_client:
-        ticket_id = client.ensure_ticket(make_ticket_input())
+        ticket_id = client.ensure_ticket(make_ticket_command())
 
     assert ticket_id == 76
     assert token_count == 2
@@ -679,7 +989,7 @@ def test_second_search_401_is_terminal_and_never_creates_a_ticket() -> None:
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiHttpError) as error_info:
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     assert error_info.value.status_code == 401
     assert error_info.value.category is GlpiErrorCategory.AUTHENTICATION
@@ -708,7 +1018,7 @@ def test_reconciliation_401_refreshes_once_without_reposting() -> None:
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiCreateOutcomeUnknownError):
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     assert token_count == 2
     assert get_count == 3
@@ -747,7 +1057,7 @@ def test_generic_create_http_errors_are_classified_without_reconciliation(
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiHttpError) as error_info:
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     error = error_info.value
     assert error.operation is GlpiOperation.CREATE_TICKET
@@ -797,7 +1107,7 @@ def test_create_raises_explicit_rejection_for_allowlisted_dynamic_validation(
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiTicketRejectedError) as error_info:
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     error = error_info.value
     assert error.operation is GlpiOperation.CREATE_TICKET
@@ -867,7 +1177,7 @@ def test_create_keeps_unallowlisted_error_responses_generic(
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiHttpError) as error_info:
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     error = error_info.value
     assert error.operation is GlpiOperation.CREATE_TICKET
@@ -892,7 +1202,7 @@ def test_client_errors_and_logs_never_expose_sensitive_values(
 
     client, http_client = make_glpi_client(handler)
     with http_client, pytest.raises(GlpiHttpError) as error_info:
-        client.ensure_ticket(make_ticket_input())
+        client.ensure_ticket(make_ticket_command())
 
     rendered_error = f"{error_info.value!s} {error_info.value!r}"
     rendered_logs = caplog.text
@@ -939,7 +1249,6 @@ def test_client_rejects_invalid_constructor_values(
         "password": SecretStr(PASSWORD),
         "client_id": CLIENT_ID,
         "client_secret": SecretStr(CLIENT_SECRET),
-        "ticket_defaults": DEFAULTS,
         "http_client": http_client,
         "timeout": TIMEOUT_SECONDS,
     }
@@ -947,6 +1256,18 @@ def test_client_rejects_invalid_constructor_values(
 
     with http_client, pytest.raises((TypeError, ValueError)):
         GlpiClient(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("ticket_id", [0, -1, True, "73", None])
+def test_get_ticket_rejects_invalid_identifiers_without_request(
+    ticket_id: object,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        pytest.fail("invalid ticket IDs must be rejected before any request")
+
+    client, http_client = make_glpi_client(handler)
+    with http_client, pytest.raises(ValueError):
+        client.get_ticket(ticket_id)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -961,9 +1282,10 @@ def test_client_rejects_invalid_constructor_values(
         ("audio_url", "relative/audio.wav"),
         ("audio_url", "ftp://storage.example.test/audio.wav"),
         ("audio_url", "https://user:password@storage.example.test/audio.wav"),
+        ("defaults", object()),
     ],
 )
-def test_ticket_input_rejects_invalid_values(
+def test_ticket_create_command_rejects_invalid_values(
     field: str,
     invalid_value: object,
 ) -> None:
@@ -971,17 +1293,18 @@ def test_ticket_input_rejects_invalid_values(
         "audio_uuid": AUDIO_UUID,
         "transcription": TRANSCRIPTION,
         "audio_url": AUDIO_URL,
+        "defaults": DEFAULTS,
     }
     arguments[field] = invalid_value
 
     with pytest.raises((TypeError, ValueError)):
-        GlpiTicketInput(**arguments)  # type: ignore[arg-type]
+        GlpiTicketCreateCommand(**arguments)  # type: ignore[arg-type]
 
 
-def test_ticket_input_repr_hides_the_transcription() -> None:
-    ticket_input = make_ticket_input()
+def test_ticket_create_command_repr_hides_the_transcription() -> None:
+    command = make_ticket_command()
 
-    assert TRANSCRIPTION not in repr(ticket_input)
+    assert TRANSCRIPTION not in repr(command)
 
 
 @pytest.mark.parametrize(
@@ -989,30 +1312,28 @@ def test_ticket_input_repr_hides_the_transcription() -> None:
     [
         {
             "title": "",
-            "ticket_type": TicketType(1),
-            "urgency": TicketLevel(2),
-            "impact": TicketLevel(3),
         },
         {
             "title": " surrounded ",
-            "ticket_type": TicketType(1),
-            "urgency": TicketLevel(2),
-            "impact": TicketLevel(3),
         },
         {
-            "title": "Ticket",
             "ticket_type": 99,
-            "urgency": TicketLevel(2),
-            "impact": TicketLevel(3),
         },
         {
-            "title": "Ticket",
-            "ticket_type": TicketType(1),
             "urgency": 0,
-            "impact": TicketLevel(3),
         },
     ],
 )
-def test_ticket_defaults_reject_invalid_values(arguments: dict[str, object]) -> None:
+def test_ticket_defaults_reject_invalid_ticket_values(
+    arguments: dict[str, object],
+) -> None:
+    default_arguments: dict[str, object] = {
+        "title": TICKET_TITLE,
+        "ticket_type": TICKET_TYPE,
+        "urgency": TICKET_URGENCY,
+        "impact": TICKET_IMPACT,
+    }
+    default_arguments.update(arguments)
+
     with pytest.raises((TypeError, ValueError)):
-        GlpiTicketDefaults(**arguments)  # type: ignore[arg-type]
+        GlpiTicketDefaults(**default_arguments)  # type: ignore[arg-type]

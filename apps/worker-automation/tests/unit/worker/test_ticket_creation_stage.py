@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from glpi_ticketing_database import ErrorScope, JobStage
-from glpi_ticketing_worker_automation.glpi import (
+from glpi_ticketing_glpi import (
     GlpiCreateOutcomeUnknownError,
     GlpiDuplicateExternalIdError,
     GlpiErrorCategory,
@@ -140,7 +140,7 @@ def test_global_glpi_contract_or_auth_error_is_system_blocked(
     assert state.eligible is True
 
 
-def test_invalid_audio_url_is_system_blocked_without_calling_glpi(
+def test_invalid_ticket_command_is_system_blocked_without_calling_glpi(
     tmp_path: Path,
 ) -> None:
     state = FakeState()
@@ -157,7 +157,7 @@ def test_invalid_audio_url_is_system_blocked_without_calling_glpi(
     outcome = worker.run_once()
 
     assert isinstance(outcome, SystemBlockedOutcome)
-    assert outcome.failure.technical_code == "invalid_audio_url"
+    assert outcome.failure.technical_code == "invalid_ticket_command"
     assert glpi_client.calls == []
     assert terminal_repository_calls(state) == []
 

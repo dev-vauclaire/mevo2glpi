@@ -9,8 +9,8 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from glpi_ticketing_database import ErrorScope, JobStage
+from glpi_ticketing_glpi import TicketId
 
-from ..glpi import TicketId
 from .outcomes import (
     BlockedOutcome,
     CompletedOutcome,
