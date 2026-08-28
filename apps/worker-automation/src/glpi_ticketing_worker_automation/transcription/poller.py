@@ -18,6 +18,7 @@ from .contracts import (
     TranscriptionHttpError,
     TranscriptionProtocolError,
     TranscriptionRetryRequired,
+    TranscriptionSubmissionCallbackError,
     TranscriptionSubmissionRejectedError,
     TranscriptionTerminalError,
     TranscriptionTransportError,
@@ -47,7 +48,12 @@ class _TranscriptionAttempt:
 
 
 class TranscriptionPoller:
-    """Submit a new job for each call, then poll it until a terminal state."""
+    """Submit a new job for each call, then poll it until a terminal state.
+
+    ``on_job_submitted`` runs synchronously after the accepted POST and before
+    the first poll. A persistence callback must therefore own and close its
+    short transaction before returning.
+    """
 
     def __init__(
         self,
@@ -58,6 +64,7 @@ class TranscriptionPoller:
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], datetime] | None = None,
         should_stop: Callable[[], bool] = _never_stop,
+        on_job_submitted: Callable[[UUID, JobUuid], None] | None = None,
     ) -> None:
         self._client = client
         self._poll_interval_seconds = _validate_positive_seconds(
@@ -73,9 +80,12 @@ class TranscriptionPoller:
         if not callable(should_stop):
             raise TypeError("should_stop must be callable")
         self._should_stop = should_stop
+        if on_job_submitted is not None and not callable(on_job_submitted):
+            raise TypeError("on_job_submitted must be callable")
+        self._on_job_submitted = on_job_submitted
 
     def transcribe(self, audio_path: Path) -> TranscriptionResult:
-        """Submit one audio, leaving it in processing when a retry is required."""
+        """Submit one audio without modifying it when a retry is required."""
         audio_path = _validate_audio_path(audio_path)
         audio_name = audio_files.parse_audio_filename(audio_path.name)
         started_at = self._current_time()
@@ -120,6 +130,7 @@ class TranscriptionPoller:
                 audio_path,
                 category=TranscriptionErrorCategory.PROTOCOL,
                 code="submission_protocol_error",
+                automatic_probe=False,
             )
         except TranscriptionClientError as error:
             if error.retryable:
@@ -134,6 +145,33 @@ class TranscriptionPoller:
             )
 
         attempt.job_uuid = submission.job_uuid
+        self._notify_job_submitted(attempt, audio_path)
+
+    def _notify_job_submitted(
+        self,
+        attempt: _TranscriptionAttempt,
+        audio_path: Path,
+    ) -> None:
+        callback = self._on_job_submitted
+        if callback is None:
+            return
+        if attempt.job_uuid is None:
+            raise TranscriptionBlockedError(
+                category=TranscriptionErrorCategory.PROTOCOL,
+                code="missing_job_uuid",
+                audio_path=audio_path,
+                automatic_probe=False,
+            )
+
+        callback_failed = False
+        try:
+            callback(attempt.audio_uuid, attempt.job_uuid)
+        except Exception:
+            # Raise outside the handler so the original, potentially sensitive
+            # exception is not retained as ``__context__``.
+            callback_failed = True
+        if callback_failed:
+            raise TranscriptionSubmissionCallbackError(audio_path)
 
     def _poll(
         self,
@@ -145,6 +183,7 @@ class TranscriptionPoller:
                 category=TranscriptionErrorCategory.PROTOCOL,
                 code="missing_job_uuid",
                 audio_path=audio_path,
+                automatic_probe=False,
             )
         job_uuid = attempt.job_uuid
 
@@ -173,12 +212,14 @@ class TranscriptionPoller:
                     audio_path,
                     category=error.category,
                     code=error.technical_code,
+                    automatic_probe=False,
                 )
             except TranscriptionProtocolError:
                 self._raise_blocked(
                     audio_path,
                     category=TranscriptionErrorCategory.PROTOCOL,
                     code="polling_protocol_error",
+                    automatic_probe=False,
                 )
             except TranscriptionClientError as error:
                 if error.retryable:
@@ -190,6 +231,7 @@ class TranscriptionPoller:
                     audio_path,
                     category=error.category,
                     code=error.technical_code,
+                    automatic_probe=False,
                 )
 
             self._raise_if_shutdown_requested(audio_path)
@@ -199,6 +241,7 @@ class TranscriptionPoller:
                     audio_path,
                     category=TranscriptionErrorCategory.PROTOCOL,
                     code="polling_job_mismatch",
+                    automatic_probe=False,
                 )
 
             if snapshot.status is JobStatus.COMPLETED:
@@ -207,10 +250,12 @@ class TranscriptionPoller:
                         audio_path,
                         category=TranscriptionErrorCategory.PROTOCOL,
                         code="missing_transcription",
+                        automatic_probe=False,
                     )
                 return TranscriptionResult(
                     audio_path=audio_path,
                     audio_uuid=attempt.audio_uuid,
+                    provider_job_id=job_uuid,
                     transcription=snapshot.transcription,
                 )
             if snapshot.status is JobStatus.FAILED:
@@ -246,11 +291,13 @@ class TranscriptionPoller:
         *,
         category: TranscriptionErrorCategory,
         code: str,
+        automatic_probe: bool = True,
     ) -> Never:
         raise TranscriptionBlockedError(
             category=category,
             code=code,
             audio_path=audio_path,
+            automatic_probe=automatic_probe,
         )
 
     def _current_time(self) -> datetime:

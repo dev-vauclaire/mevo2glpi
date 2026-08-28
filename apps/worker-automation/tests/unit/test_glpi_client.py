@@ -368,6 +368,33 @@ def test_ensure_ticket_searches_then_creates_with_the_expected_payload() -> None
     assert [request.method for request in requests] == ["POST", "GET", "POST"]
 
 
+def test_ownership_loss_after_search_prevents_ticket_creation() -> None:
+    requests: list[httpx.Request] = []
+    guard_calls = 0
+
+    def ownership_guard() -> None:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls == 6:
+            raise RuntimeError("synthetic ownership loss")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        assert request.method == "GET"
+        return httpx.Response(200, json=[])
+
+    client, http_client = make_glpi_client(
+        handler,
+        ownership_guard=ownership_guard,
+    )
+    with http_client, pytest.raises(RuntimeError, match="ownership loss"):
+        client.ensure_ticket(make_ticket_input())
+
+    assert [request.method for request in requests] == ["POST", "GET"]
+
+
 def test_ensure_ticket_returns_an_existing_ticket_without_posting() -> None:
     request_methods: list[str] = []
 
@@ -526,7 +553,7 @@ def test_ambiguous_create_failure_is_reconciled_without_a_second_post(
         "invalid_json",
     ],
 )
-def test_unreconciled_create_failure_has_unknown_outcome_and_is_never_reposted(
+def test_unreconciled_create_failure_is_not_reposted_within_the_same_call(
     create_failure: str,
 ) -> None:
     get_count = 0

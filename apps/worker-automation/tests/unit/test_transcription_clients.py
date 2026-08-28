@@ -377,6 +377,15 @@ def test_transcription_client_transport_error_does_not_expose_api_key() -> None:
     assert error_info.value.operation is TranscriptionOperation.GET_JOB
 
 
+def test_transcription_client_rejects_job_id_larger_than_persistence_contract() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        pytest.fail("an oversized job identifier must fail before HTTP")
+
+    client, http_client = make_transcription_client(handler)
+    with http_client, pytest.raises(TranscriptionProtocolError, match="too long"):
+        client.get_job(JobUuid("x" * 256))
+
+
 @pytest.mark.parametrize(
     "response",
     [

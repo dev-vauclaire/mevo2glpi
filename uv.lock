@@ -349,15 +349,19 @@ version = "0.1.0"
 source = { editable = "apps/worker-automation" }
 dependencies = [
     { name = "glpi-ticketing-common" },
+    { name = "glpi-ticketing-database" },
     { name = "httpx" },
     { name = "pydantic-settings" },
+    { name = "sqlalchemy" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "glpi-ticketing-common", editable = "packages/common" },
+    { name = "glpi-ticketing-database", editable = "packages/database" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
+    { name = "sqlalchemy", specifier = ">=2.0,<3" },
 ]
 
 [[package]]

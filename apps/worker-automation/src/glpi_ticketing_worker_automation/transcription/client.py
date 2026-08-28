@@ -25,7 +25,7 @@ from .models import (
 
 CREATE_JOB_PATH = "/api/batchTranscription/createJob"
 GET_RESULT_PATH = "/api/batchTranscription/result"
-MAX_JOB_UUID_LENGTH = 256
+MAX_JOB_UUID_LENGTH = 255
 RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429, 502, 503, 504})
 AUDIO_MEDIA_TYPES = {
     ".wav": "audio/wav",

@@ -1,4 +1,4 @@
-"""Complete worker flow against disposable Transcribe AI and GLPI stacks."""
+"""Complete persistent flow against disposable Transcribe AI and GLPI stacks."""
 
 from __future__ import annotations
 
@@ -6,15 +6,32 @@ import html
 import re
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 from pydantic import SecretStr
+from sqlalchemy import select
 
-from glpi_ticketing_common import audio_files
-from glpi_ticketing_worker_automation.application import worker_runtime
+from glpi_ticketing_common.audio_files import publish_audio
+from glpi_ticketing_database import (
+    AudioExtension,
+    AudioRetention,
+    JobEventActor,
+    JobEventType,
+    JobStage,
+    JobStatus,
+    PendingJob,
+    RetentionStatus,
+    TicketCreationJob,
+    TicketCreationJobEvent,
+    TicketCreationJobEventRepository,
+    TicketCreationJobRepository,
+    create_database_engine,
+    create_session_factory,
+)
 from glpi_ticketing_worker_automation.glpi import (
     GLPI_API_VERSION,
     GlpiClient,
@@ -22,11 +39,13 @@ from glpi_ticketing_worker_automation.glpi import (
     TicketLevel,
     TicketType,
 )
+from glpi_ticketing_worker_automation.runtime import worker_runtime
 from glpi_ticketing_worker_automation.settings import WorkerSettings
 from glpi_ticketing_worker_automation.worker import (
-    AudioProcessor,
     CompletedOutcome,
+    IdleOutcome,
     RetryOutcome,
+    SystemBlockedOutcome,
 )
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(1200)]
@@ -38,41 +57,97 @@ TICKET_TITLE = "Demande issue du pipeline E2E"
 FIRST_PARAGRAPH_PATTERN = re.compile(r"\A\s*<p>(.*?)</p>", flags=re.DOTALL)
 
 
-def test_worker_transcribes_audio_creates_ticket_and_completes_file(
+def test_worker_transcribes_audio_creates_ticket_and_completes_job(
     glpi_environment,
     transcribe_ai_environment,
+    migrated_database_url: str,
     tmp_path: Path,
 ) -> None:
-    """Exercise the composed worker through both real service adapters."""
-    directories = _create_audio_directories(tmp_path)
+    """Exercise the composed worker through persistence and both real adapters."""
+
+    audio_root = tmp_path / "audios"
+    audio_root.mkdir()
     audio_uuid = uuid4()
-    pending_path = directories["pending"] / f"{audio_uuid}.wav"
+    storage_key = f"{audio_uuid}.wav"
     with transcribe_ai_environment.audio_path.open("rb") as source:
-        audio_files.atomic_write(pending_path, source)
-    expected_audio = pending_path.read_bytes()
+        published = publish_audio(audio_root, storage_key, source)
+    expected_audio = published.path.read_bytes()
 
-    settings = _build_settings(
-        directories=directories,
-        glpi_environment=glpi_environment,
-        transcribe_ai_environment=transcribe_ai_environment,
+    engine = create_database_engine(
+        migrated_database_url,
+        connect_timeout_seconds=5,
     )
+    session_factory = create_session_factory(engine)
+    try:
+        with session_factory.begin() as session:
+            snapshot = TicketCreationJobRepository(session).add_pending(
+                PendingJob(
+                    uuid=audio_uuid,
+                    storage_key=storage_key,
+                    audio_extension=AudioExtension.WAV,
+                    audio_size_bytes=published.size_bytes,
+                )
+            )
+            TicketCreationJobEventRepository(session).append(
+                snapshot.uuid,
+                occurred_at=snapshot.created_at,
+                status=snapshot.status,
+                stage=snapshot.stage,
+                event_type=JobEventType.JOB_CREATED,
+                actor=JobEventActor.WEB,
+            )
 
-    with worker_runtime(settings) as processor:
-        outcome = _run_until_completed(processor)
+        settings = _build_settings(
+            database_url=migrated_database_url,
+            audio_root=audio_root,
+            glpi_environment=glpi_environment,
+            transcribe_ai_environment=transcribe_ai_environment,
+        )
 
-    expected_completed_path = directories["completed"] / pending_path.name
-    if outcome.completed_path != expected_completed_path:
-        pytest.fail("The worker returned an unexpected completed audio path")
+        with worker_runtime(settings) as worker:
+            outcome = _run_until_completed(worker)
+
+        with session_factory() as session:
+            job = session.get(TicketCreationJob, audio_uuid)
+            retention = session.get(AudioRetention, audio_uuid)
+            event_types = session.scalars(
+                select(TicketCreationJobEvent.event_type)
+                .where(TicketCreationJobEvent.job_uuid == audio_uuid)
+                .order_by(TicketCreationJobEvent.event_id)
+            ).all()
+    finally:
+        engine.dispose()
+
     if outcome.audio_uuid != audio_uuid:
         pytest.fail("The worker returned an unexpected audio UUID")
-    if expected_completed_path.read_bytes() != expected_audio:
-        pytest.fail("The completed audio differs from the submitted fixture")
-    if any(directories["pending"].iterdir()) or any(
-        directories["processing"].iterdir()
-    ):
-        pytest.fail("The completed audio still exists in an active directory")
-    if any(directories["failed"].iterdir()):
-        pytest.fail("The successful pipeline unexpectedly published a failed artifact")
+    if published.path.read_bytes() != expected_audio:
+        pytest.fail("The canonical audio changed during processing")
+    if {path.name for path in audio_root.iterdir()} != {storage_key}:
+        pytest.fail("The worker created an unexpected filesystem lifecycle artifact")
+    if job is None or job.status != JobStatus.COMPLETED.value:
+        pytest.fail("The persistent job was not completed")
+    if job.stage != JobStage.FINALIZATION.value:
+        pytest.fail("The persistent job did not reach finalization")
+    if job.glpi_ticket_id != int(outcome.ticket_id):
+        pytest.fail("The persistent GLPI identifier differs from the outcome")
+    if retention is None or retention.status != RetentionStatus.SCHEDULED.value:
+        pytest.fail("The completed audio retention was not scheduled")
+    expected_event_subsequence = [
+        JobEventType.JOB_CREATED.value,
+        JobEventType.PROCESSING_STARTED.value,
+        JobEventType.TRANSCRIPTION_SUBMITTED.value,
+        JobEventType.TRANSCRIPTION_SUCCEEDED.value,
+        JobEventType.TICKET_CONFIRMED.value,
+        JobEventType.JOB_COMPLETED.value,
+    ]
+    if not _contains_ordered_subsequence(event_types, expected_event_subsequence):
+        pytest.fail("The persistent job event history is incomplete or unordered")
+    forbidden_events = {
+        JobEventType.JOB_FAILED.value,
+        JobEventType.JOB_BLOCKED.value,
+    }
+    if forbidden_events.intersection(event_types):
+        pytest.fail("The completed E2E job contains a terminal failure event")
 
     ticket = _find_ticket(
         glpi_environment=glpi_environment,
@@ -98,34 +173,31 @@ def test_worker_transcribes_audio_creates_ticket_and_completes_file(
         pytest.fail("The GLPI ticket does not contain the expected audio URL")
 
 
-def _create_audio_directories(tmp_path: Path) -> dict[str, Path]:
-    directories = {
-        name: tmp_path / name
-        for name in ("pending", "processing", "completed", "failed")
-    }
-    for directory in directories.values():
-        directory.mkdir()
-    return directories
-
-
 def _build_settings(
     *,
-    directories: Mapping[str, Path],
+    database_url: str,
+    audio_root: Path,
     glpi_environment,
     transcribe_ai_environment,
 ) -> WorkerSettings:
     credentials = glpi_environment.credentials
     return WorkerSettings(
         public_base_url=PUBLIC_BASE_URL,
-        audio_pending_dir=directories["pending"],
-        audio_processing_dir=directories["processing"],
-        audio_completed_dir=directories["completed"],
-        audio_failed_dir=directories["failed"],
-        worker_scan_interval_seconds=1.0,
+        database_url=database_url,
+        audio_root=audio_root,
+        database_connect_timeout_seconds=5,
+        worker_idle_interval_seconds=1,
+        worker_retry_initial_seconds=1,
+        worker_retry_max_seconds=30,
+        worker_system_probe_interval_seconds=2,
+        completed_retention_days=90,
+        failed_retention_days=30,
+        blocked_retention_days=90,
+        retention_first_check_hours=6,
         legacy_transcription_base_url=transcribe_ai_environment.base_url,
         legacy_transcription_api_key=transcribe_ai_environment.api_key,
-        transcription_http_timeout_seconds=30.0,
-        transcription_poll_interval_seconds=2.0,
+        transcription_http_timeout_seconds=30,
+        transcription_poll_interval_seconds=2,
         transcription_job_timeout_seconds=PIPELINE_TIMEOUT_SECONDS,
         glpi_base_url=glpi_environment.base_url,
         glpi_username=credentials.username,
@@ -133,7 +205,6 @@ def _build_settings(
         glpi_client_id=credentials.client_id,
         glpi_client_secret=SecretStr(credentials.client_secret),
         glpi_http_timeout_seconds=GLPI_HTTP_TIMEOUT_SECONDS,
-        glpi_retry_interval_seconds=1.0,
         glpi_ticket_title=TICKET_TITLE,
         glpi_ticket_type=TicketType.REQUEST,
         glpi_ticket_urgency=TicketLevel.LOW,
@@ -142,17 +213,43 @@ def _build_settings(
     )
 
 
-def _run_until_completed(processor: AudioProcessor) -> CompletedOutcome:
+def _run_until_completed(worker) -> CompletedOutcome:
     deadline = time.monotonic() + PIPELINE_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        outcome = processor.run_once()
+        outcome = worker.run_once()
         if isinstance(outcome, CompletedOutcome):
             return outcome
         if isinstance(outcome, RetryOutcome):
-            time.sleep(outcome.retry_after_seconds)
+            remaining = (outcome.next_attempt_at - datetime.now(UTC)).total_seconds()
+            time.sleep(max(0.0, remaining))
+            continue
+        if isinstance(outcome, IdleOutcome):
+            time.sleep(outcome.wait_seconds)
+            continue
+        if isinstance(outcome, SystemBlockedOutcome):
+            if not outcome.automatic_probe:
+                pytest.fail(
+                    "The worker reached a latched system block during the E2E flow"
+                )
+            time.sleep(outcome.probe_after_seconds)
             continue
         pytest.fail(f"The worker stopped before completion (status: {outcome.status})")
     pytest.fail("The worker pipeline exceeded its deadline")
+
+
+def _contains_ordered_subsequence(
+    values: list[str],
+    expected: list[str],
+) -> bool:
+    expected_iterator = iter(expected)
+    next_expected = next(expected_iterator, None)
+    for value in values:
+        if value != next_expected:
+            continue
+        next_expected = next(expected_iterator, None)
+        if next_expected is None:
+            return True
+    return next_expected is None
 
 
 def _find_ticket(*, glpi_environment, audio_uuid: UUID) -> Mapping[str, object]:

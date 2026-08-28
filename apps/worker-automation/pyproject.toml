@@ -5,8 +5,10 @@ description = "Application worker d'automatisation des tickets GLPI"
 requires-python = ">=3.12"
 dependencies = [
     "glpi-ticketing-common>=0.1,<0.2",
+    "glpi-ticketing-database>=0.1,<0.2",
     "httpx>=0.28,<1",
     "pydantic-settings>=2.10,<3",
+    "sqlalchemy>=2.0,<3",
 ]
 
 [project.scripts]

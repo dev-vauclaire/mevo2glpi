@@ -1,6 +1,8 @@
 from collections import deque
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -19,6 +21,7 @@ from glpi_ticketing_worker_automation.transcription import (
     TranscriptionProtocolError,
     TranscriptionProvider,
     TranscriptionRetryRequired,
+    TranscriptionSubmissionCallbackError,
     TranscriptionSubmissionRejectedError,
     TranscriptionTerminalError,
     TranscriptionTransportError,
@@ -29,10 +32,11 @@ AUDIO_FILENAME = f"{AUDIO_UUID}.m4a"
 JOB_UUID = JobUuid("7a85ed93")
 SYNTHETIC_AUDIO = b"synthetic-audio"
 SYNTHETIC_TRANSCRIPTION = "Coucou je suis une transcription synthétique"
+SYNTHETIC_SECRET = "synthetic-database-password"
 
 
 class SimulatedProcessCrash(BaseException):
-    """Interrupt one attempt without running the poller's failure transition."""
+    """Interrupt one provider attempt before it can complete."""
 
 
 class FakeClock:
@@ -56,14 +60,18 @@ class FakeTranscriptionClient:
         *,
         events: list[JobSnapshot | BaseException],
         submit_error: Exception | None = None,
+        call_log: list[str] | None = None,
     ) -> None:
         self.events = deque(events)
         self.submit_error = submit_error
+        self.call_log = call_log
         self.submit_calls = 0
         self.get_job_calls = 0
 
     def submit(self, audio_path: Path) -> Submission:
         self.submit_calls += 1
+        if self.call_log is not None:
+            self.call_log.append("submit")
         assert audio_path.name == AUDIO_FILENAME
         if self.submit_error is not None:
             raise self.submit_error
@@ -77,6 +85,8 @@ class FakeTranscriptionClient:
 
     def get_job(self, job_uuid: JobUuid) -> JobSnapshot:
         self.get_job_calls += 1
+        if self.call_log is not None:
+            self.call_log.append("get_job")
         assert job_uuid == JOB_UUID
         if not self.events:
             raise AssertionError("unexpected polling call")
@@ -87,19 +97,16 @@ class FakeTranscriptionClient:
 
 
 @pytest.fixture
-def audio_directories(tmp_path: Path) -> tuple[Path, Path]:
-    processing_directory = tmp_path / "processing"
-    failed_directory = tmp_path / "failed"
-    processing_directory.mkdir()
-    failed_directory.mkdir()
-    return processing_directory, failed_directory
+def audio_directory(tmp_path: Path) -> Path:
+    directory = tmp_path / "audios"
+    directory.mkdir()
+    return directory
 
 
-def test_success_returns_transcription_without_operational_sidecar(
-    audio_directories: tuple[Path, Path],
+def test_success_returns_provider_result_without_modifying_audio(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(events=[_completed_snapshot()])
     poller = _make_poller(client, FakeClock())
 
@@ -107,18 +114,81 @@ def test_success_returns_transcription_without_operational_sidecar(
 
     assert result.audio_path == audio_path
     assert str(result.audio_uuid) == AUDIO_UUID
+    assert result.provider_job_id == JOB_UUID
     assert result.transcription == SYNTHETIC_TRANSCRIPTION
     assert SYNTHETIC_TRANSCRIPTION not in repr(result)
     assert client.submit_calls == 1
     assert client.get_job_calls == 1
-    assert list(processing_directory.iterdir()) == [audio_path]
+    assert list(audio_directory.iterdir()) == [audio_path]
 
 
-def test_each_call_submits_a_new_job_for_an_audio_still_in_processing(
-    audio_directories: tuple[Path, Path],
+def test_submission_callback_runs_once_after_post_and_before_polling(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
+    call_log: list[str] = []
+    callback_calls: list[tuple[UUID, JobUuid]] = []
+    client = FakeTranscriptionClient(
+        events=[_snapshot(JobStatus.PENDING), _completed_snapshot()],
+        call_log=call_log,
+    )
+
+    def record_submission(audio_uuid: UUID, provider_job_id: JobUuid) -> None:
+        call_log.append("callback")
+        callback_calls.append((audio_uuid, provider_job_id))
+
+    poller = _make_poller(
+        client,
+        FakeClock(),
+        on_job_submitted=record_submission,
+    )
+
+    result = poller.transcribe(audio_path)
+
+    assert callback_calls == [(UUID(AUDIO_UUID), JOB_UUID)]
+    assert call_log == ["submit", "callback", "get_job", "get_job"]
+    assert result.provider_job_id == JOB_UUID
+
+
+def test_submission_callback_failure_is_sanitized_and_stops_before_polling(
+    audio_directory: Path,
+) -> None:
+    audio_path = _write_audio(audio_directory)
+    client = FakeTranscriptionClient(events=[_completed_snapshot()])
+    clock = FakeClock()
+
+    def fail_to_record_submission(
+        _audio_uuid: UUID,
+        _provider_job_id: JobUuid,
+    ) -> None:
+        raise RuntimeError(f"database unavailable password={SYNTHETIC_SECRET}")
+
+    poller = _make_poller(
+        client,
+        clock,
+        on_job_submitted=fail_to_record_submission,
+    )
+
+    with pytest.raises(TranscriptionSubmissionCallbackError) as error_info:
+        poller.transcribe(audio_path)
+
+    error = error_info.value
+    serialized_error = f"{error!r} {error}"
+    assert error.audio_path == audio_path
+    assert SYNTHETIC_SECRET not in serialized_error
+    assert "database unavailable" not in serialized_error
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert client.submit_calls == 1
+    assert client.get_job_calls == 0
+    assert clock.sleep_calls == []
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+
+
+def test_each_call_submits_a_new_job_for_an_audio_still_available(
+    audio_directory: Path,
+) -> None:
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[_completed_snapshot(), _completed_snapshot()]
     )
@@ -135,10 +205,9 @@ def test_each_call_submits_a_new_job_for_an_audio_still_in_processing(
 
 
 def test_interrupted_attempt_is_resubmitted_on_the_next_call(
-    audio_directories: tuple[Path, Path],
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     interrupted_client = FakeTranscriptionClient(events=[SimulatedProcessCrash()])
     interrupted_poller = _make_poller(
         interrupted_client,
@@ -150,7 +219,7 @@ def test_interrupted_attempt_is_resubmitted_on_the_next_call(
 
     assert interrupted_client.submit_calls == 1
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert list(processing_directory.iterdir()) == [audio_path]
+    assert list(audio_directory.iterdir()) == [audio_path]
 
     restarted_client = FakeTranscriptionClient(events=[_completed_snapshot()])
     restarted_poller = _make_poller(
@@ -165,11 +234,10 @@ def test_interrupted_attempt_is_resubmitted_on_the_next_call(
     assert restarted_client.get_job_calls == 1
 
 
-def test_pending_and_processing_are_polled_with_injected_sleep(
-    audio_directories: tuple[Path, Path],
+def test_pending_and_processing_job_statuses_use_injected_sleep(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[
             _snapshot(JobStatus.PENDING),
@@ -188,11 +256,10 @@ def test_pending_and_processing_are_polled_with_injected_sleep(
     assert clock.sleep_calls == [1.0, 1.0]
 
 
-def test_shutdown_interrupts_polling_without_moving_audio(
-    audio_directories: tuple[Path, Path],
+def test_shutdown_interrupts_polling_without_modifying_audio(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(events=[_snapshot(JobStatus.PENDING)])
     clock = FakeClock()
     shutdown_requested = False
@@ -218,14 +285,12 @@ def test_shutdown_interrupts_polling_without_moving_audio(
     assert client.get_job_calls == 1
     assert clock.sleep_calls == [1.0]
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
-def test_post_transport_error_leaves_audio_in_processing_for_retry(
-    audio_directories: tuple[Path, Path],
+def test_post_transport_error_keeps_audio_available_for_retry(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionTransportError(
@@ -247,14 +312,12 @@ def test_post_transport_error_leaves_audio_in_processing_for_retry(
     assert clock.sleep_calls == []
     assert error_info.value.audio_path == audio_path
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
 def test_future_retryable_submission_error_uses_retry_fallback(
-    audio_directories: tuple[Path, Path],
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionClientError(
@@ -274,14 +337,12 @@ def test_future_retryable_submission_error_uses_retry_fallback(
         _make_poller(client, FakeClock()).transcribe(audio_path)
 
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
-def test_post_500_leaves_audio_in_processing_even_if_client_flag_is_false(
-    audio_directories: tuple[Path, Path],
+def test_post_500_keeps_audio_available_even_if_client_flag_is_false(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionHttpError(
@@ -300,7 +361,6 @@ def test_post_500_leaves_audio_in_processing_even_if_client_flag_is_false(
         poller.transcribe(audio_path)
 
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
 @pytest.mark.parametrize(
@@ -311,13 +371,12 @@ def test_post_500_leaves_audio_in_processing_even_if_client_flag_is_false(
         (422, TranscriptionErrorCategory.INVALID_REQUEST),
     ],
 )
-def test_non_retryable_submission_http_error_blocks_without_moving_audio(
-    audio_directories: tuple[Path, Path],
+def test_non_retryable_submission_http_error_blocks_without_modifying_audio(
+    audio_directory: Path,
     status_code: int,
     category: TranscriptionErrorCategory,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionHttpError(
@@ -334,14 +393,12 @@ def test_non_retryable_submission_http_error_blocks_without_moving_audio(
     assert error_info.value.category is category
     assert error_info.value.code == f"http_{status_code}"
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
 def test_explicit_submission_rejection_remains_terminal(
-    audio_directories: tuple[Path, Path],
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionSubmissionRejectedError(
@@ -354,14 +411,12 @@ def test_explicit_submission_rejection_remains_terminal(
         _make_poller(client, FakeClock()).transcribe(audio_path)
 
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
-def test_submission_protocol_error_blocks_without_moving_audio(
-    audio_directories: tuple[Path, Path],
+def test_submission_protocol_error_blocks_without_modifying_audio(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionProtocolError(
@@ -376,16 +431,15 @@ def test_submission_protocol_error_blocks_without_moving_audio(
 
     assert error_info.value.category is TranscriptionErrorCategory.PROTOCOL
     assert error_info.value.code == "submission_protocol_error"
+    assert error_info.value.automatic_probe is False
     assert "synthetic remote contract detail" not in str(error_info.value)
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
-def test_ambiguous_get_leaves_audio_in_processing_for_a_fresh_submission(
-    audio_directories: tuple[Path, Path],
+def test_ambiguous_get_keeps_audio_available_for_a_fresh_submission(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[
             TranscriptionTransportError(
@@ -409,7 +463,6 @@ def test_ambiguous_get_leaves_audio_in_processing_for_a_fresh_submission(
     assert clock.sleep_calls == []
     assert error_info.value.audio_path == audio_path
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
     result = poller.transcribe(audio_path)
 
@@ -422,13 +475,12 @@ def test_ambiguous_get_leaves_audio_in_processing_for_a_fresh_submission(
     ("status_code", "retryable"),
     [(429, True), (500, False), (599, False)],
 )
-def test_get_unavailable_http_error_leaves_audio_in_processing(
-    audio_directories: tuple[Path, Path],
+def test_get_unavailable_http_error_keeps_audio_available(
+    audio_directory: Path,
     status_code: int,
     retryable: bool,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[
             TranscriptionHttpError(
@@ -445,14 +497,12 @@ def test_get_unavailable_http_error_leaves_audio_in_processing(
         poller.transcribe(audio_path)
 
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
 def test_future_retryable_polling_error_uses_retry_fallback(
-    audio_directories: tuple[Path, Path],
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[
             TranscriptionClientError(
@@ -473,7 +523,6 @@ def test_future_retryable_polling_error_uses_retry_fallback(
         _make_poller(client, FakeClock()).transcribe(audio_path)
 
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
 @pytest.mark.parametrize(
@@ -485,13 +534,12 @@ def test_future_retryable_polling_error_uses_retry_fallback(
         (422, TranscriptionErrorCategory.INVALID_REQUEST),
     ],
 )
-def test_non_retryable_polling_http_error_blocks_without_moving_audio(
-    audio_directories: tuple[Path, Path],
+def test_non_retryable_polling_http_error_blocks_without_modifying_audio(
+    audio_directory: Path,
     status_code: int,
     category: TranscriptionErrorCategory,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[
             TranscriptionHttpError(
@@ -508,15 +556,14 @@ def test_non_retryable_polling_http_error_blocks_without_moving_audio(
 
     assert error_info.value.category is category
     assert error_info.value.code == f"http_{status_code}"
+    assert error_info.value.automatic_probe is False
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
-def test_polling_protocol_error_blocks_without_moving_audio(
-    audio_directories: tuple[Path, Path],
+def test_polling_protocol_error_blocks_without_modifying_audio(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[
             TranscriptionProtocolError(
@@ -532,16 +579,15 @@ def test_polling_protocol_error_blocks_without_moving_audio(
 
     assert error_info.value.category is TranscriptionErrorCategory.PROTOCOL
     assert error_info.value.code == "polling_protocol_error"
+    assert error_info.value.automatic_probe is False
     assert "synthetic remote contract detail" not in str(error_info.value)
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
-def test_polling_deadline_leaves_audio_in_processing_for_retry(
-    audio_directories: tuple[Path, Path],
+def test_polling_deadline_keeps_audio_available_for_retry(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(
         events=[_snapshot(JobStatus.PENDING) for _ in range(3)]
     )
@@ -563,14 +609,12 @@ def test_polling_deadline_leaves_audio_in_processing_for_retry(
     assert clock.sleep_calls == [1.0, 1.0, 0.5]
     assert error_info.value.audio_path == audio_path
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
-def test_remote_failure_raises_terminal_error_without_moving_audio(
-    audio_directories: tuple[Path, Path],
+def test_remote_failure_raises_terminal_error_without_modifying_audio(
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     client = FakeTranscriptionClient(events=[_snapshot(JobStatus.FAILED)])
     poller = _make_poller(client, FakeClock())
 
@@ -583,14 +627,12 @@ def test_remote_failure_raises_terminal_error_without_moving_audio(
     assert error_info.value.code == "remote_job_failed"
     assert error_info.value.audio_path == audio_path
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
 
 
 def test_untrusted_response_metadata_is_absent_from_terminal_error(
-    audio_directories: tuple[Path, Path],
+    audio_directory: Path,
 ) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
+    audio_path = _write_audio(audio_directory)
     sensitive_status = f"{SYNTHETIC_TRANSCRIPTION} synthetic-api-key"
     unsafe_snapshot = JobSnapshot(
         job_uuid=JOB_UUID,
@@ -619,25 +661,6 @@ def test_untrusted_response_metadata_is_absent_from_terminal_error(
     assert SYNTHETIC_TRANSCRIPTION not in serialized_error
     assert "synthetic-api-key" not in serialized_error
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert not list(failed_directory.iterdir())
-
-
-def test_existing_failed_artifacts_are_outside_the_pollers_responsibility(
-    audio_directories: tuple[Path, Path],
-) -> None:
-    processing_directory, failed_directory = audio_directories
-    audio_path = _write_audio(processing_directory)
-    existing_failed_audio = failed_directory / AUDIO_FILENAME
-    existing_failed_audio.write_bytes(b"existing-failed-audio")
-    client = FakeTranscriptionClient(events=[_snapshot(JobStatus.FAILED)])
-    poller = _make_poller(client, FakeClock())
-
-    with pytest.raises(TranscriptionTerminalError, match="remote_job_failed"):
-        poller.transcribe(audio_path)
-
-    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-    assert existing_failed_audio.read_bytes() == b"existing-failed-audio"
-    assert not (failed_directory / f"{AUDIO_UUID}.error.json").exists()
 
 
 def _make_poller(
@@ -645,6 +668,7 @@ def _make_poller(
     clock: FakeClock,
     *,
     job_timeout_seconds: float = 15.0,
+    on_job_submitted: Callable[[UUID, JobUuid], None] | None = None,
 ) -> TranscriptionPoller:
     return TranscriptionPoller(
         client=client,
@@ -652,11 +676,12 @@ def _make_poller(
         job_timeout_seconds=job_timeout_seconds,
         sleep=clock.sleep,
         now=clock.now,
+        on_job_submitted=on_job_submitted,
     )
 
 
-def _write_audio(processing_directory: Path) -> Path:
-    audio_path = processing_directory / AUDIO_FILENAME
+def _write_audio(audio_directory: Path) -> Path:
+    audio_path = audio_directory / AUDIO_FILENAME
     audio_path.write_bytes(SYNTHETIC_AUDIO)
     return audio_path
 

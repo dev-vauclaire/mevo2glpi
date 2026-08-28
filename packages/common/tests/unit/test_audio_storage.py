@@ -7,10 +7,12 @@ import pytest
 
 from glpi_ticketing_common import audio_files
 from glpi_ticketing_common.audio_files import (
+    InvalidAudioFilenameError,
     InvalidAudioStorageKeyError,
     UnsupportedAudioExtensionError,
     build_audio_storage_key,
     delete_audio,
+    parse_audio_filename,
     parse_audio_storage_key,
     publish_audio,
     resolve_audio_storage_path,
@@ -177,3 +179,67 @@ def test_publication_synchronizes_file_before_directory(
     publish_audio(tmp_path, STORAGE_KEY, BytesIO(SYNTHETIC_AUDIO))
 
     assert events == ["file", "directory"]
+
+
+def test_audio_filename_validation_remains_available_for_provider_adapter() -> None:
+    for extension in ("wav", "mp3", "ogg", "m4a"):
+        parsed = parse_audio_filename(f"{str(AUDIO_UUID).upper()}.{extension.upper()}")
+
+        assert parsed.audio_uuid == AUDIO_UUID
+        assert parsed.extension == f".{extension}"
+        assert parsed.filename == f"{AUDIO_UUID}.{extension}"
+
+    with pytest.raises(UnsupportedAudioExtensionError):
+        parse_audio_filename(f"{AUDIO_UUID}.flac")
+
+    for invalid_filename in (
+        "not-a-uuid.wav",
+        f"{AUDIO_UUID}.wav.part",
+        f"../{STORAGE_KEY}",
+        f"{{{AUDIO_UUID}}}.wav",
+    ):
+        with pytest.raises(InvalidAudioFilenameError):
+            parse_audio_filename(invalid_filename)
+
+
+def test_publication_rolls_back_after_directory_fsync_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_directory_fsync(_directory: Path) -> None:
+        raise OSError("injected directory fsync failure")
+
+    monkeypatch.setattr(audio_files, "_fsync_directory", fail_directory_fsync)
+
+    with pytest.raises(OSError, match="injected directory fsync failure"):
+        publish_audio(tmp_path, STORAGE_KEY, BytesIO(SYNTHETIC_AUDIO))
+
+    assert not (tmp_path / STORAGE_KEY).exists()
+    assert not list(tmp_path.glob("*.part"))
+
+
+def test_publication_uses_a_bounded_streaming_buffer(tmp_path: Path) -> None:
+    buffer_size = 7
+
+    class TrackingReader(BytesIO):
+        def __init__(self, payload: bytes) -> None:
+            super().__init__(payload)
+            self.requested_sizes: list[int] = []
+
+        def read(self, size: int = -1) -> bytes:
+            self.requested_sizes.append(size)
+            return super().read(size)
+
+    source = TrackingReader(SYNTHETIC_AUDIO * 8)
+
+    published = publish_audio(
+        tmp_path,
+        STORAGE_KEY,
+        source,
+        buffer_size=buffer_size,
+    )
+
+    assert published.path.read_bytes() == SYNTHETIC_AUDIO * 8
+    assert source.requested_sizes
+    assert set(source.requested_sizes) == {buffer_size}
+    assert len(source.requested_sizes) > 2

@@ -1,33 +1,49 @@
-"""Stateful worker orchestration and sanitized outcomes."""
+"""Persistent worker orchestration and sanitized outcomes."""
 
-from .models import (
+from glpi_ticketing_database import ErrorScope, JobStage
+
+from .audio import AudioInspector
+from .lifecycle import AutomationJobLifecycleService
+from .outcomes import (
     BlockedOutcome,
     CompletedOutcome,
     FailedOutcome,
     FailureDetails,
     IdleOutcome,
-    ProcessingStage,
+    InterruptedOutcome,
     RetryOutcome,
     RunOutcome,
     RunStatus,
-    WorkerDirectories,
+    SystemBlockedOutcome,
 )
-from .processor import AudioProcessor, claim_next_audio
-from .runner import WorkerBlockedError, run_forever
+from .policies import RetentionSchedulePolicy, RetryBackoffPolicy
+from .ports import AutomationWorkerProtocol
+from .runner import run_forever
+from .service import AutomationWorker
+from .stages import TicketCreationStage, TranscriptionStage
+from .transitions import JobTransitionService
 
 __all__ = [
-    "AudioProcessor",
+    "AudioInspector",
+    "AutomationWorker",
+    "AutomationWorkerProtocol",
+    "AutomationJobLifecycleService",
     "BlockedOutcome",
     "CompletedOutcome",
+    "ErrorScope",
     "FailedOutcome",
     "FailureDetails",
     "IdleOutcome",
-    "ProcessingStage",
+    "InterruptedOutcome",
+    "JobTransitionService",
+    "JobStage",
+    "RetentionSchedulePolicy",
+    "RetryBackoffPolicy",
     "RetryOutcome",
     "RunOutcome",
     "RunStatus",
-    "WorkerDirectories",
-    "WorkerBlockedError",
-    "claim_next_audio",
+    "SystemBlockedOutcome",
+    "TicketCreationStage",
+    "TranscriptionStage",
     "run_forever",
 ]

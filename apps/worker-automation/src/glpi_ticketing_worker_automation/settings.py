@@ -5,6 +5,8 @@ from typing import Self
 
 from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 from .glpi.models import TicketLevel, TicketType
 
@@ -18,21 +20,39 @@ class WorkerSettings(BaseSettings):
         env_prefix="",
         case_sensitive=False,
         env_ignore_empty=True,
+        hide_input_in_errors=True,
         extra="ignore",
         frozen=True,
     )
 
     public_base_url: HttpUrl
-
-    audio_pending_dir: Path = Path("/data/audio-pending")
-    audio_processing_dir: Path = Path("/data/audio-processing")
-    audio_completed_dir: Path = Path("/data/audio-completed")
-    audio_failed_dir: Path = Path("/data/audio-failed")
-    worker_scan_interval_seconds: float = Field(
+    database_url: SecretStr = Field(repr=False)
+    audio_root: Path = Path("/data/audios")
+    database_connect_timeout_seconds: int = Field(default=5, gt=0)
+    worker_idle_interval_seconds: float = Field(
         default=1.0,
         gt=0,
         allow_inf_nan=False,
     )
+    worker_retry_initial_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
+    worker_retry_max_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
+    worker_system_probe_interval_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
+    completed_retention_days: int = Field(default=90, gt=0)
+    failed_retention_days: int = Field(default=30, gt=0)
+    blocked_retention_days: int = Field(default=90, gt=0)
+    retention_first_check_hours: int = Field(default=6, gt=0)
 
     legacy_transcription_base_url: HttpUrl
     legacy_transcription_api_key: SecretStr = Field(repr=False)
@@ -62,15 +82,38 @@ class WorkerSettings(BaseSettings):
         gt=0,
         allow_inf_nan=False,
     )
-    glpi_retry_interval_seconds: float = Field(
-        default=2.0,
-        gt=0,
-        allow_inf_nan=False,
-    )
     glpi_ticket_title: str = Field(min_length=1, max_length=255)
     glpi_ticket_type: TicketType
     glpi_ticket_urgency: TicketLevel
     glpi_ticket_impact: TicketLevel
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, database_url: SecretStr) -> SecretStr:
+        """Require Psycopg 3 without exposing database credentials."""
+        raw_url = database_url.get_secret_value()
+        try:
+            parsed_url = make_url(raw_url)
+        except ArgumentError:
+            raise ValueError("DATABASE_URL must be a valid SQLAlchemy URL") from None
+        if parsed_url.drivername != "postgresql+psycopg":
+            raise ValueError("DATABASE_URL must use the postgresql+psycopg driver")
+        return database_url
+
+    @field_validator(
+        "database_connect_timeout_seconds",
+        "completed_retention_days",
+        "failed_retention_days",
+        "blocked_retention_days",
+        "retention_first_check_hours",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_integer_settings(cls, value: object) -> object:
+        """Reject booleans instead of silently treating them as durations."""
+        if isinstance(value, bool):
+            raise ValueError("Integer settings cannot be booleans")
+        return value
 
     @field_validator("public_base_url")
     @classmethod
@@ -163,20 +206,15 @@ class WorkerSettings(BaseSettings):
         return secret
 
     @model_validator(mode="after")
-    def validate_audio_directories_are_distinct(self) -> Self:
-        """Reject configurations that merge two audio lifecycle directories."""
-        directories = (
-            self.audio_pending_dir,
-            self.audio_processing_dir,
-            self.audio_completed_dir,
-            self.audio_failed_dir,
-        )
-        normalized_directories = {
-            directory.expanduser().resolve(strict=False) for directory in directories
-        }
-
-        if len(normalized_directories) != len(directories):
-            msg = "Audio directories must be distinct"
-            raise ValueError(msg)
-
+    def validate_schedule_ranges(self) -> Self:
+        """Keep retry and retention schedules internally consistent."""
+        if self.worker_retry_initial_seconds > self.worker_retry_max_seconds:
+            raise ValueError(
+                "WORKER_RETRY_INITIAL_SECONDS must not exceed WORKER_RETRY_MAX_SECONDS"
+            )
+        if self.retention_first_check_hours >= self.completed_retention_days * 24:
+            raise ValueError(
+                "RETENTION_FIRST_CHECK_HOURS must precede the completed retention "
+                "deadline"
+            )
         return self

@@ -1,5 +1,5 @@
 from collections import deque
-from pathlib import Path
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -7,29 +7,29 @@ import pytest
 from glpi_ticketing_worker_automation.worker import (
     BlockedOutcome,
     CompletedOutcome,
+    ErrorScope,
     FailedOutcome,
     FailureDetails,
     IdleOutcome,
-    ProcessingStage,
+    InterruptedOutcome,
+    JobStage,
     RetryOutcome,
     RunOutcome,
-    WorkerBlockedError,
+    SystemBlockedOutcome,
     run_forever,
 )
 
 AUDIO_UUID = UUID("123e4567-e89b-42d3-a456-426614174000")
-AUDIO_FILENAME = f"{AUDIO_UUID}.m4a"
+NOW = datetime(2026, 8, 28, 10, 0, tzinfo=UTC)
 
 
-class ScriptedProcessor:
+class ScriptedWorker:
     def __init__(self, outcomes: list[RunOutcome]) -> None:
         self._outcomes = deque(outcomes)
         self.calls = 0
 
     def run_once(self) -> RunOutcome:
         self.calls += 1
-        if not self._outcomes:
-            raise AssertionError("unexpected run_once call")
         return self._outcomes.popleft()
 
 
@@ -38,7 +38,7 @@ class StopLoop(Exception):
 
 
 def test_run_forever_uses_idle_outcome_wait() -> None:
-    processor = ScriptedProcessor([IdleOutcome(wait_seconds=2.5)])
+    worker = ScriptedWorker([IdleOutcome(wait_seconds=2.5)])
     sleep_calls: list[float] = []
 
     def stop_after_sleep(seconds: float) -> None:
@@ -46,94 +46,136 @@ def test_run_forever_uses_idle_outcome_wait() -> None:
         raise StopLoop
 
     with pytest.raises(StopLoop):
-        run_forever(processor, sleep=stop_after_sleep)
+        run_forever(worker, sleep=stop_after_sleep)
 
     assert sleep_calls == [2.5]
-    assert processor.calls == 1
 
 
-def test_run_forever_uses_retry_outcome_wait() -> None:
-    blocked = BlockedOutcome(
-        audio_uuid=AUDIO_UUID,
-        processing_path=Path("processing") / AUDIO_FILENAME,
-        stage=ProcessingStage.TICKETING,
-        failure=FailureDetails(
-            category="authentication",
-            technical_code="http_401",
-        ),
-    )
-    processor = ScriptedProcessor(
+def test_retry_does_not_sleep_and_allows_another_job_immediately() -> None:
+    worker = ScriptedWorker(
         [
             RetryOutcome(
                 audio_uuid=AUDIO_UUID,
-                processing_path=Path("processing") / AUDIO_FILENAME,
-                stage=ProcessingStage.TICKETING,
+                stage=JobStage.TRANSCRIPTION,
                 failure=FailureDetails(
+                    scope=ErrorScope.SYSTEM,
                     category="unavailable",
                     technical_code="transport_error",
                 ),
-                retry_after_seconds=3.5,
+                next_attempt_at=NOW,
             ),
-            CompletedOutcome(
-                audio_uuid=AUDIO_UUID,
-                completed_path=Path("completed") / AUDIO_FILENAME,
-                ticket_id=42,
-            ),
-            blocked,
+            CompletedOutcome(audio_uuid=AUDIO_UUID, ticket_id=42),
+            IdleOutcome(wait_seconds=1),
         ]
     )
-    sleep_calls: list[float] = []
 
-    with pytest.raises(WorkerBlockedError) as error_info:
-        run_forever(processor, sleep=sleep_calls.append)
+    with pytest.raises(StopLoop):
+        run_forever(worker, sleep=lambda _seconds: (_ for _ in ()).throw(StopLoop))
 
-    assert sleep_calls == [3.5]
-    assert processor.calls == 3
-    assert error_info.value.outcome is blocked
+    assert worker.calls == 3
 
 
-def test_run_forever_continues_immediately_after_terminal_outcomes() -> None:
-    blocked = BlockedOutcome(
+def test_failed_and_job_blocked_outcomes_do_not_stop_consumption() -> None:
+    failure = FailureDetails(
+        scope=ErrorScope.JOB,
+        category="terminal",
+        technical_code="remote_job_failed",
+    )
+    worker = ScriptedWorker(
+        [
+            FailedOutcome(
+                audio_uuid=AUDIO_UUID,
+                stage=JobStage.TRANSCRIPTION,
+                failure=failure,
+            ),
+            BlockedOutcome(
+                audio_uuid=AUDIO_UUID,
+                stage=JobStage.GLPI_CREATION,
+                failure=FailureDetails(
+                    scope=ErrorScope.JOB,
+                    category="conflict",
+                    technical_code="duplicate_external_id",
+                ),
+            ),
+            IdleOutcome(wait_seconds=1),
+        ]
+    )
+
+    with pytest.raises(StopLoop):
+        run_forever(worker, sleep=lambda _seconds: (_ for _ in ()).throw(StopLoop))
+
+    assert worker.calls == 3
+
+
+def test_system_block_waits_before_worker_probes_same_job() -> None:
+    blocked = SystemBlockedOutcome(
         audio_uuid=AUDIO_UUID,
-        processing_path=Path("processing") / AUDIO_FILENAME,
-        stage=ProcessingStage.TICKETING,
+        stage=JobStage.TRANSCRIPTION,
         failure=FailureDetails(
+            scope=ErrorScope.SYSTEM,
             category="authentication",
             technical_code="http_401",
         ),
+        probe_after_seconds=60,
     )
-    processor = ScriptedProcessor(
+    worker = ScriptedWorker(
         [
-            CompletedOutcome(
-                audio_uuid=AUDIO_UUID,
-                completed_path=Path("completed") / AUDIO_FILENAME,
-                ticket_id=42,
-            ),
-            FailedOutcome(
-                audio_uuid=AUDIO_UUID,
-                failed_path=Path("failed") / AUDIO_FILENAME,
-                error_sidecar_path=Path("failed") / f"{AUDIO_UUID}.error.json",
-                stage=ProcessingStage.TRANSCRIPTION,
-                failure=FailureDetails(
-                    category="terminal",
-                    technical_code="remote_job_failed",
-                ),
-            ),
             blocked,
+            CompletedOutcome(audio_uuid=AUDIO_UUID, ticket_id=42),
+            IdleOutcome(wait_seconds=1),
         ]
     )
     sleep_calls: list[float] = []
 
-    with pytest.raises(WorkerBlockedError) as error_info:
-        run_forever(processor, sleep=sleep_calls.append)
+    def sleep_then_stop(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        if len(sleep_calls) == 2:
+            raise StopLoop
 
-    assert error_info.value.outcome is blocked
-    assert processor.calls == 3
-    assert sleep_calls == []
+    with pytest.raises(StopLoop):
+        run_forever(worker, sleep=sleep_then_stop)
+
+    assert sleep_calls == [60, 1]
+    assert worker.calls == 3
+
+
+def test_latched_system_block_never_reprocesses_the_job() -> None:
+    worker = ScriptedWorker(
+        [
+            SystemBlockedOutcome(
+                audio_uuid=AUDIO_UUID,
+                stage=JobStage.TRANSCRIPTION,
+                failure=FailureDetails(
+                    scope=ErrorScope.SYSTEM,
+                    category="persistence",
+                    technical_code="submission_persistence_failed",
+                ),
+                probe_after_seconds=60,
+                automatic_probe=False,
+            ),
+            CompletedOutcome(audio_uuid=AUDIO_UUID, ticket_id=42),
+        ]
+    )
+    stop_requested = False
+    sleep_calls: list[float] = []
+
+    def request_stop(seconds: float) -> None:
+        nonlocal stop_requested
+        sleep_calls.append(seconds)
+        stop_requested = True
+
+    run_forever(
+        worker,
+        sleep=request_stop,
+        should_stop=lambda: stop_requested,
+    )
+
+    assert worker.calls == 1
+    assert sleep_calls == [60]
 
 
 def test_run_forever_returns_when_cooperative_stop_is_requested() -> None:
-    processor = ScriptedProcessor([IdleOutcome(wait_seconds=10.0)])
+    worker = ScriptedWorker([IdleOutcome(wait_seconds=10)])
     stop_requested = False
 
     def request_stop(_seconds: float) -> None:
@@ -141,9 +183,27 @@ def test_run_forever_returns_when_cooperative_stop_is_requested() -> None:
         stop_requested = True
 
     run_forever(
-        processor,
+        worker,
         sleep=request_stop,
         should_stop=lambda: stop_requested,
     )
 
-    assert processor.calls == 1
+    assert worker.calls == 1
+
+
+def test_interrupted_outcome_stops_without_sleeping_or_scheduling() -> None:
+    worker = ScriptedWorker(
+        [
+            InterruptedOutcome(
+                audio_uuid=AUDIO_UUID,
+                stage=JobStage.TRANSCRIPTION,
+            ),
+            CompletedOutcome(audio_uuid=AUDIO_UUID, ticket_id=42),
+        ]
+    )
+    sleep_calls: list[float] = []
+
+    run_forever(worker, sleep=sleep_calls.append)
+
+    assert worker.calls == 1
+    assert sleep_calls == []

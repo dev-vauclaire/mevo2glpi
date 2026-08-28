@@ -41,7 +41,7 @@ class TranscriberProtocol(Protocol):
 
 
 class TranscriptionTerminalError(Exception):
-    """Report a terminal transcription failure without moving the audio."""
+    """Report a terminal transcription failure without modifying the audio."""
 
     def __init__(self, code: str, audio_path: Path) -> None:
         self.code = code
@@ -50,12 +50,25 @@ class TranscriptionTerminalError(Exception):
 
 
 class TranscriptionRetryRequired(Exception):
-    """Request a fresh submission while leaving the audio in processing."""
+    """Request a fresh submission while leaving the source audio unchanged."""
 
     def __init__(self, code: str, audio_path: Path) -> None:
         self.code = code
         self.audio_path = audio_path
         super().__init__(f"transcription retry required with code {code}")
+
+
+class TranscriptionSubmissionCallbackError(Exception):
+    """Report that the caller could not record an accepted provider job.
+
+    The callback's original exception is deliberately excluded so that a
+    database driver message or another implementation detail cannot leak
+    through this provider-independent boundary.
+    """
+
+    def __init__(self, audio_path: Path) -> None:
+        self.audio_path = audio_path
+        super().__init__("transcription submission callback failed")
 
 
 class TranscriptionBlockedError(Exception):
@@ -67,10 +80,14 @@ class TranscriptionBlockedError(Exception):
         category: TranscriptionErrorCategory,
         code: str,
         audio_path: Path,
+        automatic_probe: bool = True,
     ) -> None:
+        if not isinstance(automatic_probe, bool):
+            raise TypeError("automatic_probe must be a boolean")
         self.category = category
         self.code = code
         self.audio_path = audio_path
+        self.automatic_probe = automatic_probe
         super().__init__(
             f"transcription blocked with category {category.value} and code {code}"
         )

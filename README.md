@@ -1,26 +1,24 @@
 # GLPI Ticketing Automation
 
-POC Python destiné à automatiser la création de tickets GLPI à partir de
-fichiers audio. Le dépôt couvre actuellement la publication robuste d'un audio,
-son cycle de vie sur des volumes partagés, sa transcription asynchrone et le
-traitement complet par le worker jusqu'à la création d'un ticket GLPI et la
-publication de l'audio dans `completed`.
-
-Le POC repose volontairement sur une architecture simple : une application
-web, un worker unique et des répertoires partagés utilisés comme file de
-travail. Il n'utilise actuellement ni base de données, ni broker de messages.
+Projet Python destiné à automatiser la création de tickets GLPI à partir de
+fichiers audio. Le dépôt conserve deux repères clairement séparés : le POC
+figé, fondé sur quatre répertoires, et la branche MVP en cours, fondée sur
+PostgreSQL et un volume audio canonique unique.
 
 L'état démonstratif du POC est figé par le tag `poc-v0.1.0`. La branche
-`mvp/job-lifecycle` prépare PostgreSQL, un stockage audio unique, le dashboard
-d'observabilité et le worker de rétention. Sa structure et ses pipelines cibles
-sont suivis dans le document vivant
+`mvp/job-lifecycle` a déjà basculé l'ingestion web et le worker d'automatisation
+sur PostgreSQL. Le dashboard d'observabilité et le worker de rétention restent
+à réaliser. La structure et les pipelines sont suivis dans le document vivant
 [`docs/mvp-architecture.md`](docs/mvp-architecture.md).
 Le MVP part d'une base PostgreSQL et d'un volume audio neufs ; il ne migre pas
 automatiquement les répertoires de travail du POC.
 
 ## État du périmètre
 
-### Fonctionnalités implémentées
+### Périmètre figé du POC
+
+Les éléments suivants décrivent le tag `poc-v0.1.0`, et non l'architecture
+active de la branche MVP :
 
 - réception d'un fichier `.wav`, `.mp3`, `.ogg` ou `.m4a` par l'application
   web, avec limite de taille configurable ;
@@ -51,20 +49,35 @@ automatiquement les répertoires de travail du POC.
   et écoute configurable avec loopback par défaut ;
 - images runtime séparées, Docker Compose mono-serveur durci et runbook de
   déploiement du POC sur un serveur de test.
+
+### Avancement de la branche MVP
+
 - package SQLAlchemy partagé décrivant les jobs, la rétention audio, leur
   historique expurgé et le heartbeat des workers du MVP ;
 - application one-shot Alembic capable d'attendre PostgreSQL puis de migrer
-  une base neuve jusqu'à la révision courante.
+  une base neuve jusqu'à la révision courante ;
 - ingestion MVP par `POST /api/jobs` : publication atomique dans le volume
   unique, création transactionnelle du job `pending` et de son événement
   initial, puis consultation minimale avec `GET /api/jobs/{uuid}` ;
 - téléchargement MVP contrôlé par l'état PostgreSQL `completed`, sans scan du
-  volume audio.
+  volume audio ;
+- worker piloté exclusivement par PostgreSQL, avec reprise prioritaire du job
+  `processing`, puis retries dus et jobs `pending` ;
+- backoff exponentiel configurable, transitions persistantes, événements et
+  planification initiale de la rétention ;
+- stockage audio immuable : aucun déplacement entre états et aucun sidecar ;
+- contrôle de la taille persistée avant transcription et blocage des réponses
+  distantes ambiguës sans resoumission automatique en boucle ;
+- verrou advisory mono-worker dont la connexion porte aussi les transactions
+  métier, revalidé aux frontières externes avec arrêt fail-closed en cas de
+  perte, et heartbeat runtime minimal ;
+- tests d'intégration du cycle de vie sur PostgreSQL migré et pipeline E2E
+  persistant avec Transcribe AI et GLPI.
 
-Le web consomme désormais cette fondation persistante. Le worker reste sur le
-cycle de répertoires du POC jusqu'à l'itération 3 ; la branche peut donc être
-temporairement non déployable entre ces deux bascules. Le POC exécutable reste
-disponible avec le tag `poc-v0.1.0`.
+Le Compose présent dans le dépôt reste celui du POC : la branche MVP n'est pas
+encore packagée pour un déploiement cohérent. PostgreSQL, la migration one-shot,
+les deux workers, le web et Nginx seront assemblés à l'itération 7. Le POC
+exécutable reste disponible avec le tag `poc-v0.1.0`.
 
 ### Limites du POC ciblées par le MVP
 
@@ -79,7 +92,10 @@ disponible avec le tag `poc-v0.1.0`.
 - authentification et autorisation applicatives ;
 - gestion des secrets par fichiers ou coffre externe ;
 - chiffrement au repos des audios ;
-- haute disponibilité et parallélisation des workers.
+- haute disponibilité et parallélisation des workers ;
+- garantie distante d'unicité GLPI : un résultat de création inconnu suivi
+  d'une recherche encore vide peut nécessiter une décision opérateur pour
+  exclure tout doublon.
 
 Chaque application possède désormais une racine de composition dans
 `application.py`, une commande console et une exécution équivalente avec
@@ -99,20 +115,20 @@ explicitement ses dépendances d'exécution.
 | --- | --- | --- | --- |
 | `apps/database-migrations` | `glpi-ticketing-database-migrations` | Application one-shot Alembic et historique versionné du schéma MVP | [Migrations de la base](apps/database-migrations/README.md) |
 | `apps/web` | `glpi-ticketing-web` | Ingestion persistée, état minimal et téléchargement contrôlé par PostgreSQL | [Application web](apps/web/README.md) |
-| `apps/worker-automation` | `glpi-ticketing-worker-automation` | Pipeline avec état privé : réclamation, transcription, ticket GLPI et finalisation | [Worker d'automatisation](apps/worker-automation/README.md) |
-| `packages/common` | `glpi-ticketing-common` | Stockage canonique MVP et primitives de transition encore requises par le worker POC | [Package commun](packages/common/README.md) |
-| `packages/database` | `glpi-ticketing-database` | Modèles, moteur, sessions et repository de jobs partagés | [Package database](packages/database/README.md) |
+| `apps/worker-automation` | `glpi-ticketing-worker-automation` | Sélection et orchestration persistantes, transcription, ticket GLPI et finalisation | [Worker d'automatisation](apps/worker-automation/README.md) |
+| `packages/common` | `glpi-ticketing-common` | Publication et résolution du stockage audio canonique unique | [Package commun](packages/common/README.md) |
+| `packages/database` | `glpi-ticketing-database` | Modèles, sessions, repositories de cycle de vie/runtime et verrous advisory | [Package database](packages/database/README.md) |
 
-Le web dépend des packages commun et database. Le worker dépend encore du seul
-package commun. L'application de migration dépend du package database pour
-importer `Base.metadata`. Ces dépendances sont déclarées comme sources
-workspace à la racine. Une application ne doit pas importer directement les
-modules internes d'une autre application.
+Le web et le worker dépendent des packages commun et database. L'application
+de migration dépend du package database pour importer `Base.metadata`. Ces
+dépendances sont déclarées comme sources workspace à la racine. Une
+application ne doit pas importer directement les modules internes d'une autre
+application.
 
 Les artefacts sous [`infra/docker/`](infra/docker/README.md) ne constituent pas
 un membre Python supplémentaire. Le déploiement complet du POC reste figé par
-le tag `poc-v0.1.0` ; l'image et le service de migration du déploiement MVP
-seront ajoutés dans une itération ultérieure.
+le tag `poc-v0.1.0` ; les images adaptées, PostgreSQL et le service de migration
+du déploiement MVP seront assemblés à l'itération 7.
 
 La convention générale est un layout `src` : le code de chaque membre se
 trouve dans `<membre>/src/<package_python>` et ses tests dans
@@ -288,8 +304,10 @@ construction et portent actuellement la version `0.1.0`.
 
 - Python 3.12 ou supérieur ;
 - [`uv`](https://docs.astral.sh/uv/) ;
-- quatre répertoires audio distincts, existants et accessibles pour démarrer le
-  worker ;
+- pour la branche MVP : une base PostgreSQL migrée et une racine audio unique,
+  existante et accessible au web comme au worker ;
+- pour exécuter spécifiquement le tag POC : ses quatre répertoires audio
+  historiques ;
 - uniquement pour les tests marqués `database`, `glpi`, `transcribe_ai` ou
   `e2e` : Docker avec le plugin Compose ;
 - uniquement pour construire ou déployer le POC : Docker Engine 28.3.3 ou
@@ -325,26 +343,30 @@ Copiez-le vers `.env`, puis fournissez uniquement des valeurs adaptées à votre
 machine. `.env` et `.env.*` sont ignorés par Git, à l'exception du modèle ; ils
 ne doivent jamais être ajoutés au dépôt.
 
-`WebSettings` et `WorkerSettings` valident ce contrat. Le point d'entrée du
-worker transforme `WorkerSettings` en `TranscriptionClient`, `GlpiClient`,
-`AudioProcessor` et `run_forever(...)`. Celui du web transforme `WebSettings`
-en application FastAPI puis en serveur Uvicorn.
+`WebSettings` et `WorkerSettings` valident ce contrat. La composition du worker
+transforme `WorkerSettings` en adaptateurs Transcribe AI/GLPI, stages,
+`AutomationWorker` et `run_forever(...)` ; son runtime possède séparément les
+ressources et le verrou. Le point d'entrée du web transforme `WebSettings` en
+application FastAPI puis en serveur Uvicorn.
 
 | Variables | Propriétaire | Rôle défini par la configuration |
 | --- | --- | --- |
-| `DATABASE_URL` | application de migration et web, puis workers MVP | URL SQLAlchemy obligatoire utilisant `postgresql+psycopg` |
+| `DATABASE_URL` | migration, web et worker | URL SQLAlchemy obligatoire utilisant `postgresql+psycopg` |
 | `DATABASE_READY_TIMEOUT_SECONDS` | application de migration | Durée maximale d'attente de PostgreSQL |
 | `DATABASE_READY_INTERVAL_SECONDS` | application de migration | Intervalle entre deux sondes de disponibilité |
-| `DATABASE_CONNECT_TIMEOUT_SECONDS` | application de migration | Timeout borné de chaque tentative de connexion |
-| `AUDIO_ROOT` | web MVP, puis workers | Volume unique contenant les clés canoniques `{uuid}.{extension}` |
-| `AUDIO_PENDING_DIR` | worker POC | Entrée historique de la file, retirée lors de l'itération 3 |
-| `AUDIO_PROCESSING_DIR` | worker | Audio réclamé et traitement en cours |
-| `AUDIO_COMPLETED_DIR` | worker POC | Sortie historique des succès, retirée lors de l'itération 3 |
-| `AUDIO_FAILED_DIR` | worker | Audio terminal et sidecar expurgé |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | migration et worker | Timeout borné de chaque tentative de connexion |
+| `AUDIO_ROOT` | web et worker | Volume unique contenant les clés canoniques `{uuid}.{extension}` |
 | `WEB_HOST`, `WEB_PORT` | web | Adresse IP et port d'écoute Uvicorn ; `127.0.0.1:8000` par défaut |
 | `WEB_TRUST_PROXY_HEADERS` | web | Confiance explicite dans les en-têtes du proxy ; désactivée par défaut |
 | `MAX_UPLOAD_BYTES` | web | Taille maximale d'un upload |
-| `WORKER_SCAN_INTERVAL_SECONDS` | worker | Attente d'un résultat `idle`, `1` seconde par défaut |
+| `WORKER_IDLE_INTERVAL_SECONDS` | worker | Attente lorsqu'aucun job n'est éligible, `1` seconde par défaut |
+| `WORKER_RETRY_INITIAL_SECONDS` | worker | Premier délai du backoff exponentiel, `5` secondes par défaut |
+| `WORKER_RETRY_MAX_SECONDS` | worker | Plafond du backoff, `300` secondes par défaut |
+| `WORKER_SYSTEM_PROBE_INTERVAL_SECONDS` | worker | Attente avant de sonder un blocage système, `60` secondes par défaut |
+| `COMPLETED_RETENTION_DAYS` | worker | Deadline absolue d'un job terminé, `90` jours par défaut |
+| `FAILED_RETENTION_DAYS` | worker | Deadline absolue d'un échec terminal, `30` jours par défaut |
+| `BLOCKED_RETENTION_DAYS` | worker | Deadline absolue d'un job bloqué, `90` jours par défaut |
+| `RETENTION_FIRST_CHECK_HOURS` | worker | Premier contrôle futur d'un ticket terminé, `6` heures par défaut |
 | `PUBLIC_BASE_URL` | worker | Base utilisée par la composition pour construire l'URL audio du ticket |
 | `LEGACY_TRANSCRIPTION_BASE_URL` | worker | URL obligatoire de l'API batch actuellement intégrée |
 | `LEGACY_TRANSCRIPTION_API_KEY` | worker | Clé obligatoire, représentée par un type secret |
@@ -354,7 +376,6 @@ en application FastAPI puis en serveur Uvicorn.
 | `GLPI_BASE_URL`, `GLPI_USERNAME` | worker | Instance GLPI et utilisateur du grant OAuth Password |
 | `GLPI_PASSWORD`, `GLPI_CLIENT_ID`, `GLPI_CLIENT_SECRET` | worker | Identifiants OAuth obligatoires, avec les deux secrets masqués |
 | `GLPI_HTTP_TIMEOUT_SECONDS` | worker | Timeout des opérations OAuth, recherche et création |
-| `GLPI_RETRY_INTERVAL_SECONDS` | worker | Attente avant de reprendre un résultat GLPI `retry`, `2` secondes par défaut |
 | `GLPI_TICKET_TITLE`, `GLPI_TICKET_TYPE` | worker | Titre fixe et type appliqués aux tickets |
 | `GLPI_TICKET_URGENCY`, `GLPI_TICKET_IMPACT` | worker | Niveaux fixes dont GLPI déduit la priorité |
 
@@ -414,9 +435,9 @@ après l'arrêt normal, `1` pour une erreur inattendue, `2` pour une
 configuration invalide et `130` pour un `KeyboardInterrupt` non pris en charge
 par Uvicorn.
 
-### Démarrage du worker
+### Démarrage du worker MVP
 
-Après avoir renseigné `.env` et créé les quatre répertoires audio configurés :
+Après avoir renseigné `.env`, appliqué la migration et créé `AUDIO_ROOT` :
 
 ```bash
 uv run glpi-ticketing-worker
@@ -430,22 +451,28 @@ uv run python -m glpi_ticketing_worker_automation
 
 Le processus retourne `0` après un arrêt normal ou un `SIGINT`/`SIGTERM` géré,
 `1` pour une erreur inattendue, `2` pour une configuration invalide, `3` pour
-un pipeline bloqué et `130` si un `KeyboardInterrupt` échappe aux gestionnaires.
-Les attentes sont réveillées par le signal ; un appel HTTP synchrone déjà en
-cours peut toutefois aller jusqu'à son timeout configuré.
+une seconde instance refusée par le verrou advisory et `130` si un
+`KeyboardInterrupt` échappe aux gestionnaires. Un blocage métier ou système
+n'arrête plus le worker : le premier est persisté avant de continuer, le second
+est sondé après une attente configurable. Les attentes sont réveillées par le
+signal ; un appel HTTP synchrone déjà en cours peut toutefois aller jusqu'à son
+timeout configuré.
 
 ## Politique de tests
 
 La suite par défaut doit être déterministe, locale et sans appel externe. Les
-tests utilisent notamment des répertoires temporaires, des clients simulés et
+tests utilisent des stockages temporaires, des repositories simulés et
 l'injection de l'horloge et de la fonction de sommeil. Ils vérifient les
-résultats observables et les invariants de publication des fichiers, sans
-attendre réellement.
+outcomes, la classification des erreurs, le backoff et les frontières de
+transaction sans attendre réellement.
 
-Les anciens tests unitaires plats du scanner et du worker ont été répartis sous
-`apps/worker-automation/tests/unit/worker/` : outcomes, scanner, transcription
-du processeur, ticketing du processeur et runner. Les contrats HTTP restent
-testés séparément au niveau de leurs adaptateurs.
+Les tests du worker sont répartis sous
+`apps/worker-automation/tests/unit/worker/` entre outcomes, politiques,
+inspection audio, transitions, stages, service d'orchestration et runner. Les
+tests de composition, runtime, heartbeat et signaux sont séparés au niveau de
+l'application. L'ancien scanner et les assertions de déplacement ou de sidecar
+ont été retirés. Les contrats HTTP restent testés séparément au niveau de leurs
+adaptateurs.
 
 L'application web possède en plus un test d'intégration local : il démarre le
 vrai serveur Uvicorn sur un socket loopback et un port aléatoire, interroge
@@ -457,11 +484,11 @@ d'import `importlib`. Les marqueurs enregistrés sont :
 
 | Marqueur | Politique |
 | --- | --- |
-| `database` | Démarre un PostgreSQL 16 jetable, migre une base vide et vérifie le schéma réel |
+| `database` | Démarre un PostgreSQL 16 jetable et vérifie migrations, repositories, verrous et cycles applicatifs réels |
 | `deployment` | Construit les trois images runtime et vérifie TLS, Nginx et le Compose durci sans appeler les API externes |
 | `transcribe_ai` | Démarre une stack Transcribe AI v1 jetable et exécute le contrat POST/polling réel |
 | `glpi` | Démarre une seule stack GLPI 11/MySQL jetable et teste le client V2.3.0 réel |
-| `e2e` | Assemble le worker réel avec les stacks Transcribe AI et GLPI jetables |
+| `e2e` | Assemble PostgreSQL migré et le worker réel avec les stacks Transcribe AI et GLPI jetables |
 
 La suite `database` lance une seule image PostgreSQL épinglée par digest sur un
 réseau privé et un port loopback aléatoire. Chaque test reçoit une base isolée,
@@ -489,12 +516,13 @@ sa corrélation par `external_id`. Elle ne doit pas être parallélisée ; son
 teardown supprime les conteneurs, le réseau, les volumes Compose et l'image
 custom construite pour la session.
 
-La suite `e2e` réutilise ces deux fixtures de session et la vraie racine de
-composition du worker. Elle génère un UUID, publie le WAV synthétique dans
-`pending`, vérifie une transcription non vide dans le ticket corrélé par
-`external_id`, puis contrôle l'audio dans `completed` et l'absence d'artefact
-dans `failed`. Les deux fixtures restent responsables de leur teardown. Cette
-suite ne doit pas être parallélisée.
+La suite `e2e` réutilise ces deux fixtures de session, une base PostgreSQL
+migrée et la vraie racine de composition du worker. Elle génère un UUID, publie
+le WAV synthétique à sa clé canonique, crée le job `pending`, puis vérifie le
+ticket corrélé par `external_id`, l'état `completed`, la rétention et
+l'historique d'événements. Elle confirme que l'audio est inchangé et qu'aucun
+artefact de cycle de vie n'a été créé. Les fixtures restent responsables de
+leur teardown. Cette suite ne doit pas être parallélisée.
 
 ## Commandes de validation depuis la racine
 
@@ -512,11 +540,14 @@ parallélisation :
 uv run pytest -m database \
   apps/database-migrations/tests/integration \
   apps/web/tests/integration/test_job_ingestion.py \
+  packages/database/tests/integration \
+  apps/worker-automation/tests/integration/database \
   -vv --maxfail=1
 ```
 
-Smoke test du packaging de déploiement, à exécuter séparément et sans
-parallélisation :
+Smoke test du packaging de déploiement POC, à exécuter depuis le tag
+`poc-v0.1.0`, séparément et sans parallélisation. Le Compose de la branche MVP
+ne sera remis en cohérence qu'à l'itération 7 :
 
 ```bash
 uv run pytest -m deployment tests/deployment -vv --maxfail=1

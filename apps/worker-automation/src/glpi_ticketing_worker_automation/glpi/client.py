@@ -7,6 +7,7 @@ import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import TypeVar
 
 import httpx
 from pydantic import SecretStr
@@ -42,6 +43,12 @@ TICKET_REJECTION_VIOLATIONS = {
     "external_id": frozenset({"maxLength", "pattern"}),
 }
 
+_ResultT = TypeVar("_ResultT")
+
+
+def _no_op() -> None:
+    return None
+
 
 @dataclass(frozen=True, slots=True)
 class _CachedOAuthToken:
@@ -64,6 +71,7 @@ class GlpiClient:
         http_client: httpx.Client,
         timeout: float | httpx.Timeout,
         monotonic: Callable[[], float] = time.monotonic,
+        ownership_guard: Callable[[], None] = _no_op,
     ) -> None:
         self._base_url = _validate_base_url(base_url)
         self._username = _validate_identifier(username, "username")
@@ -76,15 +84,19 @@ class GlpiClient:
             raise TypeError("http_client must be an httpx.Client")
         if not callable(monotonic):
             raise TypeError("monotonic must be callable")
+        if not callable(ownership_guard):
+            raise TypeError("ownership_guard must be callable")
 
         self._ticket_defaults = ticket_defaults
         self._http_client = http_client
         self._timeout = _validate_timeout(timeout)
         self._monotonic = monotonic
+        self._ownership_guard = ownership_guard
         self._cached_token: _CachedOAuthToken | None = None
 
     def authenticate(self) -> OAuthToken:
         """Obtain or reuse a validated OAuth Password access token."""
+        self._ownership_guard()
         now = self._read_monotonic()
         if self._cached_token is not None and _token_is_reusable(
             self._cached_token,
@@ -94,19 +106,21 @@ class GlpiClient:
 
         operation = GlpiOperation.AUTHENTICATE
         try:
-            response = self._http_client.post(
-                self._url(TOKEN_PATH),
-                headers={"Accept": "application/json"},
-                data={
-                    "grant_type": "password",
-                    "client_id": self._client_id,
-                    "client_secret": self._client_secret.get_secret_value(),
-                    "username": self._username,
-                    "password": self._password.get_secret_value(),
-                    "scope": OAUTH_SCOPE,
-                },
-                timeout=self._timeout,
-                follow_redirects=False,
+            response = self._guarded_request(
+                lambda: self._http_client.post(
+                    self._url(TOKEN_PATH),
+                    headers={"Accept": "application/json"},
+                    data={
+                        "grant_type": "password",
+                        "client_id": self._client_id,
+                        "client_secret": self._client_secret.get_secret_value(),
+                        "username": self._username,
+                        "password": self._password.get_secret_value(),
+                        "scope": OAUTH_SCOPE,
+                    },
+                    timeout=self._timeout,
+                    follow_redirects=False,
+                )
             )
         except httpx.RequestError:
             raise GlpiTransportError(operation) from None
@@ -195,15 +209,17 @@ class GlpiClient:
     ) -> TicketId | None:
         operation = GlpiOperation.FIND_TICKET
         try:
-            response = self._http_client.get(
-                self._url(TICKET_PATH),
-                headers=self._bearer_headers(token),
-                params={
-                    "filter": f"external_id=={external_id}",
-                    "limit": "2",
-                },
-                timeout=self._timeout,
-                follow_redirects=False,
+            response = self._guarded_request(
+                lambda: self._http_client.get(
+                    self._url(TICKET_PATH),
+                    headers=self._bearer_headers(token),
+                    params={
+                        "filter": f"external_id=={external_id}",
+                        "limit": "2",
+                    },
+                    timeout=self._timeout,
+                    follow_redirects=False,
+                )
             )
         except httpx.RequestError:
             raise GlpiTransportError(operation) from None
@@ -232,19 +248,21 @@ class GlpiClient:
     ) -> TicketId:
         operation = GlpiOperation.CREATE_TICKET
         try:
-            response = self._http_client.post(
-                self._url(TICKET_PATH),
-                headers=self._bearer_headers(token),
-                json={
-                    "name": self._ticket_defaults.title,
-                    "content": _build_ticket_content(ticket),
-                    "external_id": external_id,
-                    "type": int(self._ticket_defaults.ticket_type),
-                    "urgency": int(self._ticket_defaults.urgency),
-                    "impact": int(self._ticket_defaults.impact),
-                },
-                timeout=self._timeout,
-                follow_redirects=False,
+            response = self._guarded_request(
+                lambda: self._http_client.post(
+                    self._url(TICKET_PATH),
+                    headers=self._bearer_headers(token),
+                    json={
+                        "name": self._ticket_defaults.title,
+                        "content": _build_ticket_content(ticket),
+                        "external_id": external_id,
+                        "type": int(self._ticket_defaults.ticket_type),
+                        "urgency": int(self._ticket_defaults.urgency),
+                        "impact": int(self._ticket_defaults.impact),
+                    },
+                    timeout=self._timeout,
+                    follow_redirects=False,
+                )
             )
         except httpx.RequestError:
             raise GlpiCreateOutcomeUnknownError(
@@ -326,6 +344,15 @@ class GlpiClient:
         if not math.isfinite(value):
             raise ValueError("monotonic must return a finite number")
         return float(value)
+
+    def _guarded_request(self, operation: Callable[[], _ResultT]) -> _ResultT:
+        """Fence each GLPI HTTP request with singleton ownership checks."""
+
+        self._ownership_guard()
+        try:
+            return operation()
+        finally:
+            self._ownership_guard()
 
 
 def _token_is_reusable(cached_token: _CachedOAuthToken, now: float) -> bool:

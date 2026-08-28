@@ -1,13 +1,7 @@
-"""Atomic filesystem primitives for the audio lifecycle.
+"""Canonical, atomic filesystem storage for lifecycle audio files."""
 
-The POC has a single worker and assumes one writer for a given audio UUID.
-"""
-
-import json
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO
 from uuid import UUID, uuid4
@@ -64,14 +58,6 @@ class PublishedAudio:
     storage_key: str
     path: Path
     size_bytes: int
-
-
-@dataclass(frozen=True, slots=True)
-class FailedTransition:
-    """Paths published by a successful transition to the failed directory."""
-
-    audio_path: Path
-    sidecar_path: Path
 
 
 def parse_audio_filename(name_or_path: str | Path) -> AudioFileName:
@@ -198,18 +184,6 @@ def delete_audio(audio_root: Path, storage_key: str) -> bool:
     return True
 
 
-def atomic_write(
-    destination: Path,
-    source: BinaryIO,
-    *,
-    buffer_size: int = DEFAULT_BUFFER_SIZE,
-) -> Path:
-    """Publish a stream through a flushed and synchronized ``.part`` file."""
-    destination = Path(destination)
-    _atomic_write(destination, source, buffer_size=buffer_size)
-    return destination
-
-
 def _atomic_write(
     destination: Path,
     source: BinaryIO,
@@ -247,117 +221,6 @@ def _atomic_write(
     return size_bytes
 
 
-def move_audio(
-    source: Path,
-    destination_directory: Path,
-    *,
-    buffer_size: int = DEFAULT_BUFFER_SIZE,
-) -> Path:
-    """Copy an audio to another volume, then remove its source."""
-    source = Path(source)
-    destination_directory = Path(destination_directory)
-    audio_name = _validate_audio_source(source)
-    _require_directory(destination_directory)
-
-    destination = destination_directory / audio_name.filename
-    with source.open("rb") as source_stream:
-        atomic_write(destination, source_stream, buffer_size=buffer_size)
-
-    try:
-        _unlink_source(source)
-    except BaseException:
-        if source.exists():
-            _unlink_if_exists(destination)
-            _fsync_directory(destination_directory)
-        raise
-    return destination
-
-
-def move_to_failed(
-    source: Path,
-    failed_directory: Path,
-    sidecar_payload: Mapping[str, object],
-    *,
-    buffer_size: int = DEFAULT_BUFFER_SIZE,
-) -> FailedTransition:
-    """Publish an audio and error sidecar before removing the source."""
-    source = Path(source)
-    failed_directory = Path(failed_directory)
-    audio_name = _validate_audio_source(source)
-    _require_directory(failed_directory)
-    serialized_sidecar = _serialize_sidecar(sidecar_payload)
-
-    audio_destination = failed_directory / audio_name.filename
-    sidecar_destination = failed_directory / f"{audio_name.audio_uuid}.error.json"
-    attempt_paths = (
-        audio_destination,
-        sidecar_destination,
-    )
-    for attempt_path in attempt_paths:
-        _require_absent(attempt_path)
-
-    published_paths: list[Path] = []
-    try:
-        with source.open("rb") as source_stream:
-            atomic_write(
-                audio_destination,
-                source_stream,
-                buffer_size=buffer_size,
-            )
-        published_paths.append(audio_destination)
-
-        atomic_write(
-            sidecar_destination,
-            BytesIO(serialized_sidecar),
-            buffer_size=buffer_size,
-        )
-        published_paths.append(sidecar_destination)
-        _unlink_source(source)
-    except BaseException:
-        if source.exists():
-            _cleanup_failed_attempt(published_paths, failed_directory)
-        raise
-
-    return FailedTransition(
-        audio_path=audio_destination,
-        sidecar_path=sidecar_destination,
-    )
-
-
-def list_ready_audio_files(directory: Path) -> list[Path]:
-    """List valid, complete audio files in deterministic filename order."""
-    directory = Path(directory)
-    _require_directory(directory)
-    ready_files: list[Path] = []
-
-    for candidate in directory.iterdir():
-        if candidate.name.endswith(".part"):
-            continue
-        if candidate.is_symlink() or not candidate.is_file():
-            continue
-
-        try:
-            parse_audio_filename(candidate.name)
-        except InvalidAudioFilenameError:
-            continue
-        ready_files.append(candidate)
-
-    return sorted(ready_files, key=lambda path: path.name)
-
-
-def _validate_audio_source(source: Path) -> AudioFileName:
-    audio_name = parse_audio_filename(source.name)
-    if source.is_symlink():
-        msg = f"Audio source must not be a symbolic link: {source}"
-        raise ValueError(msg)
-    if not source.exists():
-        raise FileNotFoundError(source)
-    if not source.is_file():
-        msg = f"Audio source must be a regular file: {source}"
-        raise ValueError(msg)
-    return audio_name
-
-
 def _validate_buffer_size(buffer_size: int) -> None:
     if isinstance(buffer_size, bool) or not isinstance(buffer_size, int):
         raise TypeError("buffer_size must be an integer")
@@ -383,31 +246,6 @@ def _copy_stream(source: BinaryIO, destination: BinaryIO, buffer_size: int) -> i
             if written is None or written <= 0:
                 raise OSError("Destination did not accept the complete audio chunk")
             remaining = remaining[written:]
-
-
-def _serialize_sidecar(sidecar_payload: Mapping[str, object]) -> bytes:
-    """Serialize a small sidecar payload already sanitized by its caller."""
-    try:
-        serialized = json.dumps(
-            dict(sidecar_payload),
-            allow_nan=False,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-    except (TypeError, ValueError) as error:
-        raise ValueError("Sidecar payload must contain valid JSON values") from error
-    return f"{serialized}\n".encode()
-
-
-def _cleanup_failed_attempt(
-    published_paths: list[Path],
-    destination_directory: Path,
-) -> None:
-    for path in reversed(published_paths):
-        _unlink_if_exists(path)
-    if published_paths:
-        _fsync_directory(destination_directory)
 
 
 def _new_part_path(destination: Path) -> Path:
@@ -453,8 +291,3 @@ def _replace_file(source: Path, destination: Path) -> None:
     except BaseException:
         _unlink_if_exists(destination)
         raise
-
-
-def _unlink_source(source: Path) -> None:
-    source.unlink()
-    _fsync_directory(source.parent)

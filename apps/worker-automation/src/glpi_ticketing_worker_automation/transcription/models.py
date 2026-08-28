@@ -84,8 +84,13 @@ class JobSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class TranscriptionResult:
-    """Successful transcription associated with its processing audio."""
+    """Successful provider result associated with its source audio."""
 
     audio_path: Path
     audio_uuid: UUID
+    provider_job_id: JobUuid
     transcription: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provider_job_id, str) or not self.provider_job_id:
+            raise ValueError("provider_job_id must be a non-empty string")

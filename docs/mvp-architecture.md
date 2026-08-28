@@ -98,17 +98,25 @@ pour le MVP.
 │   │   │       └── js/upload.js                       🟦 base ; ⬜ dashboard
 │   │   └── tests/                                     🟦 à compléter
 │   │
-│   ├── worker-automation/                             🟦 à adapter
+│   ├── worker-automation/                             🟦 worker persistant
 │   │   ├── src/glpi_ticketing_worker_automation/
 │   │   │   ├── __main__.py                            🟦
-│   │   │   ├── application.py                         ⬜ composition DB
-│   │   │   ├── settings.py                            ⬜ DB + heartbeat
+│   │   │   ├── application.py                         🟦 CLI + boucle
+│   │   │   ├── composition.py                         🟦 assemblage des services
+│   │   │   ├── settings.py                            🟦 contrat MVP
+│   │   │   ├── runtime/                               🟦 ressources + heartbeat
 │   │   │   ├── transcription/                         🟦
 │   │   │   └── worker/
-│   │   │       ├── models.py                          ⬜ états persistants
-│   │   │       ├── processor.py                       ⬜ orchestration DB
-│   │   │       └── runner.py                          ⬜ autonomie singleton
-│   │   └── tests/                                     🟦 à compléter
+│   │   │       ├── audio.py                           🟦 inspection canonique
+│   │   │       ├── lifecycle.py                       🟦 transactions multi-modèles
+│   │   │       ├── outcomes.py                        🟦 résultats expurgés
+│   │   │       ├── ports.py                           🟦 contrats internes
+│   │   │       ├── policies.py                        🟦 retry + rétention
+│   │   │       ├── service.py                         🟦 orchestration lisible
+│   │   │       ├── stages/                            🟦 Transcribe AI + GLPI
+│   │   │       ├── transitions.py                     🟦 décisions persistantes
+│   │   │       └── runner.py                          🟦 autonomie singleton
+│   │   └── tests/                                     🟦 unitaires + intégration DB
 │   │
 │   └── worker-retention/                              ⬜ nouvelle application
 │       ├── pyproject.toml
@@ -128,7 +136,7 @@ pour le MVP.
 ├── packages/
 │   ├── common/                                        🟦
 │   │   └── src/glpi_ticketing_common/
-│   │       └── audio_files.py                         🟦 stockage unique + compatibilité POC
+│   │       └── audio_files.py                         🟦 stockage canonique unique
 │   │
 │   ├── database/                                      🟦 fondation persistante
 │   │   ├── pyproject.toml
@@ -143,8 +151,14 @@ pour le MVP.
 │   │   │   │   ├── audio_retention.py                 🟦
 │   │   │   │   ├── ticket_creation_job_event.py       🟦
 │   │   │   │   └── worker_runtime_status.py           🟦
-│   │   │   ├── repositories.py                        🟦 création et lecture d'un job
-│   │   │   └── advisory_locks.py                      ⬜ ajouté avec les workers
+│   │   │   ├── repositories/                          🟦 un repository par modèle
+│   │   │   │   ├── __init__.py                        🟦 façade publique
+│   │   │   │   ├── _validation.py                     🟦 validations partagées
+│   │   │   │   ├── ticket_creation_job.py             🟦
+│   │   │   │   ├── ticket_creation_job_event.py       🟦
+│   │   │   │   ├── audio_retention.py                 🟦
+│   │   │   │   └── worker_runtime_status.py           🟦
+│   │   │   └── advisory_locks.py                      🟦 singleton par service
 │   │   └── tests/
 │   │
 │   └── glpi-client/                                   ⬜ extraction du client
@@ -175,8 +189,10 @@ les quatre classes : un import de `glpi_ticketing_database.models` enregistre
 donc toujours le schéma complet dans l'unique `Base.metadata`. Les enums restent
 centralisés car plusieurs tables partagent leurs valeurs persistées.
 
-Le fichier `repositories.py` reste unique tant que ses responsabilités réelles
-ne justifient pas une nouvelle segmentation.
+Les repositories sont séparés par modèle. Aucun repository ne crée ou ne
+modifie implicitement une autre table : le web orchestre la création du job et
+de son événement initial, tandis que `AutomationJobLifecycleService` coordonne
+job, événement et rétention côté worker dans une même transaction SQLAlchemy.
 
 Aucune classe `UnitOfWork` personnalisée n'est ajoutée. La session SQLAlchemy
 porte déjà cette responsabilité ; les applications ouvrent explicitement une
@@ -198,8 +214,8 @@ flowchart LR
     User[Intervenant]:::implemented --> Nginx[Nginx TLS + Basic Auth]:::implemented
     Nginx --> Web[Application web]:::implemented
 
-    Web --> Audio[(Volume audio unique)]:::future
-    Web --> Database[(PostgreSQL)]:::future
+    Web --> Audio[(Volume audio unique)]:::implemented
+    Web --> Database[(PostgreSQL)]:::implemented
 
     Automation[Worker automation]:::implemented --> Audio
     Automation --> Database
@@ -293,7 +309,7 @@ par état.
 
 `storage_key` est l'emplacement faisant autorité. `audio_extension` est une
 métadonnée immuable, validée lors du dépôt et utilisée pour le type de contenu ;
-le repository de création garantit leur cohérence.
+le repository `TicketCreationJobRepository` garantit leur cohérence.
 
 ### `audio_retentions`
 
@@ -494,46 +510,51 @@ purge ne supprime jamais le job ni ses événements.
 
 ```mermaid
 flowchart TD
-    Start[Démarrage]:::implemented --> Lock[Acquérir le verrou advisory automation]:::future
-    Lock -->|déjà pris| Duplicate[Refuser une seconde instance]:::future
-    Lock -->|acquis| Heartbeat[Heartbeat running]:::future
+    Start[Démarrage]:::implemented --> Lock[Acquérir le verrou advisory automation]:::implemented
+    Lock -->|déjà pris| Duplicate[Refuser une seconde instance]:::implemented
+    Lock -->|acquis| Heartbeat[Heartbeat starting puis running]:::implemented
 
-    Heartbeat --> Recover{Un job processing<br/>est à reprendre ?}:::future
-    Recover -->|oui| HasTicket{glpi_ticket_id existe ?}:::future
-    HasTicket -->|oui| Finalize[stage finalization]:::future
-    HasTicket -->|non| TranscriptionStage[stage transcription]:::future
+    Heartbeat --> Recover{Un job processing<br/>est à reprendre ?}:::implemented
+    Recover -->|oui| HasTicket{glpi_ticket_id existe ?}:::implemented
+    HasTicket -->|oui| Finalize[stage finalization]:::implemented
+    HasTicket -->|non| TranscriptionStage[stage transcription]:::implemented
 
-    Recover -->|non| Select[Sélectionner pending ou retry dû]:::future
+    Recover -->|non| Select[Sélectionner retry dû<br/>puis pending]:::implemented
     Select -->|aucun| Wait[Attendre]:::implemented
     Wait --> Heartbeat
-    Select -->|trouvé| Claim[Transaction : processing<br/>+ tentative + événement]:::future
+    Select -->|trouvé| Claim[Transaction : processing<br/>+ tentative + événement]:::implemented
     Claim --> HasTicket
 
-    TranscriptionStage --> Read[Lire /data/audios/clé canonique]:::future
+    TranscriptionStage --> Read[Lire /data/audios/clé canonique]:::implemented
     Read --> Transcribe[POST puis polling Transcribe AI]:::implemented
-    Transcribe -->|indisponible| RetryT[retry_scheduled + next_attempt_at]:::future
+    Transcribe -->|job créé| ProviderId[Persister transcription_provider_job_id<br/>avant le polling]:::implemented
+    ProviderId --> Transcribe
+    ProviderId -->|persistance impossible| SystemBlocked
+    Transcribe -->|indisponible| RetryT[retry_scheduled + next_attempt_at]:::implemented
     RetryT --> Heartbeat
-    Transcribe -->|terminal propre au job| Failed[failed + rétention + événement]:::future
+    Transcribe -->|terminal propre au job| Failed[failed + rétention + événement]:::implemented
     Failed --> Heartbeat
-    Transcribe -->|ambigu propre au job| JobBlocked[Job blocked + événement]:::future
+    Transcribe -->|ambigu propre au job| JobBlocked[Job blocked + rétention + événement]:::implemented
     JobBlocked --> Heartbeat
-    Transcribe -->|auth, configuration ou contrat global| SystemBlocked[Heartbeat blocked<br/>+ suspendre la consommation]:::future
-    Transcribe -->|transcription reçue| GlpiStage[stage glpi_creation]:::future
+    Transcribe -->|auth, configuration ou contrat global| SystemBlocked[Heartbeat blocked<br/>+ suspendre la consommation]:::implemented
+    Transcribe -->|transcription reçue| GlpiStage[stage glpi_creation]:::implemented
 
     GlpiStage --> Glpi[Retrouver ou créer le ticket]:::implemented
-    Glpi -->|indisponible ou résultat inconnu| RetryG[retry_scheduled + next_attempt_at]:::future
+    Glpi -->|indisponible ou résultat inconnu| RetryG[retry_scheduled + next_attempt_at]:::implemented
     RetryG --> Heartbeat
     Glpi -->|rejet terminal du job| Failed
     Glpi -->|ambigu propre au job| JobBlocked
     Glpi -->|auth, configuration ou contrat global| SystemBlocked
-    Glpi -->|ticket confirmé| Persist[Persister glpi_ticket_id]:::future
+    Glpi -->|ticket confirmé| Persist[Persister glpi_ticket_id]:::implemented
     Persist --> Finalize
-    Finalize --> Complete[Transaction : completed + rétention + événement]:::future
+    Finalize --> Complete[Transaction : completed + rétention + événement]:::implemented
     Complete --> Heartbeat
 
-    SystemBlocked --> Probe[Attendre puis revalider<br/>sans réclamer de job]:::future
+    SystemBlocked --> SafeProbe{Nouvelle tentative<br/>sans effet ambigu ?}:::implemented
+    SafeProbe -->|oui| Probe[Attendre puis revalider<br/>sans réclamer de job]:::implemented
     Probe -->|toujours bloqué| SystemBlocked
     Probe -->|résolu| Heartbeat
+    SafeProbe -->|non| Latched[Attendre un arrêt ou<br/>une décision opérateur]:::implemented
 
     classDef implemented fill:#dbeafe,stroke:#2563eb,color:#111827;
     classDef future fill:#fff,stroke:#64748b,color:#111827,stroke-dasharray:5 4;
@@ -544,6 +565,19 @@ Transcribe AI, GLPI ou une attente. Un retry métier ne redémarre pas le
 conteneur : il persiste `retry_scheduled`, libère le job et laisse la boucle
 traiter un autre job éligible.
 
+La sélection applique strictement la priorité `processing`, puis retry arrivé
+à échéance, puis `pending`. Un retry de portée `system` non encore échu bloque
+la réclamation de nouveaux jobs : il sert de sonde unique et évite de propager
+la même panne à toute la file. Le backoff exponentiel vaut 5 secondes au
+premier échec, double à chaque échec consécutif et reste plafonné à 300
+secondes. Le singleton du MVP n'ajoute pas de jitter.
+
+`consecutive_retry_count` représente une série globale d'échecs temporaires du
+pipeline, et non un compteur distinct par dépendance. Une réussite Transcribe
+suivie d'une indisponibilité GLPI ne remet donc pas la série à zéro : la reprise
+GLPI impose encore une nouvelle transcription. Seul le futur réarmement
+opérateur réinitialise explicitement ce compteur.
+
 Le test de `glpi_ticket_id` s'applique aussi à un job réarmé par un opérateur.
 Si le ticket est déjà confirmé, le worker reprend la finalisation sans demander
 une transcription inutile. Sans identifiant GLPI persisté, il redemande la
@@ -552,6 +586,49 @@ transcription puisque son contenu n'est pas conservé.
 Un crash technique inattendu peut être relancé par Docker Compose. Un résultat
 `failed` ou `blocked` est un état métier persisté, pas une raison de redémarrer
 aveuglément le processus.
+
+Le worker écrit dès l'itération 3 un heartbeat minimal aux frontières de sa
+boucle : `starting`, `running`, `degraded`, `blocked` et `stopped`. Une erreur
+système immédiate laisse le job `processing`. Elle est sondée uniquement si la
+répétition ne peut pas dupliquer un effet distant ; après un `POST` accepté non
+persisté, une rupture du polling ou un contrat GLPI incohérent, le blocage est
+verrouillé et le processus reste vivant sans rappeler le processeur. La
+périodicité indépendante des appels longs, la détection de heartbeat périmé et
+les alertes du dashboard restent le périmètre de l'itération 6.
+
+Toutes les transactions du worker, y compris les heartbeats, utilisent la
+connexion qui détient le verrou advisory. La perte de cette connexion fait donc
+échouer le commit lui-même ; une ancienne instance ne peut pas valider une
+transition SQL après la prise de possession par sa remplaçante. Le verrou est
+également revalidé avant et après chaque itération et appel externe, ainsi
+qu'autour de chaque lecture du polling de transcription. Si le `POST`
+Transcribe AI a réussi mais que son identifiant ne peut pas être persisté,
+l'erreur expurgée devient un blocage système et le job reste `processing` ; il
+n'est jamais classé `failed` pour une panne de PostgreSQL.
+
+Le résultat du polling doit porter exactement le même identifiant provider que
+celui persisté par le callback de soumission. Une divergence de chemin, d'UUID
+audio ou d'identifiant provider est traitée comme une rupture de contrat
+systémique : le job reste `processing` et aucun ticket GLPI n'est créé. Un
+`SIGINT` ou `SIGTERM` observé pendant le polling produit de même une sortie
+interrompue sans programmer de retry ; le prochain démarrage reprend ce job en
+priorité.
+
+Le client GLPI revalide le verrou avant et après chacune de ses requêtes. Cette
+barrière réduit la fenêtre de course, mais ne peut pas annuler une création
+HTTP déjà en vol et GLPI ne garantit pas l'unicité de `external_id`. La
+recherche de réconciliation reste donc nécessaire et ne constitue pas un jeton
+de fencing distribué.
+
+Avant tout appel distant, le worker vérifie également que la taille du fichier
+canonique correspond à `audio_size_bytes`. Une divergence bloque ce job avant
+transcription. Cette vérification détecte une troncature ou un remplacement de
+taille différente ; une empreinte de contenu reste hors périmètre de cette
+itération.
+
+L'audio reste à sa `storage_key` pendant toutes ces transitions. Le worker ne
+scanne jamais le volume, ne déplace aucun fichier et ne crée aucun sidecar ;
+`failed` et `completed` sont des états PostgreSQL, pas des répertoires.
 
 ## Pipeline du worker de rétention
 
@@ -750,18 +827,19 @@ Périmètre : publication atomique dans `/data/audios`, création du job
 `pending`, événement initial et réponse `202` avec `Location`.
 
 État : 🟦 implémenté sur la branche. La façade HTML reste disponible jusqu'au
-dashboard par lot ; le worker historique sera basculé lors de l'itération 3.
+dashboard par lot ; le worker consomme désormais ces jobs persistés depuis
+l'itération 3.
 
 - Tests unitaires : validation de `storage_key`, refus des traversées de
   chemin, écriture `.part`, compensation et contrats HTTP.
 - Tests d'intégration : requête FastAPI avec PostgreSQL et volume temporaires,
   cohérence fichier/ligne, deux dépôts distincts et panne SQL simulée.
-- Tests POC à adapter : tests web qui inspectent directement `pending` ou
+- Tests POC adaptés : tests web qui inspectaient directement `pending` ou
   `completed`. Leur intention fonctionnelle est conservée avec la base et le
   stockage canonique.
-- Code POC à adapter : configuration multi-répertoires du web et fonctions de
-  publication. Les primitives encore utilisées par le worker historique sont
-  conservées jusqu'à l'itération 3.
+- Code POC adapté : configuration multi-répertoires du web et fonctions de
+  publication. Les primitives de transition conservées provisoirement pour le
+  worker historique ont été retirées à l'itération 3.
 - Sortie : le web ne crée jamais un job consommable avant la publication
   durable de son audio.
 
@@ -771,21 +849,28 @@ Périmètre : sélection en base, verrou advisory singleton, reprise d'un job
 `processing`, retries planifiés et transitions `completed`, `failed` ou
 `blocked`.
 
+État : 🟦 implémenté sur la branche. PostgreSQL pilote la sélection et toutes
+les transitions ; le volume canonique ne représente plus l'état du job. Un
+heartbeat minimal a été avancé depuis l'itération 6 pour rendre les blocages
+système observables dès cette bascule.
+
 - Tests unitaires : priorité de reprise, matrice des transitions, backoff,
   classification des erreurs, idempotence GLPI et transactions sans appel
   réseau ouvert.
-- Tests d'intégration : worker avec PostgreSQL et stockage réels, concurrence
-  de deux instances sur le verrou, crash/reprise et non-duplication du ticket.
-- Tests POC à remplacer :
+- Tests d'intégration : worker avec PostgreSQL migré et stockage réel,
+  crash/reprise avec ou sans ticket confirmé, échéance d'un retry et verrou
+  advisory sur de vraies sessions PostgreSQL. Le pipeline E2E conserve le même
+  audio à sa clé canonique et vérifie le job, la rétention et les événements.
+- Tests POC remplacés :
   `apps/worker-automation/tests/unit/worker/test_scanner.py`, ainsi que les
-  assertions des tests processor et E2E portant sur les déplacements entre
+  assertions des tests du service et E2E portant sur les déplacements entre
   `pending`, `processing`, `completed` et `failed` ou sur les sidecars. Les
   tests de `packages/common/tests/unit/test_audio_files.py` portant sur ces
-  transitions sont remplacés ; ceux portant sur l'écriture atomique sont
-  conservés et adaptés au stockage canonique.
-- Code POC à retirer après migration : scanner de répertoires, transitions de
-  volumes et sidecars JSON. Les fonctions communes encore utiles à l'écriture
-  atomique sont conservées sous une responsabilité de stockage renommée.
+  transitions ont été remplacés ; ceux portant sur l'écriture atomique sont
+  conservés dans `test_audio_storage.py`.
+- Code POC retiré : scanner de répertoires, transitions de volumes, sidecars
+  JSON et état privé du processeur. Les primitives communes de stockage
+  canonique restent partagées par le web et le worker.
 - Sortie : le worker ne découvre plus aucun job depuis le système de fichiers.
 
 ### Itération 4 — API des jobs et dashboard par lot
@@ -829,6 +914,12 @@ application `worker-retention`, deadlines et purge crash-safe.
 Périmètre : états runtime des workers, alertes dashboard, détection des jobs
 anciens et distinction entre retry métier et redémarrage de processus.
 
+Un socle minimal est déjà présent depuis l'itération 3 pour le worker
+d'automatisation : écriture des états runtime aux frontières de la boucle et
+distinction entre blocage de job et blocage système. Cette itération ajoute la
+périodicité pendant les traitements longs, les seuils d'absence et leur
+présentation dans le dashboard.
+
 - Tests unitaires : seuils de heartbeat, alertes dédupliquées, état
   `degraded`/`blocked`, horloge injectée et politique de sortie du processus.
 - Tests d'intégration : heartbeat réel en base, arrêt d'un worker, reprise
@@ -844,6 +935,9 @@ anciens et distinction entre retry métier et redémarrage de processus.
 
 Périmètre : PostgreSQL, migration one-shot, deux workers, web, Nginx, volumes,
 healthchecks, politiques de redémarrage et documentation d'exploitation.
+
+Jusqu'à ce jalon, le Compose versionné reste celui du POC et ne doit pas être
+présenté comme un déploiement cohérent de la branche MVP.
 
 - Tests unitaires : validation ciblée des settings et des commandes d'entrée ;
   aucun test Docker simulé.
