@@ -25,6 +25,15 @@ def validate_positive_integer(value: int, field_name: str) -> int:
     return value
 
 
+def validate_page_limit(value: int, field_name: str = "limit") -> int:
+    """Return a repository page size constrained to a safe bounded range."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be an integer")
+    if not 1 <= value <= 100:
+        raise ValueError(f"{field_name} must be between 1 and 100")
+    return value
+
+
 def validate_aware_datetime(value: datetime, field_name: str) -> datetime:
     """Return a timezone-aware datetime."""
     if not isinstance(value, datetime):
@@ -75,6 +84,7 @@ __all__ = [
     "validate_aware_datetime",
     "validate_future_datetime",
     "validate_optional_error",
+    "validate_page_limit",
     "validate_positive_integer",
     "validate_safe_identifier",
     "validate_uuid",

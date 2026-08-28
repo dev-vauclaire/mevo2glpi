@@ -87,6 +87,7 @@ class JobEventType(StrEnum):
     JOB_COMPLETED = "job_completed"
     JOB_FAILED = "job_failed"
     JOB_BLOCKED = "job_blocked"
+    OPERATOR_RETRY_REQUESTED = "operator_retry_requested"
 
 
 class WorkerServiceName(StrEnum):

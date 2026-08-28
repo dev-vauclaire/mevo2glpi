@@ -85,6 +85,7 @@ from glpi_ticketing_database.models import (
                 "job_completed",
                 "job_failed",
                 "job_blocked",
+                "operator_retry_requested",
             },
         ),
         (WorkerServiceName, {"worker_automation", "worker_retention"}),

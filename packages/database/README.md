@@ -80,6 +80,29 @@ Les repositories n'appellent jamais `commit()`. Ils valident et `flush()` les
 mutations dans la session fournie, ce qui laisse la frontière transactionnelle
 au service appelant.
 
+## Lecture dashboard et relance opérateur
+
+`TicketCreationJobRepository.list_page()` expose une pagination keyset stable
+sur `(updated_at, uuid) DESC`, avec filtre d'état et recherche exacte par UUID.
+`TicketCreationJobEventRepository.list_page()` applique la même convention sur
+`(occurred_at, event_id) DESC`. Les curseurs HTTP opaques appartiennent à
+l'application web : le package database ne manipule que leurs valeurs typées.
+
+La relance d'un job reste une orchestration applicative. Dans une même
+transaction, le web appelle successivement :
+
+1. `TicketCreationJobRepository.rearm_for_operator_retry()` ;
+2. `AudioRetentionRepository.deactivate_for_operator_retry()` ;
+3. `TicketCreationJobEventRepository.append()` avec
+   `operator_retry_requested`.
+
+Le réarmement accepte uniquement `failed` ou `blocked`, remet les champs
+transitoires à zéro et conserve l'historique : UUID, `glpi_ticket_id`, compteur
+total de tentatives, création et premier démarrage. La rétention ne peut être
+désactivée que depuis `scheduled`, `retry_scheduled` ou `blocked`. Les lignes
+sont verrouillées dans l'ordre job puis rétention ; un repository ne modifie
+jamais le modèle du suivant.
+
 ## Verrous advisory et runtime
 
 `try_acquire_advisory_lock()` réserve une clé stable par
@@ -188,6 +211,7 @@ packages/database/
     │   ├── test_ticket_creation_job_transitions.py
     │   └── test_worker_runtime_status_repository.py
     └── integration/
+        ├── test_dashboard_repositories.py
         └── test_ticket_creation_job_repository.py
 ```
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -18,6 +18,7 @@ from ..models import (
 )
 from ._validation import (
     validate_aware_datetime,
+    validate_page_limit,
     validate_positive_integer,
     validate_safe_identifier,
     validate_uuid,
@@ -67,6 +68,23 @@ class JobSnapshot:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class JobCursor:
+    """Stable keyset cursor for the dashboard job ordering."""
+
+    updated_at: datetime
+    uuid: UUID
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class JobPage:
+    """One bounded page of jobs and the cursor for the following page."""
+
+    items: tuple[JobSnapshot, ...]
+    next_cursor: JobCursor | None
+    has_more: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class JobAcquisition:
     """Describe one deterministic worker claim or crash recovery."""
 
@@ -111,6 +129,92 @@ class TicketCreationJobRepository:
         validate_uuid(job_uuid, "job_uuid")
         job = self._session.get(TicketCreationJob, job_uuid)
         return _to_snapshot(job) if job is not None else None
+
+    def list_page(
+        self,
+        *,
+        limit: int,
+        status: JobStatus | None = None,
+        job_uuid: UUID | None = None,
+        cursor: JobCursor | None = None,
+    ) -> JobPage:
+        """List jobs with deterministic descending keyset pagination."""
+        limit = validate_page_limit(limit)
+        if status is not None and not isinstance(status, JobStatus):
+            raise TypeError("status must be a JobStatus or None")
+        if job_uuid is not None:
+            validate_uuid(job_uuid, "job_uuid")
+        if cursor is not None:
+            if not isinstance(cursor, JobCursor):
+                raise TypeError("cursor must be a JobCursor or None")
+            validate_aware_datetime(cursor.updated_at, "cursor.updated_at")
+            validate_uuid(cursor.uuid, "cursor.uuid")
+
+        statement = select(TicketCreationJob)
+        if status is not None:
+            statement = statement.where(TicketCreationJob.status == status.value)
+        if job_uuid is not None:
+            statement = statement.where(TicketCreationJob.uuid == job_uuid)
+        if cursor is not None:
+            statement = statement.where(
+                or_(
+                    TicketCreationJob.updated_at < cursor.updated_at,
+                    and_(
+                        TicketCreationJob.updated_at == cursor.updated_at,
+                        TicketCreationJob.uuid < cursor.uuid,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            TicketCreationJob.updated_at.desc(),
+            TicketCreationJob.uuid.desc(),
+        ).limit(limit + 1)
+
+        jobs = tuple(self._session.scalars(statement).all())
+        has_more = len(jobs) > limit
+        items = tuple(_to_snapshot(job) for job in jobs[:limit])
+        next_cursor = None
+        if has_more:
+            last_item = items[-1]
+            next_cursor = JobCursor(
+                updated_at=last_item.updated_at,
+                uuid=last_item.uuid,
+            )
+        return JobPage(
+            items=items,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+
+    def rearm_for_operator_retry(
+        self,
+        job_uuid: UUID,
+        *,
+        now: datetime,
+    ) -> JobSnapshot:
+        """Return a failed or blocked job to pending for an operator retry."""
+        validate_uuid(job_uuid, "job_uuid")
+        now = validate_aware_datetime(now, "now")
+        job = self._session.get(
+            TicketCreationJob,
+            job_uuid,
+            with_for_update=True,
+        )
+        if job is None:
+            raise JobNotFoundError(f"job {job_uuid} does not exist")
+        if job.status not in (JobStatus.FAILED.value, JobStatus.BLOCKED.value):
+            raise InvalidJobTransitionError(f"job {job_uuid} is not failed or blocked")
+
+        job.status = JobStatus.PENDING.value
+        job.stage = None
+        job.transcription_provider_job_id = None
+        job.consecutive_retry_count = 0
+        job.next_attempt_at = None
+        _clear_job_error(job)
+        job.updated_at = now
+        job.finished_at = None
+        self._session.flush()
+        return _to_snapshot(job)
 
     def resume_or_claim_next(self, now: datetime) -> JobAcquisition | None:
         """Resume processing, otherwise claim a due retry then a pending job."""
@@ -467,8 +571,10 @@ def _to_snapshot(job: TicketCreationJob) -> JobSnapshot:
 __all__ = [
     "InvalidJobTransitionError",
     "JobAcquisition",
+    "JobCursor",
     "JobMutation",
     "JobNotFoundError",
+    "JobPage",
     "JobSnapshot",
     "PendingJob",
     "TicketCreationJobRepository",

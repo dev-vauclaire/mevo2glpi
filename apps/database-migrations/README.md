@@ -37,6 +37,17 @@ uv run python -m glpi_ticketing_database_migrations
 Les ressources Alembic sont embarquées dans le package Python. Leur résolution
 ne dépend donc pas du répertoire courant du processus.
 
+## Historique courant
+
+- `0001_initial_schema` crée les quatre tables du cycle de vie MVP ;
+- `0002_add_operator_retry_event` étend la contrainte des événements avec
+  `operator_retry_requested`, sans réécrire la migration initiale.
+
+La montée `0001 -> 0002` est testée avec des données préexistantes. Le
+downgrade de `0002` conserve volontairement la sécurité native de PostgreSQL :
+il échoue si des événements `operator_retry_requested` existent encore, au
+lieu de supprimer silencieusement l'historique d'audit.
+
 ## Tests
 
 Les tests unitaires ne nécessitent pas PostgreSQL :

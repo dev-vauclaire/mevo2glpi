@@ -12,6 +12,9 @@ import glpi_ticketing_database as database_api
 from glpi_ticketing_database import (
     AudioExtension,
     ErrorScope,
+    InvalidJobTransitionError,
+    JobCursor,
+    JobPage,
     JobSnapshot,
     JobStage,
     JobStatus,
@@ -169,9 +172,114 @@ def test_get_by_uuid_returns_none_for_an_unknown_job() -> None:
     session.get.assert_called_once_with(TicketCreationJob, job_uuid)
 
 
+def test_list_page_returns_a_stable_cursor_from_the_last_visible_job() -> None:
+    session = create_autospec(Session, instance=True)
+    oldest_time = datetime(2026, 8, 27, 10, tzinfo=UTC)
+    newest_time = datetime(2026, 8, 27, 12, tzinfo=UTC)
+    jobs = (
+        _persisted_job(uuid4(), newest_time),
+        _persisted_job(uuid4(), newest_time),
+        _persisted_job(uuid4(), oldest_time),
+    )
+    session.scalars.return_value.all.return_value = jobs
+
+    page = TicketCreationJobRepository(session).list_page(limit=2)
+
+    assert page == JobPage(
+        items=(
+            _snapshot_for(jobs[0]),
+            _snapshot_for(jobs[1]),
+        ),
+        next_cursor=JobCursor(
+            updated_at=jobs[1].updated_at,
+            uuid=jobs[1].uuid,
+        ),
+        has_more=True,
+    )
+    session.scalars.assert_called_once()
+    session.flush.assert_not_called()
+
+
+@pytest.mark.parametrize("limit", [0, 101, True])
+def test_list_page_rejects_an_invalid_limit_before_reading(limit: int) -> None:
+    session = create_autospec(Session, instance=True)
+
+    with pytest.raises((TypeError, ValueError)):
+        TicketCreationJobRepository(session).list_page(limit=limit)
+
+    session.scalars.assert_not_called()
+
+
+def test_rearm_for_operator_retry_clears_transient_state_only() -> None:
+    session = create_autospec(Session, instance=True)
+    job_uuid = uuid4()
+    created_at = datetime(2026, 8, 20, 12, tzinfo=UTC)
+    first_started_at = datetime(2026, 8, 21, 12, tzinfo=UTC)
+    job = _persisted_job(job_uuid, created_at)
+    job.status = JobStatus.BLOCKED.value
+    job.stage = JobStage.FINALIZATION.value
+    job.glpi_ticket_id = 1234
+    job.transcription_provider_job_id = "provider-before-retry"
+    job.attempt_count = 7
+    job.consecutive_retry_count = 3
+    job.next_attempt_at = None
+    job.last_error_scope = ErrorScope.SYSTEM.value
+    job.last_error_category = "ambiguous_result"
+    job.last_error_code = "glpi_result_unknown"
+    job.first_started_at = first_started_at
+    job.finished_at = datetime(2026, 8, 27, 12, tzinfo=UTC)
+    session.get.return_value = job
+    retry_time = datetime(2026, 8, 28, 13, tzinfo=UTC)
+
+    snapshot = TicketCreationJobRepository(session).rearm_for_operator_retry(
+        job_uuid,
+        now=retry_time,
+    )
+
+    assert snapshot.status is JobStatus.PENDING
+    assert snapshot.stage is None
+    assert snapshot.glpi_ticket_id == 1234
+    assert snapshot.transcription_provider_job_id is None
+    assert snapshot.attempt_count == 7
+    assert snapshot.consecutive_retry_count == 0
+    assert snapshot.next_attempt_at is None
+    assert snapshot.last_error_scope is None
+    assert snapshot.last_error_category is None
+    assert snapshot.last_error_code is None
+    assert snapshot.created_at == created_at
+    assert snapshot.first_started_at == first_started_at
+    assert snapshot.updated_at == retry_time
+    assert snapshot.finished_at is None
+    session.get.assert_called_once_with(
+        TicketCreationJob,
+        job_uuid,
+        with_for_update=True,
+    )
+    session.flush.assert_called_once_with()
+    session.commit.assert_not_called()
+
+
+def test_rearm_for_operator_retry_rejects_a_non_terminal_job() -> None:
+    session = create_autospec(Session, instance=True)
+    job = _persisted_job(uuid4(), datetime(2026, 8, 27, 12, tzinfo=UTC))
+    job.status = JobStatus.PROCESSING.value
+    job.stage = JobStage.TRANSCRIPTION.value
+    session.get.return_value = job
+
+    with pytest.raises(InvalidJobTransitionError, match="failed or blocked"):
+        TicketCreationJobRepository(session).rearm_for_operator_retry(
+            job.uuid,
+            now=datetime(2026, 8, 28, 12, tzinfo=UTC),
+        )
+
+    session.flush.assert_not_called()
+
+
 def test_repository_contracts_are_exposed_by_the_package() -> None:
     assert database_api.TicketCreationJobRepository is TicketCreationJobRepository
     assert database_api.JobSnapshot is JobSnapshot
+    assert database_api.JobCursor is JobCursor
+    assert database_api.JobPage is JobPage
     assert database_api.PendingJob is PendingJob
 
 
@@ -235,4 +343,31 @@ def _persisted_job(job_uuid: UUID, now: datetime) -> TicketCreationJob:
         first_started_at=now,
         updated_at=now,
         finished_at=None,
+    )
+
+
+def _snapshot_for(job: TicketCreationJob) -> JobSnapshot:
+    return JobSnapshot(
+        uuid=job.uuid,
+        status=JobStatus(job.status),
+        stage=JobStage(job.stage) if job.stage is not None else None,
+        storage_key=job.storage_key,
+        audio_extension=AudioExtension(job.audio_extension),
+        audio_size_bytes=job.audio_size_bytes,
+        glpi_ticket_id=job.glpi_ticket_id,
+        transcription_provider_job_id=job.transcription_provider_job_id,
+        attempt_count=job.attempt_count,
+        consecutive_retry_count=job.consecutive_retry_count,
+        next_attempt_at=job.next_attempt_at,
+        last_error_scope=(
+            ErrorScope(job.last_error_scope)
+            if job.last_error_scope is not None
+            else None
+        ),
+        last_error_category=job.last_error_category,
+        last_error_code=job.last_error_code,
+        created_at=job.created_at,
+        first_started_at=job.first_started_at,
+        updated_at=job.updated_at,
+        finished_at=job.finished_at,
     )

@@ -6,12 +6,18 @@ from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
+from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import CheckConstraint, Engine, inspect, select, text
 
-from glpi_ticketing_database import Base, TicketCreationJob, create_database_engine
+from glpi_ticketing_database import (
+    Base,
+    TicketCreationJob,
+    TicketCreationJobEvent,
+    create_database_engine,
+)
 from glpi_ticketing_database_migrations.application import (
     MigrationExitCode,
     build_alembic_config,
@@ -43,6 +49,13 @@ def _single_head() -> str:
 def _current_revision(engine: Engine) -> str | None:
     with engine.connect() as connection:
         return connection.scalar(text("SELECT version_num FROM alembic_version"))
+
+
+def _upgrade_to_revision(engine: Engine, revision: str) -> None:
+    config = build_alembic_config()
+    with engine.connect() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, revision)
 
 
 def test_revision_graph_has_one_head() -> None:
@@ -89,6 +102,63 @@ def test_reapplying_head_is_idempotent_and_preserves_data(
         ).one()
     assert persisted_job == (job_uuid, "pending", f"{job_uuid}.wav")
     assert _current_revision(database_engine) == _single_head()
+
+
+def test_upgrade_from_0001_preserves_events_and_allows_operator_retry(
+    database_engine: Engine,
+) -> None:
+    _upgrade_to_revision(database_engine, "0001_initial_schema")
+    job_uuid = uuid4()
+    with database_engine.begin() as connection:
+        connection.execute(
+            TicketCreationJob.__table__.insert(),
+            {
+                "uuid": job_uuid,
+                "storage_key": f"{job_uuid}.wav",
+                "audio_extension": "wav",
+                "audio_size_bytes": 128,
+            },
+        )
+        connection.execute(
+            TicketCreationJobEvent.__table__.insert(),
+            {
+                "job_uuid": job_uuid,
+                "status": "pending",
+                "stage": None,
+                "event_type": "job_created",
+                "actor": "web",
+            },
+        )
+
+    upgrade_to_head(database_engine)
+
+    with database_engine.begin() as connection:
+        historical_event = connection.execute(
+            select(
+                TicketCreationJobEvent.job_uuid,
+                TicketCreationJobEvent.event_type,
+            ).where(TicketCreationJobEvent.job_uuid == job_uuid)
+        ).one()
+        connection.execute(
+            TicketCreationJobEvent.__table__.insert(),
+            {
+                "job_uuid": job_uuid,
+                "status": "pending",
+                "stage": None,
+                "event_type": "operator_retry_requested",
+                "actor": "web",
+            },
+        )
+
+    assert historical_event == (job_uuid, "job_created")
+    assert _current_revision(database_engine) == _single_head()
+    with database_engine.connect() as connection:
+        event_types = connection.scalars(
+            select(TicketCreationJobEvent.event_type)
+            .where(TicketCreationJobEvent.job_uuid == job_uuid)
+            .order_by(TicketCreationJobEvent.event_id)
+        ).all()
+    assert event_types == ["job_created", "operator_retry_requested"]
 
 
 def test_migrated_schema_matches_shared_metadata(database_engine: Engine) -> None:
