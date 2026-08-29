@@ -20,6 +20,11 @@ def test_web_settings_expose_canonical_storage_and_required_database(
         "WEB_PORT",
         "WEB_TRUST_PROXY_HEADERS",
         "MAX_UPLOAD_BYTES",
+        "WORKER_HEARTBEAT_INTERVAL_SECONDS",
+        "DASHBOARD_WORKER_STALE_AFTER_SECONDS",
+        "DASHBOARD_PENDING_ALERT_AFTER_SECONDS",
+        "DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS",
+        "DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS",
     ):
         monkeypatch.delenv(variable_name, raising=False)
         monkeypatch.delenv(variable_name.lower(), raising=False)
@@ -34,6 +39,11 @@ def test_web_settings_expose_canonical_storage_and_required_database(
     assert settings.web_port == 8000
     assert settings.web_trust_proxy_headers is False
     assert settings.max_upload_bytes == DEFAULT_MAX_UPLOAD_BYTES
+    assert settings.worker_heartbeat_interval_seconds == 10.0
+    assert settings.dashboard_worker_stale_after_seconds == 45.0
+    assert settings.dashboard_pending_alert_after_seconds == 900.0
+    assert settings.dashboard_retry_overdue_grace_seconds == 60.0
+    assert settings.dashboard_retention_deadline_grace_seconds == 120.0
     assert not hasattr(settings, "audio_pending_dir")
     assert not hasattr(settings, "audio_completed_dir")
 
@@ -49,6 +59,11 @@ def test_web_settings_read_environment_overrides(
     monkeypatch.setenv("WEB_PORT", "8080")
     monkeypatch.setenv("WEB_TRUST_PROXY_HEADERS", "true")
     monkeypatch.setenv("MAX_UPLOAD_BYTES", "4096")
+    monkeypatch.setenv("WORKER_HEARTBEAT_INTERVAL_SECONDS", "8.5")
+    monkeypatch.setenv("DASHBOARD_WORKER_STALE_AFTER_SECONDS", "35.5")
+    monkeypatch.setenv("DASHBOARD_PENDING_ALERT_AFTER_SECONDS", "600")
+    monkeypatch.setenv("DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS", "30")
+    monkeypatch.setenv("DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS", "90")
 
     settings = WebSettings(_env_file=None)
 
@@ -58,6 +73,11 @@ def test_web_settings_read_environment_overrides(
     assert settings.web_port == 8080
     assert settings.web_trust_proxy_headers is True
     assert settings.max_upload_bytes == 4096
+    assert settings.worker_heartbeat_interval_seconds == 8.5
+    assert settings.dashboard_worker_stale_after_seconds == 35.5
+    assert settings.dashboard_pending_alert_after_seconds == 600
+    assert settings.dashboard_retry_overdue_grace_seconds == 30
+    assert settings.dashboard_retention_deadline_grace_seconds == 90
 
 
 @pytest.mark.parametrize(
@@ -110,5 +130,41 @@ def test_web_host_must_be_an_ip_address(invalid_host: str) -> None:
         WebSettings(
             database_url=DATABASE_URL,
             web_host=invalid_host,
+            _env_file=None,
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "worker_heartbeat_interval_seconds",
+        "dashboard_worker_stale_after_seconds",
+        "dashboard_pending_alert_after_seconds",
+        "dashboard_retry_overdue_grace_seconds",
+        "dashboard_retention_deadline_grace_seconds",
+    ],
+)
+@pytest.mark.parametrize("invalid_duration", [0, -1, True, float("inf"), float("nan")])
+def test_observability_durations_must_be_positive_finite_numbers(
+    field_name: str,
+    invalid_duration: float | bool,
+) -> None:
+    with pytest.raises(ValidationError):
+        WebSettings(
+            database_url=DATABASE_URL,
+            **{field_name: invalid_duration},
+            _env_file=None,
+        )
+
+
+@pytest.mark.parametrize("stale_after", [10, 9.999])
+def test_stale_threshold_must_exceed_heartbeat_interval(
+    stale_after: float,
+) -> None:
+    with pytest.raises(ValidationError):
+        WebSettings(
+            database_url=DATABASE_URL,
+            worker_heartbeat_interval_seconds=10,
+            dashboard_worker_stale_after_seconds=stale_after,
             _env_file=None,
         )

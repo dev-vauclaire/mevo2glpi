@@ -1,9 +1,10 @@
 """Typed configuration owned by the web application."""
 
+import math
 from ipaddress import ip_address
 from pathlib import Path
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -31,6 +32,11 @@ class WebSettings(BaseSettings):
     web_port: int = Field(default=8000, ge=1, le=65535)
     web_trust_proxy_headers: bool = False
     max_upload_bytes: int = Field(default=DEFAULT_MAX_UPLOAD_BYTES, gt=0)
+    worker_heartbeat_interval_seconds: float = Field(default=10.0, gt=0)
+    dashboard_worker_stale_after_seconds: float = Field(default=45.0, gt=0)
+    dashboard_pending_alert_after_seconds: float = Field(default=900.0, gt=0)
+    dashboard_retry_overdue_grace_seconds: float = Field(default=60.0, gt=0)
+    dashboard_retention_deadline_grace_seconds: float = Field(default=120.0, gt=0)
 
     @field_validator("web_port", "max_upload_bytes", mode="before")
     @classmethod
@@ -39,6 +45,40 @@ class WebSettings(BaseSettings):
         if isinstance(value, bool):
             raise ValueError("Integer settings cannot be booleans")
         return value
+
+    @field_validator(
+        "worker_heartbeat_interval_seconds",
+        "dashboard_worker_stale_after_seconds",
+        "dashboard_pending_alert_after_seconds",
+        "dashboard_retry_overdue_grace_seconds",
+        "dashboard_retention_deadline_grace_seconds",
+        mode="before",
+    )
+    @classmethod
+    def validate_duration_seconds(cls, value: object) -> object:
+        """Require finite positive durations and reject boolean coercion."""
+        if isinstance(value, bool):
+            raise ValueError("Duration settings cannot be booleans")
+        try:
+            duration = float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return value
+        if not math.isfinite(duration):
+            raise ValueError("Duration settings must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def validate_observability_thresholds(self) -> "WebSettings":
+        """Keep stale detection above the expected heartbeat cadence."""
+        if (
+            self.dashboard_worker_stale_after_seconds
+            <= self.worker_heartbeat_interval_seconds
+        ):
+            raise ValueError(
+                "DASHBOARD_WORKER_STALE_AFTER_SECONDS must exceed "
+                "WORKER_HEARTBEAT_INTERVAL_SECONDS"
+            )
+        return self
 
     @field_validator("web_host")
     @classmethod

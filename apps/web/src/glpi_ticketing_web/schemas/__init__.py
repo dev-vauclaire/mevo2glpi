@@ -16,6 +16,16 @@ from .jobs import (
     JobSummaryResponse,
     RetentionState,
 )
+from .observability import (
+    ObservabilityResponse,
+    OperationalAlertKind,
+    OperationalAlertResponse,
+    OperationalAlertSeverity,
+    WorkerHeartbeatStatus,
+    WorkerObservationResponse,
+    WorkerRuntimeState,
+    WorkerService,
+)
 
 __all__ = [
     "AudioFileExtension",
@@ -31,5 +41,13 @@ __all__ = [
     "JobStage",
     "JobState",
     "JobSummaryResponse",
+    "ObservabilityResponse",
+    "OperationalAlertKind",
+    "OperationalAlertResponse",
+    "OperationalAlertSeverity",
     "RetentionState",
+    "WorkerHeartbeatStatus",
+    "WorkerObservationResponse",
+    "WorkerRuntimeState",
+    "WorkerService",
 ]

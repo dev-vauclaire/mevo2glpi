@@ -91,3 +91,7 @@ export function listJobEvents(audioUuid, { limit = 25, cursor = "" } = {}) {
 export function retryJob(audioUuid) {
   return requestJson(jobPath(audioUuid, "/retry"), { method: "POST" });
 }
+
+export function getObservability() {
+  return requestJson("/api/observability");
+}

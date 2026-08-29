@@ -15,16 +15,19 @@ from glpi_ticketing_web import __version__
 from glpi_ticketing_web.controllers import (
     HealthController,
     JobController,
+    ObservabilityController,
     PageController,
 )
 from glpi_ticketing_web.routes import (
     create_health_router,
     create_jobs_router,
+    create_observability_router,
     create_pages_router,
 )
 from glpi_ticketing_web.services import (
     GetAudioJob,
     GetDownloadableAudio,
+    GetObservability,
     ListAudioJobEvents,
     ListAudioJobs,
     RetryAudioJob,
@@ -51,6 +54,7 @@ def create_app(
     list_audio_job_events: ListAudioJobEvents,
     retry_audio_job: RetryAudioJob,
     get_downloadable_audio: GetDownloadableAudio,
+    get_observability: GetObservability,
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
     shutdown_callback: Callable[[], None] | None = None,
 ) -> FastAPI:
@@ -88,10 +92,12 @@ def create_app(
         templates=_TEMPLATES,
         max_upload_bytes=config.max_upload_bytes,
     )
+    observability_controller = ObservabilityController(get_observability)
 
     app.include_router(create_health_router(HealthController()))
     app.include_router(create_pages_router(page_controller))
     app.include_router(create_jobs_router(job_controller))
+    app.include_router(create_observability_router(observability_controller))
     return app
 
 

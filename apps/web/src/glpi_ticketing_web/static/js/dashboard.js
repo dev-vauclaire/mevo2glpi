@@ -3,7 +3,6 @@
 import { getJob, listJobEvents, listJobs, retryJob } from "./api.js";
 
 const PAGE_SIZE = 25;
-const REFRESH_INTERVAL_MS = 10000;
 
 const STATE_LABELS = new Map([
   ["pending", "En attente"],
@@ -223,7 +222,6 @@ export function createDashboardController({
   filters,
   stateFilter,
   uuidFilter,
-  refreshButton,
   feedback,
   tableContainer,
   tableBody,
@@ -251,8 +249,12 @@ export function createDashboardController({
   let eventCursor = "";
   let eventRequest = 0;
   const retryingUuids = new Set();
-  let refreshTimer = null;
-  let pollingStopped = false;
+
+  function resetPagination() {
+    currentCursor = "";
+    nextCursor = "";
+    previousCursors = [];
+  }
 
   function currentQuery() {
     return {
@@ -270,7 +272,6 @@ export function createDashboardController({
     const requestId = pageRequest + 1;
     pageRequest = requestId;
     activePageRequests += 1;
-    refreshButton.disabled = true;
     if (announce) {
       feedback.textContent = "Chargement des traitements…";
     }
@@ -305,9 +306,6 @@ export function createDashboardController({
       nextButton.disabled = true;
     } finally {
       activePageRequests -= 1;
-      if (requestId === pageRequest) {
-        refreshButton.disabled = false;
-      }
     }
   }
 
@@ -462,13 +460,9 @@ export function createDashboardController({
 
   filters.addEventListener("submit", (event) => {
     event.preventDefault();
-    currentCursor = "";
-    nextCursor = "";
-    previousCursors = [];
+    resetPagination();
     loadPage();
   });
-
-  refreshButton.addEventListener("click", () => loadPage());
 
   nextButton.addEventListener("click", () => {
     if (!nextCursor) {
@@ -541,29 +535,15 @@ export function createDashboardController({
     }
   });
 
-  async function pollDashboard() {
-    if (pollingStopped) {
-      return;
-    }
-    if (document.visibilityState === "visible") {
-      await loadPage({ announce: false, onlyWhenIdle: true });
-    }
-    if (!pollingStopped) {
-      refreshTimer = window.setTimeout(pollDashboard, REFRESH_INTERVAL_MS);
-    }
+  function applyFilters({ state = "", audioUuid = "" }) {
+    stateFilter.value = state;
+    uuidFilter.value = audioUuid;
+    resetPagination();
+    return loadPage();
   }
 
-  refreshTimer = window.setTimeout(pollDashboard, REFRESH_INTERVAL_MS);
-  window.addEventListener(
-    "pagehide",
-    () => {
-      pollingStopped = true;
-      window.clearTimeout(refreshTimer);
-    },
-    { once: true },
-  );
-
-  loadPage();
-
-  return { refresh: () => loadPage({ announce: false }) };
+  return {
+    applyFilters,
+    refresh: (options = {}) => loadPage(options),
+  };
 }

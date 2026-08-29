@@ -1,13 +1,17 @@
 "use strict";
 
 import { createDashboardController } from "./dashboard.js";
+import { createObservabilityController } from "./observability.js";
 import { createUploadController } from "./uploads.js";
+
+const REFRESH_INTERVAL_MS = 10000;
+const refreshButton = document.querySelector("[data-dashboard-refresh]");
+const jobsPanel = document.querySelector("[data-jobs-panel]");
 
 const dashboard = createDashboardController({
   filters: document.querySelector("[data-job-filters]"),
   stateFilter: document.querySelector("[data-state-filter]"),
   uuidFilter: document.querySelector("[data-uuid-filter]"),
-  refreshButton: document.querySelector("[data-dashboard-refresh]"),
   feedback: document.querySelector("[data-dashboard-feedback]"),
   tableContainer: document.querySelector("[data-jobs-table-container]"),
   tableBody: document.querySelector("[data-jobs-table]"),
@@ -26,6 +30,85 @@ const dashboard = createDashboardController({
   eventsMore: document.querySelector("[data-events-more]"),
 });
 
+function showFilteredJobs(filters) {
+  dashboard.applyFilters(filters);
+  jobsPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+const observability = createObservabilityController({
+  feedback: document.querySelector("[data-observability-feedback]"),
+  workerCards: document.querySelector("[data-worker-cards]"),
+  alertList: document.querySelector("[data-alert-list]"),
+  alertEmpty: document.querySelector("[data-alert-empty]"),
+  alertCount: document.querySelector("[data-alert-count]"),
+  onFilterJobs: showFilteredJobs,
+});
+
+let refreshTimer = null;
+let refreshInFlight = null;
+let pollingStopped = false;
+
+function refreshApplication({ announce = true, onlyWhenIdle = false } = {}) {
+  if (refreshInFlight !== null) {
+    return refreshInFlight;
+  }
+
+  refreshButton.disabled = true;
+  refreshInFlight = Promise.allSettled([
+    Promise.resolve().then(() => dashboard.refresh({ announce, onlyWhenIdle })),
+    Promise.resolve().then(() => observability.refresh({ announce })),
+  ]).finally(() => {
+    refreshInFlight = null;
+    refreshButton.disabled = false;
+  });
+  return refreshInFlight;
+}
+
+function clearScheduledRefresh() {
+  if (refreshTimer !== null) {
+    window.clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+function scheduleRefresh() {
+  clearScheduledRefresh();
+  if (pollingStopped || document.visibilityState !== "visible") {
+    return;
+  }
+  refreshTimer = window.setTimeout(async () => {
+    refreshTimer = null;
+    await refreshApplication({ announce: false, onlyWhenIdle: true });
+    scheduleRefresh();
+  }, REFRESH_INTERVAL_MS);
+}
+
+function refreshThenSchedule(options) {
+  clearScheduledRefresh();
+  void refreshApplication(options).finally(scheduleRefresh);
+}
+
+refreshButton.addEventListener("click", () => {
+  refreshThenSchedule({ announce: true, onlyWhenIdle: false });
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") {
+    clearScheduledRefresh();
+    return;
+  }
+  refreshThenSchedule({ announce: false, onlyWhenIdle: true });
+});
+
+window.addEventListener(
+  "pagehide",
+  () => {
+    pollingStopped = true;
+    clearScheduledRefresh();
+  },
+  { once: true },
+);
+
 createUploadController({
   form: document.querySelector("[data-upload-form]"),
   fileInput: document.querySelector("[data-audio-input]"),
@@ -34,5 +117,8 @@ createUploadController({
   results: document.querySelector("[data-upload-results]"),
   feedback: document.querySelector("[data-upload-feedback]"),
   submitButton: document.querySelector("[data-upload-submit]"),
-  onAccepted: () => dashboard.refresh(),
+  onAccepted: () =>
+    refreshApplication({ announce: false, onlyWhenIdle: true }),
 });
+
+refreshThenSchedule({ announce: true, onlyWhenIdle: false });

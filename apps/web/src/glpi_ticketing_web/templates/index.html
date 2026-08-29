@@ -83,11 +83,14 @@
         </div>
       </section>
 
-      <section class="panel jobs-panel" aria-labelledby="jobs-title">
+      <section
+        class="panel observability-panel"
+        aria-labelledby="observability-title"
+      >
         <div class="section-heading">
           <div>
             <p class="eyebrow">Observabilité</p>
-            <h2 id="jobs-title">Suivi des traitements</h2>
+            <h2 id="observability-title">État du service</h2>
           </div>
           <button
             class="button button--secondary"
@@ -96,6 +99,50 @@
           >
             Actualiser
           </button>
+        </div>
+
+        <p
+          class="observability-feedback"
+          data-observability-feedback
+          aria-live="polite"
+        >
+          Chargement de l’état des workers…
+        </p>
+
+        <div
+          class="worker-grid"
+          data-worker-cards
+          aria-label="État des workers"
+          aria-busy="true"
+        ></div>
+
+        <section class="alerts" aria-labelledby="alerts-title">
+          <div class="alerts__heading">
+            <div>
+              <h3 id="alerts-title">Alertes actives</h3>
+              <p class="alerts__hint">
+                Situations nécessitant une surveillance ou une intervention.
+              </p>
+            </div>
+            <span class="alerts__count" data-alert-count hidden></span>
+          </div>
+          <p class="alerts__empty" data-alert-empty hidden>
+            Aucune alerte active.
+          </p>
+          <ul class="alert-list" data-alert-list></ul>
+        </section>
+      </section>
+
+      <section
+        class="panel jobs-panel"
+        aria-labelledby="jobs-title"
+        data-jobs-panel
+      >
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Traitements</p>
+            <h2 id="jobs-title">Suivi des traitements</h2>
+          </div>
         </div>
 
         <form class="filters" data-job-filters>

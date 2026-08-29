@@ -18,6 +18,9 @@ def test_index_exposes_reusable_multi_audio_upload_and_dashboard() -> None:
     assert "data-job-dialog" in template
     assert "data-job-events" in template
     assert "data-job-retry" in template
+    assert "data-worker-cards" in template
+    assert "data-alert-list" in template
+    assert "data-alert-empty" in template
     assert 'type="module"' in template
     assert "path='/js/app.js'" in template
 
@@ -56,15 +59,74 @@ def test_dashboard_names_every_retention_lifecycle_event() -> None:
     assert '["audio_deleted",' in dashboard
 
 
-def test_dashboard_serializes_polling_and_ignores_stale_detail_requests() -> None:
+def test_application_serializes_polling_and_stale_detail_requests() -> None:
+    app = (JAVASCRIPT_ROOT / "app.js").read_text(encoding="utf-8")
     dashboard = (JAVASCRIPT_ROOT / "dashboard.js").read_text(encoding="utf-8")
 
+    assert "setInterval" not in app
     assert "setInterval" not in dashboard
-    assert "window.setTimeout(pollDashboard" in dashboard
-    assert "onlyWhenIdle: true" in dashboard
+    assert "Promise.allSettled" in app
+    assert "refreshInFlight" in app
+    assert "window.setTimeout" in app
+    assert 'document.addEventListener("visibilitychange"' in app
+    assert 'document.visibilityState !== "visible"' in app
+    assert "onlyWhenIdle: true" in app
     assert "activePageRequests" in dashboard
     assert "detailGeneration" in dashboard
     assert "eventRequest" in dashboard
+
+
+def test_observability_uses_the_deduplicated_contract_and_safe_dom_apis() -> None:
+    api = (JAVASCRIPT_ROOT / "api.js").read_text(encoding="utf-8")
+    observability = (JAVASCRIPT_ROOT / "observability.js").read_text(encoding="utf-8")
+
+    assert 'requestJson("/api/observability")' in api
+    assert "snapshot.observed_at" in observability
+    assert "snapshot.workers" in observability
+    assert "snapshot.alerts" in observability
+    assert "worker.last_error_category" in observability
+    assert "worker.last_error_code" in observability
+    assert "alert.key" in observability
+    assert "alert.condition_since" in observability
+    assert "replaceChildren" in observability
+    assert "textContent" in observability
+    assert "innerHTML" not in observability
+
+
+def test_observability_names_every_alert_and_links_job_alerts_to_filters() -> None:
+    observability = (JAVASCRIPT_ROOT / "observability.js").read_text(encoding="utf-8")
+    dashboard = (JAVASCRIPT_ROOT / "dashboard.js").read_text(encoding="utf-8")
+
+    expected_kinds = {
+        "worker_absent",
+        "worker_stopped",
+        "worker_stale",
+        "worker_blocked",
+        "worker_degraded",
+        "job_blocked",
+        "job_failed",
+        "job_pending_overdue",
+        "job_retry_overdue",
+        "retention_deadline_overdue",
+        "retention_glpi_check_blocked",
+        "retention_audio_deletion_blocked",
+        "retention_glpi_retry_overdue",
+        "retention_audio_deletion_retry_overdue",
+    }
+    assert all(f'"{kind}"' in observability for kind in expected_kinds)
+    assert 'applyFilters({ state = "", audioUuid = "" })' in dashboard
+    assert "stateFilter.value = state" in dashboard
+    assert "uuidFilter.value = audioUuid" in dashboard
+    assert "Voir les traitements concernés" in observability
+
+
+def test_observability_renders_two_expected_workers_and_an_empty_state() -> None:
+    observability = (JAVASCRIPT_ROOT / "observability.js").read_text(encoding="utf-8")
+
+    assert '"worker_automation", "worker_retention"' in observability
+    assert "orderedWorkers(workers)" in observability
+    assert "alertEmpty.hidden = alerts.length > 0" in observability
+    assert "alertCount.hidden = alerts.length === 0" in observability
 
 
 def test_dashboard_disables_impossible_retries_and_names_row_actions() -> None:

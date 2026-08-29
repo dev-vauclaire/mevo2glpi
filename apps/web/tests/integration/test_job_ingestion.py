@@ -23,8 +23,10 @@ from glpi_ticketing_database import (
 from glpi_ticketing_web.services import (
     GetAudioJob,
     GetDownloadableAudio,
+    GetObservability,
     ListAudioJobEvents,
     ListAudioJobs,
+    ObservabilityThresholds,
     RetryAudioJob,
     SubmitAudioJob,
 )
@@ -34,6 +36,7 @@ pytestmark = pytest.mark.database
 
 SYNTHETIC_AUDIO = b"RIFF\x10\x00\x00\x00WAVEfmt \x00\x00\x00\x00data"
 MAX_UPLOAD_BYTES = 64
+OBSERVED_AT = datetime(2026, 8, 29, 12, tzinfo=UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +56,12 @@ def ingestion_context(
     audio_root.mkdir()
     session_factory = create_session_factory(migrated_engine)
     get_audio_job = GetAudioJob(session_factory)
+    thresholds = ObservabilityThresholds.from_seconds(
+        worker_stale_after=45,
+        pending_alert_after=900,
+        retry_overdue_grace=60,
+        retention_deadline_grace=120,
+    )
     app = create_app(
         audio_root=audio_root,
         submit_audio_job=SubmitAudioJob(
@@ -69,6 +78,11 @@ def ingestion_context(
             get_audio_job=get_audio_job,
         ),
         get_downloadable_audio=GetDownloadableAudio(audio_root, get_audio_job),
+        get_observability=GetObservability(
+            session_factory,
+            thresholds=thresholds,
+            clock=lambda: OBSERVED_AT,
+        ),
         max_upload_bytes=MAX_UPLOAD_BYTES,
     )
     with TestClient(app) as client:

@@ -28,6 +28,7 @@ from glpi_ticketing_web.services import (
     JobPersistenceUnavailableError,
     JobQueryUnavailableError,
     JobView,
+    ObservabilitySnapshot,
     RetriedJob,
     SubmittedJob,
     UnsupportedAudioUploadError,
@@ -85,6 +86,15 @@ class FakeRetryAudioJob:
         return RetriedJob(audio_uuid=audio_uuid, state=JobStatus.PENDING)
 
 
+class FakeGetObservability:
+    def execute(self) -> ObservabilitySnapshot:
+        return ObservabilitySnapshot(
+            observed_at=datetime(2026, 8, 29, tzinfo=UTC),
+            workers=(),
+            alerts=(),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class WebTestContext:
     client: TestClient
@@ -109,6 +119,7 @@ def web_context(tmp_path: Path) -> Iterator[WebTestContext]:
         list_audio_job_events=FakeListAudioJobEvents(),
         retry_audio_job=FakeRetryAudioJob(),
         get_downloadable_audio=GetDownloadableAudio(audio_root, query),
+        get_observability=FakeGetObservability(),  # type: ignore[arg-type]
         max_upload_bytes=MAX_UPLOAD_BYTES,
     )
     with TestClient(app) as client:
@@ -189,6 +200,7 @@ def test_upload_errors_are_sanitized(
         list_audio_job_events=FakeListAudioJobEvents(),
         retry_audio_job=FakeRetryAudioJob(),
         get_downloadable_audio=GetDownloadableAudio(audio_root, query),
+        get_observability=FakeGetObservability(),  # type: ignore[arg-type]
     )
 
     with TestClient(app) as client:

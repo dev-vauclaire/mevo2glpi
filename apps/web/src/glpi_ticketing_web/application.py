@@ -20,8 +20,10 @@ from glpi_ticketing_database import (
 from .services import (
     GetAudioJob,
     GetDownloadableAudio,
+    GetObservability,
     ListAudioJobEvents,
     ListAudioJobs,
+    ObservabilityThresholds,
     RetryAudioJob,
     SubmitAudioJob,
 )
@@ -72,6 +74,14 @@ def build_application(settings: WebSettings) -> FastAPI:
         )
         session_factory = create_session_factory(engine)
         get_audio_job = GetAudioJob(session_factory)
+        observability_thresholds = ObservabilityThresholds.from_seconds(
+            worker_stale_after=settings.dashboard_worker_stale_after_seconds,
+            pending_alert_after=settings.dashboard_pending_alert_after_seconds,
+            retry_overdue_grace=settings.dashboard_retry_overdue_grace_seconds,
+            retention_deadline_grace=(
+                settings.dashboard_retention_deadline_grace_seconds
+            ),
+        )
         return create_app(
             audio_root=audio_root,
             submit_audio_job=SubmitAudioJob(
@@ -90,6 +100,10 @@ def build_application(settings: WebSettings) -> FastAPI:
             get_downloadable_audio=GetDownloadableAudio(
                 audio_root,
                 get_audio_job,
+            ),
+            get_observability=GetObservability(
+                session_factory,
+                thresholds=observability_thresholds,
             ),
             max_upload_bytes=settings.max_upload_bytes,
             shutdown_callback=engine.dispose,
