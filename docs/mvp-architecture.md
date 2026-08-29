@@ -92,7 +92,8 @@ pour le MVP.
 │   │   │   ├── routes/                                🟦 routes fines
 │   │   │   ├── controllers/                           🟦 traduction HTTP
 │   │   │   ├── services/                              🟦 use cases par responsabilité
-│   │   │   │   └── jobs/                              🟦 ingestion, requêtes, download, retry
+│   │   │   │   ├── jobs/                              🟦 ingestion, requêtes, download, retry
+│   │   │   │   └── observability/                     🟦 statuts runtime et alertes agrégées
 │   │   │   ├── schemas/                               🟦 contrats ingestion + dashboard
 │   │   │   ├── middlewares/                           🟦 couche réservée
 │   │   │   ├── templates/
@@ -427,8 +428,46 @@ current_job_uuid, last_error_category, last_error_code, updated_at
 ```
 
 `state` vaut `starting`, `running`, `degraded`, `blocked` ou `stopped`. Le
-dashboard produira au sous-jalon 6B une alerte si un heartbeat dépasse le seuil
+dashboard dérive `fresh`, `stale` ou `absent` sans les persister et produit une
+alerte lorsque l'âge du dernier heartbeat dépasse strictement le seuil
 configuré.
+
+## Politique d'observabilité du dashboard
+
+`GET /api/observability` lit les trois modèles séparément dans une session
+courte, sans verrou ni commit. Il retourne toujours les deux workers attendus et
+une liste bornée d'alertes agrégées. Aucun historique ou acquittement d'alerte
+n'est persisté : une clé stable par worker ou condition remplace l'alerte au
+polling suivant.
+
+Pour un worker, une seule alerte est produite avec la priorité `absent`,
+`stopped`, `stale`, `blocked`, puis `degraded`. Le seuil stale est de 45 secondes
+par défaut, strictement supérieur à la cadence de heartbeat de 10 secondes. À
+la frontière exacte, le heartbeat reste frais. `stale` signifie seulement
+« aucun checkpoint récent, processus potentiellement non réactif » ; un appel
+HTTP synchrone long peut retarder le checkpoint sans que le processus soit
+arrêté.
+
+Les conditions jobs sont `failed`, `blocked`, `pending` depuis plus de 15
+minutes et retry dû depuis plus de 60 secondes. L'âge `pending` part de
+`updated_at`, car un retry opérateur réarme un ancien job et actualise justement
+ce timestamp. Les conditions de rétention distinguent contrôle GLPI et purge
+locale. Une deadline dépassée après une grâce de 120 secondes prime sur un
+blocage, qui prime sur un retry en retard ; une même rétention n'alimente donc
+qu'un agrégat.
+
+Ces valeurs sont configurées par `DASHBOARD_WORKER_STALE_AFTER_SECONDS`,
+`DASHBOARD_PENDING_ALERT_AFTER_SECONDS`,
+`DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS` et
+`DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS`. Le web lit également
+`WORKER_HEARTBEAT_INTERVAL_SECONDS` afin de refuser un seuil stale inférieur ou
+égal à la cadence attendue.
+
+Chaque réponse expose seulement les états, compteurs, timestamps, UUID courant
+du worker et codes d'erreur déjà expurgés. Elle ne contient ni transcription,
+ni `storage_key`, ni identifiant Transcribe AI, ni réponse HTTP brute, ni
+secret. `/health` reste une liveness indépendante de PostgreSQL ; une lecture
+d'observabilité impossible retourne un `503` générique.
 
 ## Politique d'autonomie et codes de sortie
 
@@ -542,7 +581,9 @@ flowchart TD
     Events --> Database
     List --> Database
     Database --> Dashboard[Tableau et détails]:::implemented
-    Dashboard --> Alerts[Alertes runtime et jobs en retard]:::future
+    Dashboard --> Observe[GET /api/observability]:::implemented
+    Observe --> Alerts[Cartes workers et alertes agrégées]:::implemented
+    Observe --> Database
 
     Dashboard --> Retry[POST /api/jobs/UUID/retry]:::implemented
     Retry --> RetryGate{failed ou blocked<br/>et audio présent ?}:::implemented
@@ -1037,7 +1078,7 @@ transactions courtes, la barrière de sonde GLPI et la purge crash-safe via
 Périmètre : états runtime des workers, alertes dashboard, détection des jobs
 anciens et distinction entre retry métier et redémarrage de processus.
 
-État : sous-jalon 6A 🟦 implémenté ; sous-jalon 6B ⬜ à implémenter.
+État : sous-jalons 6A et 6B 🟦 implémentés sur la branche.
 
 Le socle présent depuis l'itération 3 écrivait les états runtime aux frontières
 de la boucle. Le sous-jalon 6A ajoute une cadence commune de 10 secondes
@@ -1069,18 +1110,22 @@ fermé avec le code `1`.
 - Code POC : le tag `poc-v0.1.0` reste inchangé. Aucun fichier du Compose POC
   n'est adapté avant l'itération 7.
 
-Le sous-jalon 6B ajoutera la lecture des statuts runtime, un seuil sans
-checkpoint de 45 secondes, les alertes dédupliquées du dashboard, l'alerte
-`pending` après 15 minutes et une grâce de 60 secondes pour un retry arrivé à
-échéance. Le terme `stale` signifiera donc « aucun checkpoint récent,
-processus potentiellement non réactif », et non une preuve certaine que le
-processus est arrêté. Le seuil devra rester strictement supérieur à la cadence
-de heartbeat avec une marge explicite.
+Le sous-jalon 6B ajoute la lecture des statuts runtime, un seuil sans checkpoint
+de 45 secondes, les alertes dédupliquées du dashboard, l'alerte `pending` après
+15 minutes et une grâce de 60 secondes pour un retry arrivé à échéance. Une
+deadline audio dépassée de plus de 120 secondes prime sur les autres alertes de
+rétention. Le terme `stale` signifie donc « aucun checkpoint récent, processus
+potentiellement non réactif », et non une preuve certaine que le processus est
+arrêté. Le seuil est validé comme strictement supérieur à la cadence de
+heartbeat attendue.
 
 - Tests unitaires 6B : seuils exacts, priorisation, déduplication et données
   expurgées.
 - Tests d'intégration 6B : heartbeat frais, périmé ou absent, agrégats jobs et
   rétentions, puis affichage correspondant dans le dashboard.
+- Tests existants 6B : aucun test ni endpoint jobs n'est supprimé. Le polling
+  du dashboard est déplacé vers l'assemblage JavaScript afin de rafraîchir jobs
+  et observabilité avec un seul timer sérialisé.
 - Sortie de l'itération complète : le dashboard distingue un job en retry, un
   job bloqué et un worker absent.
 

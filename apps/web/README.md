@@ -19,6 +19,7 @@ le Compose MVP complet appartient à une itération ultérieure.
 | `GET /api/jobs/{uuid}` | UUID canonique | détail persistant et rétention, ou `404` |
 | `GET /api/jobs/{uuid}/events` | `limit` et curseur optionnels | historique expurgé, paginé séparément |
 | `POST /api/jobs/{uuid}/retry` | UUID d'un job `failed` ou `blocked` | `202`, état `pending` et `Location` |
+| `GET /api/observability` | aucune | état des deux workers et alertes opérationnelles agrégées |
 | `GET /audios/{uuid}` | UUID canonique | audio `completed`, `410` si purgé, sinon `404` |
 
 Exemple de réponse :
@@ -40,6 +41,14 @@ simultanées. Chaque résultat reste indépendant, le formulaire est remis à z�
 après le lot et le tableau se rafraîchit sans recharger la page. La pagination
 utilise un curseur opaque fondé sur `(updated_at, uuid)` ; le client ne doit ni
 l'interpréter ni le fabriquer.
+
+Le dashboard lit séparément l'état des jobs et l'instantané d'observabilité.
+Il affiche toujours une carte par worker attendu, même si aucun heartbeat n'a
+encore été publié. Les alertes jobs et rétentions sont agrégées par condition :
+leur compteur donne le nombre de lignes concernées et un bouton applique le
+filtre d'état correspondant lorsque celui-ci existe. Le navigateur remplace
+l'instantané à chaque lecture ; il ne conserve ni historique d'alerte ni
+acquittement local.
 
 La relance opérateur est autorisée uniquement lorsque le job est `failed` ou
 `blocked`, que son fichier canonique existe encore et que sa taille correspond
@@ -146,7 +155,8 @@ apps/web/
 │   ├── routes/              # déclarations URL/méthode et délégation pure
 │   ├── controllers/         # adaptation du protocole HTTP
 │   ├── services/
-│   │   └── jobs/            # ingestion, requêtes, download, retry et DTO internes
+│   │   ├── jobs/            # ingestion, requêtes, download, retry et DTO internes
+│   │   └── observability/   # seuils, priorités et projection opérationnelle
 │   ├── schemas/             # contrats HTTP Pydantic
 │   ├── middlewares/         # traitements HTTP transversaux futurs
 │   ├── templates/           # pages HTML Jinja
@@ -177,10 +187,13 @@ Conventions :
 - le nom original n'entre jamais dans `storage_key`.
 
 L'interface utilise du JavaScript natif segmenté en `api.js`, `uploads.js`,
-`dashboard.js` et `app.js`. Les valeurs venant de l'API sont ajoutées au DOM
-avec `textContent` ou `replaceChildren`, jamais interprétées comme du HTML.
-Cette itération suppose un accès limité au réseau interne et n'ajoute pas de
-mécanisme d'authentification applicative.
+`dashboard.js`, `observability.js` et `app.js`. `app.js` possède l'unique
+ordonnanceur de rafraîchissement : les lectures jobs et observabilité sont
+attendues indépendamment, sans `setInterval`, et le polling est suspendu lorsque
+l'onglet est masqué. Les valeurs venant de l'API sont ajoutées au DOM avec
+`textContent` ou `replaceChildren`, jamais interprétées comme du HTML. Cette
+itération suppose un accès limité au réseau interne et n'ajoute pas de mécanisme
+d'authentification applicative.
 
 ## Configuration
 
@@ -192,10 +205,17 @@ mécanisme d'authentification applicative.
 | `WEB_PORT` | `8000` | port Uvicorn |
 | `WEB_TRUST_PROXY_HEADERS` | `false` | confiance explicite dans le reverse proxy |
 | `MAX_UPLOAD_BYTES` | `26214400` | limite par fichier |
+| `WORKER_HEARTBEAT_INTERVAL_SECONDS` | `10` | cadence attendue des checkpoints, utilisée pour valider le seuil stale |
+| `DASHBOARD_WORKER_STALE_AFTER_SECONDS` | `45` | absence de checkpoint avant alerte worker |
+| `DASHBOARD_PENDING_ALERT_AFTER_SECONDS` | `900` | durée depuis la dernière entrée en `pending` avant alerte |
+| `DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS` | `60` | grâce après l'échéance d'un retry job ou rétention |
+| `DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS` | `120` | grâce après une deadline audio avant alerte critique |
 
-Le moteur est construit de façon paresseuse avec `pool_pre_ping`. `/health`
-reste une sonde de liveness et ne dépend pas de PostgreSQL ; une readiness
-complète sera ajoutée avec l'observabilité du MVP.
+Les durées doivent être positives et finies. Le seuil stale doit être
+strictement supérieur à la cadence attendue du heartbeat. Le moteur est
+construit de façon paresseuse avec `pool_pre_ping`. `/health` reste une sonde de
+liveness indépendante de PostgreSQL ; une lecture d'observabilité impossible
+retourne séparément un `503` expurgé.
 
 ## Commandes
 
@@ -230,7 +250,12 @@ uv run ruff check apps/web
 ## Limites actuelles
 
 - pas d'authentification applicative ;
-- pas encore d'alertes sur les heartbeats périmés ou les jobs en retard ;
+- pas d'acquittement, d'historique ou de notification externe des alertes ;
+- un job `failed` ou `blocked` reste signalé jusqu'à son retry opérateur, même
+  si la deadline de son audio a ensuite conduit à une purge ;
+- un heartbeat `stale` indique seulement l'absence récente de checkpoint : un
+  appel HTTP synchrone long peut rendre un processus vivant potentiellement non
+  réactif dans le dashboard ;
 - pas de détection du format réel de l'audio ;
 - la limite applicative est vérifiée pendant la lecture de `UploadFile`, donc
   après le parsing multipart de Starlette ; une exposition réseau doit imposer

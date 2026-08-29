@@ -44,7 +44,9 @@ ne dépend donc pas du répertoire courant du processus.
   `operator_retry_requested`, sans réécrire la migration initiale ;
 - `0003_add_retention_lifecycle` remplace le libellé GLPI par son identifiant
   numérique, ajoute les invariants du cycle de purge et autorise les quatre
-  événements du worker de rétention.
+  événements du worker de rétention ;
+- `0004_add_observability_queries` ajoute l'index de lecture des rétentions par
+  état et impose la cohérence entre état runtime et erreur expurgée.
 
 Les montées depuis `0001` et `0002` sont testées avec des données
 préexistantes. `0003` convertit explicitement les valeurs numériques de
@@ -55,6 +57,8 @@ représentation texte. Une ancienne valeur non vide et non numérique fait
 Les downgrades des migrations d'événements conservent volontairement la
 sécurité native de PostgreSQL : ils échouent si des événements plus récents
 existent encore, au lieu de supprimer silencieusement l'historique d'audit.
+De même, `0004` refuse une donnée runtime antérieure incohérente au lieu de
+masquer ou réécrire son erreur pendant la montée de version.
 
 ## Tests
 

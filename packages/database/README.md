@@ -21,6 +21,8 @@ par modèle, et les verrous advisory protègent l'unicité des workers persistan
 - persister l'identifiant Transcribe AI dès la soumission et l'identifiant
   GLPI avant la finalisation ;
 - exposer le heartbeat expurgé des workers singleton ;
+- exposer des agrégats bornés de lecture pour l'observabilité, sans persister
+  d'alerte ;
 - conserver un verrou advisory PostgreSQL sur une connexion dédiée pendant la
   durée de vie d'un worker ;
 - retourner des snapshots immuables et typés plutôt que des objets ORM liés à
@@ -81,6 +83,10 @@ après ce début, un backoff peut dépasser la deadline afin d'éviter une boucl
 active. Un statut `checking` porte toujours `last_checked_at`, et une
 suppression confirmée ne peut pas précéder `deletion_started_at`.
 
+L'index `(status, updated_at DESC, job_uuid DESC)` couvre les agrégats par état
+du dashboard lorsque les lignes `deleted` commencent à s'accumuler. Les
+deadlines et retries continuent d'utiliser leurs index partiels dédiés.
+
 ## Cycle de vie du worker d'automatisation
 
 `TicketCreationJobRepository.resume_or_claim_next()` sélectionne atomiquement
@@ -112,6 +118,22 @@ sur `(updated_at, uuid) DESC`, avec filtre d'état et recherche exacte par UUID.
 `TicketCreationJobEventRepository.list_page()` applique la même convention sur
 `(occurred_at, event_id) DESC`. Les curseurs HTTP opaques appartiennent à
 l'application web : le package database ne manipule que leurs valeurs typées.
+
+Les lectures d'alerte restent également séparées par modèle :
+
+- `TicketCreationJobRepository.get_alert_summary()` compte les jobs
+  `failed`, `blocked`, `pending` trop anciens et les retries en retard ;
+- `AudioRetentionRepository.get_alert_summary()` distingue deadline dépassée,
+  contrôle GLPI bloqué, purge bloquée et retries en retard ;
+- `WorkerRuntimeStatusRepository.list_all()` retourne les heartbeats présents,
+  sans fabriquer lui-même les états temporels `fresh`, `stale` ou `absent`.
+
+Chaque agrégat contient un compteur et le plus ancien timestamp source. Les
+seuils, priorités, délais de grâce et clés de déduplication appartiennent au
+service web. Les comparaisons de cutoff sont strictes et utilisent des dates
+UTC. Une ligne de rétention contribue à une seule condition, avec la priorité
+deadline, blocage, puis retry. Aucune table `alerts` ni transaction d'écriture
+n'est nécessaire pour construire cet instantané.
 
 La relance d'un job reste une orchestration applicative. Dans une même
 transaction, le web appelle successivement :
@@ -156,6 +178,8 @@ les autres états ne peuvent pas en stocker. Seul un heartbeat `starting`, écri
 après acquisition du verrou advisory, peut remplacer l'identifiant d'une
 ancienne instance. Tout heartbeat ultérieur portant un autre identifiant est
 refusé afin qu'un processus supplanté ne puisse pas écraser l'état du nouveau.
+Cette cohérence erreur/état est également imposée par PostgreSQL afin qu'une
+écriture extérieure au repository ne puisse produire un snapshot ambigu.
 
 ## Transactions
 
@@ -216,6 +240,7 @@ packages/database/
 │   ├── engine.py
 │   ├── repositories/
 │   │   ├── __init__.py
+│   │   ├── _alerting.py
 │   │   ├── _validation.py
 │   │   ├── ticket_creation_job.py
 │   │   ├── ticket_creation_job_event.py
@@ -232,6 +257,7 @@ packages/database/
 └── tests/
     ├── unit/
     │   ├── test_advisory_locks.py
+    │   ├── test_alert_repositories.py
     │   ├── test_audio_retention_acquisition.py
     │   ├── test_audio_retention_repository.py
     │   ├── test_audio_retention_transitions.py
@@ -245,6 +271,7 @@ packages/database/
     └── integration/
         ├── test_audio_retention_repository.py
         ├── test_dashboard_repositories.py
+        ├── test_observability_repositories.py
         └── test_ticket_creation_job_repository.py
 ```
 

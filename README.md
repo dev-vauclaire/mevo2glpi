@@ -9,9 +9,9 @@ L'état démonstratif du POC est figé par le tag `poc-v0.1.0`. La branche
 `mvp/job-lifecycle` a basculé l'ingestion web et les deux workers sur
 PostgreSQL et fournit désormais l'API de consultation, le dashboard par lot et
 la rétention crash-safe des audios. Les deux workers publient désormais leur
-heartbeat pendant leurs attentes coopératives ; la détection des heartbeats
-périmés et leur présentation dans le dashboard restent à réaliser. La
-structure et les pipelines sont suivis dans le document vivant
+heartbeat pendant leurs attentes coopératives ; le dashboard distingue leurs
+états frais, périmés ou absents et agrège les jobs et rétentions nécessitant une
+attention. La structure et les pipelines sont suivis dans le document vivant
 [`docs/mvp-architecture.md`](docs/mvp-architecture.md).
 Le MVP part d'une base PostgreSQL et d'un volume audio neufs ; il ne migre pas
 automatiquement les répertoires de travail du POC.
@@ -80,6 +80,8 @@ active de la branche MVP :
   détail expurgé et téléchargement distinguant un audio purgé ;
 - dashboard interne avec dépôt multiple borné à trois requêtes simultanées,
   actualisation du suivi et relance opérateur des jobs `failed` ou `blocked` ;
+- instantané d'observabilité avec cartes des deux workers, seuil stale
+  configurable, alertes agrégées des jobs/retries/rétentions et deadline audio ;
 - réarmement transactionnel qui conserve l'ID GLPI durable, désactive la
   rétention et ajoute un événement d'audit sans scanner le volume ;
 - worker de rétention singleton qui contrôle GLPI par l'identifiant de ticket
@@ -107,6 +109,7 @@ exécutable reste disponible avec le tag `poc-v0.1.0`.
 - gestion des secrets par fichiers ou coffre externe ;
 - chiffrement au repos des audios ;
 - haute disponibilité et parallélisation des workers ;
+- acquittement, historique et notifications externes des alertes ;
 - garantie distante d'unicité GLPI : un résultat de création inconnu suivi
   d'une recherche encore vide peut nécessiter une décision opérateur pour
   exclure tout doublon.
@@ -379,7 +382,11 @@ FastAPI puis en serveur Uvicorn.
 | `WEB_HOST`, `WEB_PORT` | web | Adresse IP et port d'écoute Uvicorn ; `127.0.0.1:8000` par défaut |
 | `WEB_TRUST_PROXY_HEADERS` | web | Confiance explicite dans les en-têtes du proxy ; désactivée par défaut |
 | `MAX_UPLOAD_BYTES` | web | Taille maximale d'un upload |
-| `WORKER_HEARTBEAT_INTERVAL_SECONDS` | workers | Intervalle maximal entre deux checkpoints coopératifs de heartbeat, `10` secondes par défaut |
+| `WORKER_HEARTBEAT_INTERVAL_SECONDS` | workers et web | Intervalle maximal entre deux checkpoints coopératifs et cadence attendue par l'observabilité, `10` secondes par défaut |
+| `DASHBOARD_WORKER_STALE_AFTER_SECONDS` | web | Seuil sans checkpoint avant alerte, `45` secondes par défaut |
+| `DASHBOARD_PENDING_ALERT_AFTER_SECONDS` | web | Durée depuis la dernière entrée en `pending`, `900` secondes par défaut |
+| `DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS` | web | Grâce après l'échéance d'un retry job ou rétention, `60` secondes par défaut |
+| `DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS` | web | Grâce après une deadline audio, `120` secondes par défaut |
 | `WORKER_IDLE_INTERVAL_SECONDS` | worker | Attente lorsqu'aucun job n'est éligible, `1` seconde par défaut |
 | `WORKER_RETRY_INITIAL_SECONDS` | worker | Premier délai du backoff exponentiel, `5` secondes par défaut |
 | `WORKER_RETRY_MAX_SECONDS` | worker | Plafond du backoff, `300` secondes par défaut |
@@ -526,7 +533,9 @@ stockage réel, puis contrats GLPI sur la stack jetable partagée.
 L'application web possède en plus un test d'intégration local : il démarre le
 vrai serveur Uvicorn sur un socket loopback et un port aléatoire, interroge
 `GET /health` par polling borné puis vérifie son arrêt. Il ne requiert aucun
-service externe.
+service externe. Ses tests PostgreSQL vérifient également les frontières des
+seuils d'observabilité, les agrégats expurgés et le contrat
+`GET /api/observability` sans démarrer GLPI ou Transcribe AI.
 
 Pytest est configuré avec `--strict-config`, `--strict-markers` et le mode
 d'import `importlib`. Les marqueurs enregistrés sont :
