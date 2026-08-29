@@ -186,14 +186,30 @@ pour le MVP.
 │   └── mvp-architecture.md                            🟦
 │
 ├── infra/docker/
-│   ├── docker-compose.prod.yaml                       ⬜ PostgreSQL + services
-│   ├── database-migrations/Dockerfile                 ⬜
-│   ├── retention/Dockerfile                           ⬜
-│   ├── worker/Dockerfile                              🟦 à adapter
-│   ├── web/Dockerfile                                 🟦 à adapter
-│   └── nginx/                                         🟦
+│   ├── compose.yaml                                   🟦 socle PostgreSQL + services
+│   ├── compose.internal-ca.yaml                       🟦 CA privée optionnelle
+│   ├── environments/
+│   │   ├── dev/
+│   │   │   ├── compose.override.yaml                  🟦 construction locale
+│   │   │   ├── compose.env.example                    🟦 chemins locaux
+│   │   │   └── services/*.env.example                 🟦 contrats applicatifs
+│   │   ├── staging/
+│   │   │   ├── compose.override.yaml                  🟦 déploiement depuis `main`
+│   │   │   ├── compose.env.example                    🟦 chemins `/etc`
+│   │   │   ├── services/*.env.example                 🟦 dont DB partagée
+│   │   │   └── versions.env                           🟦 digests promus
+│   │   └── prod/
+│   │       ├── compose.override.yaml                  🟦 déploiement depuis un tag MVP
+│   │       ├── compose.env.example                    🟦 chemins `/etc`
+│   │       ├── services/*.env.example                 🟦 dont DB partagée
+│   │       └── versions.env                           🟦 mêmes digests validés en staging
+│   ├── database-migrations/Dockerfile                 🟦
+│   ├── worker-automation/Dockerfile                   🟦
+│   ├── worker-retention/Dockerfile                    🟦
+│   ├── web/Dockerfile                                 🟦
+│   └── nginx/Dockerfile                               🟦
 │
-└── tests/deployment/                                  🟦 à adapter
+└── tests/deployment/                                  🟦 smoke tests Compose MVP
 ```
 
 Les modèles sont séparés par table afin que chaque module porte ses colonnes,
@@ -885,10 +901,10 @@ production ; elle est distincte de la rétention audio.
 
 ```mermaid
 flowchart TD
-    Postgres[PostgreSQL healthy]:::future --> Migration[Application database-migrations<br/>Alembic upgrade head terminé]:::future
+    Postgres[PostgreSQL healthy]:::implemented --> Migration[Application database-migrations<br/>Alembic upgrade head terminé]:::implemented
     Migration --> Web[Web]:::implemented
     Migration --> Automation[Worker automation]:::implemented
-    Migration --> Retention[Worker rétention]:::future
+    Migration --> Retention[Worker rétention]:::implemented
     Web --> Nginx[Nginx healthy]:::implemented
 
     classDef implemented fill:#dbeafe,stroke:#2563eb,color:#111827;
@@ -907,6 +923,68 @@ migration ne transforme pas leurs répertoires.
 
 PostgreSQL est épinglé par tag et digest, possède son propre volume, un
 healthcheck ainsi qu'une procédure documentée de sauvegarde et restauration.
+
+### Socle commun et overlays
+
+`infra/docker/compose.yaml` décrit les invariants des six services. Les
+overlays `dev`, `staging` et `prod` ne recopient pas ce socle : ils définissent
+uniquement les différences de construction, de publication du port Nginx et de
+configuration propres à l'environnement. Un overlay optionnel
+`compose.internal-ca.yaml` ajoute un bundle de confiance sans désactiver la
+validation TLS.
+
+Chaque environnement emploie un projet Compose distinct (`gta-dev`,
+`gta-staging` ou `gta-prod`). Les noms réels des réseaux et des volumes sont
+donc préfixés par ce projet : une commande staging ne peut pas réutiliser par
+erreur `postgres-data` ou `audio-data` de production. Les tests de déploiement
+utilisent encore un quatrième projet jetable.
+
+PostgreSQL et les quatre applications partagent uniquement le réseau interne
+`database-private`. Nginx et le web communiquent sur `web-private` ; Nginx ne
+possède donc aucune route directe vers la base. Les workers rejoignent en plus
+`worker-egress` pour les API externes, tandis que seul Nginx rejoint
+`proxy-edge` et publie un port.
+
+Les configurations et secrets réels de staging et production résident hors
+Git sous `/etc/glpi-ticketing-automation/<environnement>/`. Le dépôt conserve
+seulement les fichiers `*.example` et les `versions.env` de staging et
+production. Ces deux fichiers versionnés portent les digests immuables des
+images : une promotion vers la production reprend exactement les digests
+validés en staging, sans reconstruire depuis une autre révision.
+
+La livraison staging/prod exécute un `compose pull` explicite. Leur
+`pull_policy: missing` permet ensuite à un redémarrage hôte de réutiliser
+l'image en cache si le registre est indisponible ; l'épinglage par digest
+garantit que ce cache ne dérive pas.
+
+Chaque environnement possède un contrat `services/database.env.example`
+chargé par la migration, le web et les deux workers avant leur fichier propre.
+`DATABASE_URL` n'est donc défini qu'une fois par environnement ; les fichiers
+spécifiques conservent seulement les réglages de leur application.
+
+### Politique Git et promotion
+
+Le développement converge vers `main` par branches courtes. Un commit source
+`A` est construit une seule fois. Un second commit `B`, limité au manifeste de
+release, inscrit les digests obtenus dans les `versions.env` de staging et de
+production. Staging déploie `B` ; après validation, le tag immuable
+`mvp-vX.Y.Z` pointe vers `B` et la production réutilise les mêmes digests sans
+reconstruction. Le tag historique `poc-v0.1.0` reste une archive du POC à
+quatre répertoires et ne doit pas recevoir les overlays MVP.
+
+Cette promotion sépare trois identités complémentaires : le label OCI prouve
+quel commit source `A` a produit l'image, le tag Git autorise le manifeste `B`
+en production et les digests prouvent quels octets de conteneurs sont
+réellement exécutés. Réutiliser seulement un tag d'image mutable romprait cette
+chaîne ; reconstruire après la recette changerait les digests validés.
+
+### Limite des droits PostgreSQL
+
+Le MVP partage encore un même rôle PostgreSQL entre la migration, le web et
+les workers. Ce choix simplifie le premier déploiement mais accorde aux
+runtimes des droits de modification du schéma dont ils n'ont pas besoin. Avant
+une production renforcée, il faudra séparer au minimum un rôle propriétaire
+réservé aux migrations et un rôle runtime limité aux opérations DML attendues.
 
 ## Règle de préparation de chaque itération
 
@@ -1107,8 +1185,9 @@ fermé avec le code `1`.
 - Tests existants : aucun test n'est supprimé. Les anciens tests du runner ont
   déjà été remplacés à l'itération 3 ; un `BlockedOutcome` propre au job ne
   constitue plus une politique d'arrêt sur la branche MVP.
-- Code POC : le tag `poc-v0.1.0` reste inchangé. Aucun fichier du Compose POC
-  n'est adapté avant l'itération 7.
+- Code POC au sous-jalon 6A : le tag `poc-v0.1.0` reste inchangé et aucun
+  fichier de son Compose n'était encore adapté ; leur remplacement intervient
+  explicitement à l'itération 7.
 
 Le sous-jalon 6B ajoute la lecture des statuts runtime, un seuil sans checkpoint
 de 45 secondes, les alertes dédupliquées du dashboard, l'alerte `pending` après
@@ -1134,17 +1213,23 @@ heartbeat attendue.
 Périmètre : PostgreSQL, migration one-shot, deux workers, web, Nginx, volumes,
 healthchecks, politiques de redémarrage et documentation d'exploitation.
 
-Jusqu'à ce jalon, le Compose versionné reste celui du POC et ne doit pas être
-présenté comme un déploiement cohérent de la branche MVP.
+État : 🟦 implémenté sur la branche. Le manifeste commun et ses trois overlays
+forment désormais le seul déploiement actif de la branche MVP. Le déploiement
+POC reste consultable exclusivement depuis `poc-v0.1.0`.
 
 - Tests unitaires : validation ciblée des settings et des commandes d'entrée ;
   aucun test Docker simulé.
 - Tests d'intégration : smoke test Compose, ordre de démarrage, échec de
-  migration bloquant, persistance après redémarrage et permissions des volumes.
-- Tests POC à adapter : `tests/deployment/test_compose.py` pour les nouveaux
-  services, variables et healthchecks.
-- Code POC à adapter : Compose, fichiers d'environnement et images runtime ;
-  les fichiers locaux encore utiles sont conservés avec des noms explicites.
+  migration bloquant, persistance après redémarrage, isolation des projets et
+  permissions des volumes.
+- Tests POC adaptés : `tests/deployment/test_compose.py` cible les six services,
+  la migration one-shot, PostgreSQL et le volume audio canonique. Les attentes
+  portant sur quatre répertoires et un worker unique sont supprimées parce que
+  leur intention est remplacée par les invariants PostgreSQL du MVP.
+- Code POC remplacé : l'ancien manifeste production, son overlay local, le
+  script de démarrage du worker et le script de préparation des quatre bind
+  mounts n'appartiennent plus aux manifestes actifs. Ils restent récupérables
+  avec le tag d'archive `poc-v0.1.0`.
 - Sortie : un hôte vierge peut initialiser la stack avec des secrets injectés.
 
 ### Itération 8 — Validation E2E et publication du MVP

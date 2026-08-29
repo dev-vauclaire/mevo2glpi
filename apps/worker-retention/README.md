@@ -133,8 +133,18 @@ PostgreSQL propriétaire du verrou. Une requête GLPI synchrone ne publie pas de
 heartbeat intermédiaire ; un checkpoint est effectué avant et après l'appel.
 Les timeouts HTTPX bornent l'inactivité de chaque phase réseau, pas une deadline
 murale totale. La détection des heartbeats périmés — donc des processus sans
-checkpoint récent, potentiellement non réactifs — et leur présentation dans le
-dashboard appartiennent au sous-jalon 6B.
+checkpoint récent, potentiellement non réactifs — est exposée dans le
+dashboard sans affirmer que le processus est arrêté.
+
+L'image exécute aussi le module
+`glpi_ticketing_worker_retention.runtime.healthcheck`. Cette sonde vérifie
+PostgreSQL, exige un heartbeat `worker_retention` présent, non `stopped` et
+récent, puis crée et supprime un fichier de sonde sous `/data/audios` afin de
+confirmer l'accès en lecture-écriture nécessaire aux purges. Un état `blocked`
+ou `degraded` encore frais reste healthy. Le seuil
+`WORKER_HEALTHCHECK_STALE_AFTER_SECONDS`, fixé à `45` secondes par défaut, doit
+être strictement supérieur à `WORKER_HEARTBEAT_INTERVAL_SECONDS`. Les erreurs
+sont réduites à un code technique expurgé.
 
 La fermeture suit l'ordre heartbeat `stopped`, client HTTP, verrou advisory,
 puis moteur SQLAlchemy.
@@ -163,6 +173,7 @@ src/glpi_ticketing_worker_retention/
 ├── runtime/
 │   ├── context.py          # ressources, singleton et fencing
 │   ├── heartbeat.py        # projection des outcomes vers le runtime
+│   ├── healthcheck.py      # adaptateur PostgreSQL de la sonde conteneur
 │   └── signals.py          # arrêt coopératif SIGINT/SIGTERM
 └── retention/
     ├── lifecycle.py        # transactions multi-modèles courtes
@@ -188,6 +199,7 @@ repository. `application.py` reste une frontière de processus testable.
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Timeout d'établissement PostgreSQL. |
 | `AUDIO_ROOT` | `/data/audios` | Répertoire canonique existant et non symbolique. |
 | `WORKER_HEARTBEAT_INTERVAL_SECONDS` | `10` | Cadence maximale des checkpoints de heartbeat pendant les attentes coopératives. |
+| `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS` | `45` | Âge maximal du heartbeat accepté par la sonde conteneur ; strictement supérieur à sa cadence. |
 | `RETENTION_POLL_INTERVAL_SECONDS` | `60` | Attente maximale lorsqu'aucune opération n'est due. |
 | `RETENTION_RETRY_INITIAL_SECONDS` | `5` | Premier délai du backoff exponentiel. |
 | `RETENTION_RETRY_MAX_SECONDS` | `300` | Plafond du backoff exponentiel. |
@@ -220,9 +232,13 @@ uv run --package glpi-ticketing-worker-retention \
   python -m glpi_ticketing_worker_retention
 ```
 
-Le service Docker Compose du worker de rétention n'est pas créé au sous-jalon
-5C. Il appartient à l'itération 7 avec PostgreSQL, la migration one-shot et les
-permissions finales du volume.
+Le [Dockerfile du worker](../../infra/docker/worker-retention/Dockerfile)
+installe l'application sans dépendances de développement et l'exécute en
+non-root. Dans Compose, `/data/audios` est monté en lecture-écriture car ce
+worker est l'unique application chargée de la quarantaine et de la suppression
+des octets après ingestion. Le [runbook Docker Compose](../../infra/docker/README.md)
+décrit les commandes et configurations dev, staging et production ainsi que
+l'autorité de certification interne optionnelle.
 
 ## Tests
 

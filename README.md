@@ -5,8 +5,9 @@ fichiers audio. Le dépôt conserve deux repères clairement séparés : le POC
 figé, fondé sur quatre répertoires, et la branche MVP en cours, fondée sur
 PostgreSQL et un volume audio canonique unique.
 
-L'état démonstratif du POC est figé par le tag `poc-v0.1.0`. La branche
-`mvp/job-lifecycle` a basculé l'ingestion web et les deux workers sur
+L'état démonstratif du POC est archivé par le tag immuable `poc-v0.1.0`. La
+branche `mvp/job-lifecycle`, destinée à rejoindre `main`, a basculé l'ingestion
+web et les deux workers sur
 PostgreSQL et fournit désormais l'API de consultation, le dashboard par lot et
 la rétention crash-safe des audios. Les deux workers publient désormais leur
 heartbeat pendant leurs attentes coopératives ; le dashboard distingue leurs
@@ -90,10 +91,10 @@ active de la branche MVP :
 - purge audio crash-safe via la quarantaine privée `.purge`, avec publication
   create-only et reprise après chaque frontière disque ou PostgreSQL.
 
-Le Compose présent dans le dépôt reste celui du POC : la branche MVP n'est pas
-encore packagée pour un déploiement cohérent. PostgreSQL, la migration one-shot,
-les deux workers, le web et Nginx seront assemblés à l'itération 7. Le POC
-exécutable reste disponible avec le tag `poc-v0.1.0`.
+Le déploiement Compose du MVP assemble PostgreSQL, la migration one-shot, les
+deux workers, le web et Nginx à partir d'un socle commun et d'overlays `dev`,
+`staging` et `prod`. Le POC à quatre répertoires n'est plus un manifeste actif
+de la branche ; il reste disponible avec le tag `poc-v0.1.0`.
 
 ### Limites du POC ciblées par le MVP
 
@@ -110,6 +111,8 @@ exécutable reste disponible avec le tag `poc-v0.1.0`.
 - chiffrement au repos des audios ;
 - haute disponibilité et parallélisation des workers ;
 - acquittement, historique et notifications externes des alertes ;
+- séparation du rôle propriétaire utilisé par Alembic et des rôles PostgreSQL
+  runtime limités au DML ; le MVP partage encore un rôle entre les services ;
 - garantie distante d'unicité GLPI : un résultat de création inconnu suivi
   d'une recherche encore vide peut nécessiter une décision opérateur pour
   exclure tout doublon.
@@ -146,9 +149,8 @@ racine. Une application ne doit pas importer directement les modules internes
 d'une autre application.
 
 Les artefacts sous [`infra/docker/`](infra/docker/README.md) ne constituent pas
-un membre Python supplémentaire. Le déploiement complet du POC reste figé par
-le tag `poc-v0.1.0` ; les images adaptées, PostgreSQL et le service de migration
-du déploiement MVP seront assemblés à l'itération 7.
+un membre Python supplémentaire. Ils assemblent le déploiement mono-serveur du
+MVP ; le déploiement historique du POC reste figé par `poc-v0.1.0`.
 
 La convention générale est un layout `src` : le code de chaque membre se
 trouve dans `<membre>/src/<package_python>` et ses tests dans
@@ -315,8 +317,8 @@ vérité ; `uv.lock` fixe les versions exactes installées pour le dépôt.
 | Pytest | `>=8.4,<10` | Tests unitaires et tests d'intégration opt-in |
 | Ruff | `>=0.12,<1` | Formatage et analyse statique |
 | Testcontainers | `>=4.12,<5`, groupe de développement | Stacks PostgreSQL, GLPI/MySQL et Transcribe AI jetables pour les tests d'intégration |
-| Nginx | `1.30.4-alpine3.24`, image épinglée par digest | Terminaison TLS, authentification Basic et reverse proxy du POC |
-| Docker Engine / Compose | `28.3.3+` / `2.24+`, hors workspace Python | Images Nginx/web/worker et déploiement mono-serveur du POC |
+| Nginx | `1.30.4-alpine3.24`, image épinglée par digest | Terminaison TLS, authentification Basic et reverse proxy du MVP |
+| Docker Engine / Compose | `28.3.3+` / `2.33.1+`, hors workspace Python | PostgreSQL, migration, images applicatives et déploiement mono-serveur multi-environnements |
 
 Les sept distributions du projet utilisent `uv_build` comme backend de
 construction et portent actuellement la version `0.1.0`.
@@ -331,8 +333,8 @@ construction et portent actuellement la version `0.1.0`.
   historiques ;
 - uniquement pour les tests marqués `database`, `glpi`, `transcribe_ai` ou
   `e2e` : Docker avec le plugin Compose ;
-- uniquement pour construire ou déployer le POC : Docker Engine 28.3.3 ou
-  supérieur, Docker Compose 2.24 ou supérieur, un certificat TLS avec sa clé
+- uniquement pour construire ou déployer le MVP : Docker Engine 28.3.3 ou
+  supérieur, Docker Compose 2.33.1 ou supérieur, un certificat TLS avec sa clé
   privée et l'utilitaire `htpasswd` ;
 - uniquement pour `transcribe_ai` ou `e2e` : un hôte et un daemon Docker
   `linux/amd64`, ainsi qu'un accès réseau à chaque session pour le modèle
@@ -383,6 +385,7 @@ FastAPI puis en serveur Uvicorn.
 | `WEB_TRUST_PROXY_HEADERS` | web | Confiance explicite dans les en-têtes du proxy ; désactivée par défaut |
 | `MAX_UPLOAD_BYTES` | web | Taille maximale d'un upload |
 | `WORKER_HEARTBEAT_INTERVAL_SECONDS` | workers et web | Intervalle maximal entre deux checkpoints coopératifs et cadence attendue par l'observabilité, `10` secondes par défaut |
+| `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS` | healthchecks Docker des workers | Âge maximal du heartbeat conteneur, `45` secondes par défaut et strictement supérieur à la cadence |
 | `DASHBOARD_WORKER_STALE_AFTER_SECONDS` | web | Seuil sans checkpoint avant alerte, `45` secondes par défaut |
 | `DASHBOARD_PENDING_ALERT_AFTER_SECONDS` | web | Durée depuis la dernière entrée en `pending`, `900` secondes par défaut |
 | `DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS` | web | Grâce après l'échéance d'un retry job ou rétention, `60` secondes par défaut |
@@ -416,29 +419,74 @@ Sa valeur est `cpu` par défaut ou `gpu` pour demander explicitement CUDA. Les
 identifiants de la stack sont générés en mémoire à chaque session pytest :
 aucune clé Transcribe AI ne doit être fournie par le développeur.
 
-## Déploiement mono-serveur du POC
+## Workflow Git et promotion
 
-Le mode validé pour un serveur de test construit trois images : Nginx, `web` et
-`worker`. GLPI et Transcribe AI restent des services externes. Quatre bind
-mounts persistants conservent le cycle de vie des audios ; le web ne voit que
-`pending` en écriture et `completed` en lecture seule.
+`main` est la branche d'intégration stable. Le travail passe par des branches
+courtes (`feature/*`, `fix/*` ou `chore/*`) revues avant fusion ; une branche
+d'environnement longue n'est pas utilisée comme source de vérité.
 
-Nginx est le seul service publié. Il termine TLS, exige une authentification
-Basic et relaie vers `web:8000` sur un réseau Docker interne. Par défaut, son
-port HTTPS est lié au loopback de l'hôte ; l'ouverture sur l'adresse du serveur
-doit être explicite et protégée par le pare-feu. Les trois conteneurs utilisent
-un rootfs en lecture seule, aucune capability Linux et une rotation locale des
-logs ; les applications Python partagent l'UID `10001`, Nginx utilise l'UID
-non-root `101`.
+- un commit source `A` de `main` est construit une seule fois ;
+- un commit manifeste `B` inscrit les digests obtenus dans les
+  `versions.env` de staging et de production, puis est déployé en staging ;
+- après validation, un tag immuable `mvp-vX.Y.Z` pointe vers `B` ;
+- production est déployée depuis ce tag sans reconstruire les images ;
+- `poc-v0.1.0` archive le POC historique et ne reçoit aucune modification MVP.
 
-Le worker n'est volontairement pas redémarré automatiquement : son code de
-sortie `3` est un signal d'intervention, pas une panne à masquer. Le démarrage
-systemd fourni refuse également de reprendre un ancien worker sorti avec un
-code non nul ; la reprise reste une décision opérateur explicite.
+Le tag Git identifie le manifeste de release autorisé, les `versions.env`
+suivis identifient les octets des images et leurs labels OCI conservent le
+commit source `A`. Les trois références doivent être consignées ensemble lors
+d'une mise à jour ou d'un rollback.
 
-Le runbook complet, la préparation des volumes, les fichiers de configuration,
-l'overlay de CA interne, Nginx et la procédure de rollback se trouvent
-dans la [documentation de déploiement](infra/docker/README.md).
+## Déploiement mono-serveur du MVP
+
+Le socle [`infra/docker/compose.yaml`](infra/docker/compose.yaml) assemble six
+services : PostgreSQL, la migration Alembic one-shot, le web, les workers
+d'automatisation et de rétention, puis Nginx. GLPI et Transcribe AI restent des
+services externes. PostgreSQL conserve le cycle de vie dans `postgres-data` et
+les trois applications métier partagent les octets immuables de `audio-data`.
+
+Les overlays `dev`, `staging` et `prod` isolent les projets Compose, réseaux et
+volumes. Seul Nginx publie un port. Les secrets réels de staging et production
+résident sous `/etc/glpi-ticketing-automation/<environnement>/`, jamais dans le
+checkout. La migration doit réussir avant que le web ou les workers démarrent.
+
+Commandes principales, détaillées dans le
+[runbook Docker](infra/docker/README.md) :
+
+```bash
+# développement : configuration locale ignorée par Git
+docker compose --project-name gta-dev \
+  --env-file infra/docker/environments/dev/compose.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/dev/compose.override.yaml \
+  up --detach --build --wait
+
+# staging : commit manifeste B de main + digests versionnés
+sudo docker compose --project-name gta-staging \
+  --env-file /etc/glpi-ticketing-automation/staging/compose.env \
+  --env-file infra/docker/environments/staging/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/staging/compose.override.yaml \
+  up --detach --wait
+
+# production : checkout d'un tag mvp-vX.Y.Z + mêmes digests validés
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  up --detach --wait
+```
+
+Ne lancez jamais `down -v` sur staging ou production : cette option supprime
+les volumes PostgreSQL et audio. Le runbook couvre la sauvegarde, la
+restauration, la mise à jour, le rollback, l'overlay de CA interne et l'unité
+systemd.
+
+Une livraison staging/prod exécute explicitement `docker compose pull` avant
+la commande `up` ci-dessus. Les overlays utilisent ensuite
+`pull_policy: missing` afin qu'un reboot puisse repartir du digest local si le
+registre est indisponible.
 
 ### Démarrage de l'application web du POC
 
@@ -543,7 +591,7 @@ d'import `importlib`. Les marqueurs enregistrés sont :
 | Marqueur | Politique |
 | --- | --- |
 | `database` | Démarre un PostgreSQL 16 jetable et vérifie migrations, repositories, verrous et cycles applicatifs réels |
-| `deployment` | Construit les trois images runtime et vérifie TLS, Nginx et le Compose durci sans appeler les API externes |
+| `deployment` | Valide les images, overlays, migrations, healthchecks et volumes du Compose MVP sans appeler les API externes |
 | `transcribe_ai` | Démarre une stack Transcribe AI v1 jetable et exécute le contrat POST/polling réel |
 | `glpi` | Démarre une seule stack GLPI 11/MySQL jetable et teste le client V2.3.0 réel |
 | `e2e` | Assemble PostgreSQL migré et le worker réel avec les stacks Transcribe AI et GLPI jetables |
@@ -608,9 +656,8 @@ uv run --all-packages pytest -m database \
   -vv --maxfail=1
 ```
 
-Smoke test du packaging de déploiement POC, à exécuter depuis le tag
-`poc-v0.1.0`, séparément et sans parallélisation. Le Compose de la branche MVP
-ne sera remis en cohérence qu'à l'itération 7 :
+Smoke test du packaging de déploiement MVP, à exécuter séparément et sans
+parallélisation :
 
 ```bash
 uv run pytest -m deployment tests/deployment -vv --maxfail=1

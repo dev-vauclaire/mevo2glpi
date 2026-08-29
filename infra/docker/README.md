@@ -1,503 +1,622 @@
-# Déploiement Docker du POC sur un serveur de test
+# Déploiement Docker Compose du MVP
 
-> [!IMPORTANT]
-> Cette procédure décrit exactement le déploiement figé par le tag
-> `poc-v0.1.0`. Sur la branche `mvp/job-lifecycle`, l'application web utilise
-> déjà PostgreSQL et le volume canonique `/data/audios`, tandis que le manifeste
-> Compose conserve encore les quatre répertoires du POC. La branche MVP ne doit
-> donc pas être déployée avec ce manifeste avant l'itération dédiée au packaging
-> PostgreSQL, aux migrations et aux deux workers.
->
-> Le futur volume audio MVP devra être un système de fichiers Linux local
-> prenant en charge les liens durs POSIX et `fsync` sur les répertoires. Les
-> montages CIFS et stockages objets ne sont pas validés pour la purge
-> crash-safe.
+Ce runbook décrit le déploiement mono-serveur du MVP. Le POC historique à
+quatre répertoires est archivé par le tag immuable `poc-v0.1.0` ; ses anciens
+manifestes et scripts ne doivent pas être réintroduits dans cette stack.
 
-Ce répertoire transforme le workspace en trois images et une stack Docker
-Compose destinée à **un seul serveur de démonstration** : Nginx, l'application
-web et le worker. GLPI et Transcribe AI restent des services externes. Les stacks sous
-`apps/worker-automation/tests/integration/` sont jetables et ne doivent jamais
-être réutilisées pour ce déploiement.
+GLPI et Transcribe AI restent externes. Le Compose démarre PostgreSQL, applique
+les migrations Alembic, puis lance le web, les deux workers et Nginx.
 
-Les responsabilités sont séparées par service :
+> [!CAUTION]
+> N'exécutez jamais `docker compose down -v` sur staging ou production. Cette
+> option détruit `postgres-data` et `audio-data`. Les procédures normales
+> utilisent `stop`, `up` ou `down` sans `--volumes`.
 
-```text
-infra/docker/
-├── .env.example
-├── docker-compose.prod.yaml
-├── prepare-host.sh
-├── nginx/
-│   ├── .dockerignore
-│   ├── Dockerfile
-│   └── nginx.conf
-├── web/
-│   ├── Dockerfile
-│   └── web.env.example
-└── worker/
-    ├── Dockerfile
-    ├── docker-compose.internal-ca.yaml
-    ├── start-runtime.sh
-    └── worker.env.example
-```
-
-Chaque service possède ainsi son Dockerfile ou son contrat d'environnement. Le
-manifeste à la racine de `infra/docker` ne fait que les assembler. Nginx est le
-seul point d'entrée réseau de la stack ; le web n'a aucun port publié.
-
-## Architecture déployée
+## Architecture
 
 ```mermaid
 flowchart LR
-    U[Utilisateur] -->|HTTPS + authentification| N[Conteneur Nginx]
-    N -->|réseau privé, web:8000| W[Conteneur web]
-    W -->|RW| Q[(pending)]
-    W -->|RO| C[(completed)]
-    Q -->|RW| A[Conteneur worker unique]
-    A -->|RW| R[(processing)]
-    A -->|RW| C
-    A -->|RW| F[(failed)]
-    A -->|HTTPS| T[Transcribe AI externe]
-    A -->|HTTPS / OAuth| G[GLPI externe]
+    User[Utilisateur interne] -->|HTTPS + Basic Auth| Nginx
+    Nginx -->|web-private| Web
+    Web -->|database-private| PostgreSQL[(PostgreSQL)]
+    Web -->|RW| Audio[(audio-data)]
+    Migration[Migration Alembic one-shot] -->|database-private| PostgreSQL
+    Automation[Worker automation] -->|database-private| PostgreSQL
+    Automation -->|RO| Audio
+    Retention[Worker rétention] -->|database-private| PostgreSQL
+    Retention -->|RW| Audio
+    Automation -->|worker-egress| Transcribe[Transcribe AI externe]
+    Automation -->|worker-egress| GLPI[GLPI externe]
+    Retention -->|worker-egress| GLPI
 ```
 
-Nginx et le web partagent le bridge interne `web-private`. Nginx rejoint aussi
-`proxy-edge`, seul réseau portant le binding HTTPS de l'hôte. Le worker utilise
-un troisième bridge pour joindre les deux API et ne partage aucun réseau avec
-Nginx ou le web. Les applications communiquent par les bind mounts audio, pas
-par HTTP.
+Les responsabilités persistantes sont volontairement distinctes :
 
-| Répertoire | Web | Worker | Pourquoi le conserver |
-| --- | --- | --- | --- |
-| `pending` | lecture/écriture | lecture/écriture | uploads encore non réclamés |
-| `processing` | absent | lecture/écriture | reprise après arrêt ou blocage |
-| `completed` | lecture seule | lecture/écriture | audios liés aux tickets confirmés |
-| `failed` | absent | lecture/écriture | échecs terminaux et sidecars expurgés |
+| Ressource | Propriétaires | Rôle |
+| --- | --- | --- |
+| `postgres-data` | PostgreSQL | source de vérité des jobs, événements, rétentions et heartbeats |
+| `audio-data` | web en écriture, automation en lecture seule, rétention en écriture | octets audio canoniques et quarantaine privée `.purge` |
+| `database-private` | PostgreSQL, migration, web et workers | trafic SQL non exposé à Nginx |
+| `web-private` | web et Nginx | trafic HTTP interne sans accès direct à PostgreSQL |
+| `worker-egress` | workers | accès sortant à GLPI et Transcribe AI |
+| `proxy-edge` | Nginx | unique réseau portant le port publié |
 
-Le web et le worker partagent l'UID/GID fixe `10001:10001`. Nginx s'exécute avec
-l'UID/GID non-root `101:101` et un groupe supplémentaire dédié à la lecture de
-ses secrets. Les trois services utilisent un rootfs en lecture seule,
-suppriment toutes les capabilities Linux et activent `no-new-privileges`. Leurs
-répertoires temporaires sont des tmpfs. Les images Python, uv et Nginx
-`1.30.4-alpine3.24` sont épinglées par tag et digest ; `uv.lock` est installé
-avec `--locked`, sans dépendances de développement et en mode non éditable.
+Seul Nginx publie un port hôte. L'endpoint FastAPI `/health` et PostgreSQL ne
+sont pas directement exposés.
+
+Les exemples lient Nginx à `127.0.0.1`. Pour un accès depuis le réseau interne,
+remplacez `GTA_NGINX_BIND_IP` par l'adresse dédiée du serveur et limitez ce port
+au sous-réseau autorisé avec le pare-feu ; n'utilisez pas `0.0.0.0` sans cette
+barrière.
+
+Les images Python sont multi-stage, installées depuis `uv.lock` sans dépendance
+de développement et exécutées en `10001:10001`. Les runtimes ont un rootfs en
+lecture seule, un `/tmp` en tmpfs, aucune capability Linux et
+`no-new-privileges`. Ces protections complètent les permissions distinctes du
+volume audio ; elles ne remplacent pas l'isolation des secrets.
+
+L'image PostgreSQL officielle épinglée est elle aussi forcée en `70:70`, sans
+capability et avec un rootfs en lecture seule. Seuls `postgres-data`, `/tmp`,
+`/var/run/postgresql` et la mémoire partagée restent inscriptibles.
+
+## Arborescence et sources de configuration
+
+```text
+infra/docker/
+├── compose.yaml
+├── compose.internal-ca.yaml
+├── database-migrations/Dockerfile
+├── web/Dockerfile
+├── worker-automation/Dockerfile
+├── worker-retention/Dockerfile
+├── nginx/
+│   ├── Dockerfile
+│   └── nginx.conf
+└── environments/
+    ├── dev/
+    │   ├── compose.override.yaml
+    │   ├── compose.env.example
+    │   └── services/*.env.example
+    ├── staging/
+    │   ├── compose.override.yaml
+    │   ├── compose.env.example
+    │   ├── versions.env
+    │   └── services/*.env.example
+    └── prod/
+        ├── compose.override.yaml
+        ├── compose.env.example
+        ├── versions.env
+        └── services/*.env.example
+```
+
+`compose.yaml` contient les invariants. Les overlays ne décrivent que les
+différences d'environnement : build local en développement, images de registre
+épinglées par digest en staging et production. L'overlay de CA interne est
+optionnel et doit toujours être ajouté explicitement à la commande lorsqu'il
+est nécessaire.
+
+Aucun profil Compose ne masque un service : une commande `up` ordinaire lance
+toujours la stack complète et sa migration one-shot.
+
+Les fichiers `*.example` sont des contrats, pas des configurations prêtes à
+l'emploi. Les fichiers réels `compose.env`, `services/*.env` et `secrets/*`
+sont ignorés par Git. Les `versions.env` staging et production sont au contraire
+versionnés afin de rendre une promotion et un rollback auditables.
+
+## Politique Git et promotion
+
+- `main` reçoit des branches de travail courtes après revue ;
+- le commit source `A` est construit une seule fois et produit cinq digests ;
+- un commit manifeste `B` inscrit ces mêmes digests dans les deux
+  `versions.env` suivis, puis est déployé en staging ;
+- après validation, un tag immuable `mvp-vX.Y.Z` pointe vers `B` ;
+- production est déployée depuis ce tag sans reconstruire les images ;
+- `poc-v0.1.0` reste l'archive du POC et n'est jamais déplacé.
+
+Un tag Git ne remplace pas un digest d'image. Le tag identifie le manifeste de
+release autorisé ; les digests identifient exactement les artefacts exécutés.
+Les labels OCI `org.opencontainers.image.revision` des images conservent le
+commit source `A`, tandis que le tag pointe vers le commit manifeste `B`. Cette
+séparation évite de devoir connaître le digest d'une image avant de committer
+le fichier qui le référence. Le commit `B` ne modifie que les métadonnées de
+déploiement et ne déclenche aucune reconstruction des images promues.
+
+Les valeurs `sha256:000…000` et le registre `example.invalid` sont des
+sentinelles volontaires. Staging et production restent non déployables tant
+qu'elles n'ont pas été remplacées et que
+`GTA_RELEASE_DIGESTS_CONFIRMED=1` n'est pas défini dans le `compose.env`
+externe.
+
+Les overlays de release utilisent `pull_policy: missing`. La livraison exécute
+explicitement `docker compose pull` avant `up`, mais un reboot peut réutiliser
+le cache si le registre est momentanément indisponible. Le digest immuable
+empêche alors toute dérive vers une autre image.
 
 ## Prérequis
 
-- un hôte Linux avec Docker Engine 28.3.3 ou supérieur et Docker Compose 2.24
-  ou supérieur ;
-- un daemon Docker rootful sans `userns-remap` pour que l'UID/GID fixe `10001`
-  corresponde à celui préparé sur les bind mounts de l'hôte ;
-- le dépôt placé, dans les exemples, sous
-  `/opt/glpi-ticketing-automation` sur un commit identifié ;
-- un certificat TLS correspondant au nom public, sa clé privée et un fichier
-  `htpasswd` bcrypt réservés au POC ;
-- l'utilitaire `htpasswd` pour initialiser cette authentification ;
-- des URL GLPI et Transcribe AI joignables **depuis un conteneur** ;
-- un compte GLPI et un client OAuth Password réservés au POC ;
-- un espace disque local sauvegardable pour les quatre répertoires audio.
+- hôte Linux avec Docker Engine 28.3.3+ et Docker Compose 2.33.1+ ;
+- checkout appartenant à root sous `/opt/glpi-ticketing-automation` pour les
+  exemples staging/prod ;
+- espace local sauvegardable pour les deux volumes nommés ;
+- certificat TLS, clé privée et fichier `htpasswd` bcrypt ;
+- registre joignable contenant les cinq images applicatives épinglées ;
+- GLPI V2.3.0 et Transcribe AI joignables depuis `worker-egress` ;
+- client OAuth et utilisateur GLPI dédiés à l'environnement ;
+- autorité de certification installée ou bundle interne explicite.
 
-`localhost` dans `worker.env` désignerait le conteneur worker, pas l'hôte. Il
-faut utiliser des noms DNS ou des adresses réseau réelles. Il ne faut jamais
-désactiver la validation TLS. Pour une autorité interne, utilisez l'overlay
-`worker/docker-compose.internal-ca.yaml` décrit plus bas.
+Le stockage de `audio-data` doit préserver les permissions POSIX, les liens
+durs et la synchronisation de répertoires attendus par la purge crash-safe. Un
+montage CIFS ou un stockage objet n'est pas qualifié par ce MVP.
 
-Le minimum Engine n'est pas cosmétique : des versions antérieures ont connu
-des contournements du binding loopback depuis le réseau local, notamment après
-un rechargement de `firewalld`. Le serveur doit conserver le mode bridge/NAT
-standard et sa politique pare-feu doit être vérifiée après provisionnement.
+`localhost` dans un fichier worker désigne le conteneur lui-même. Utilisez les
+noms DNS ou adresses réellement accessibles depuis Docker. Ne désactivez
+jamais la vérification TLS pour contourner une CA interne.
 
-## 1. Préparer les chemins persistants
+Le minimum Compose 2.33.1 est requis par `networks.*.gw_priority`. Cette règle
+force la route par défaut des workers vers `worker-egress` et celle de Nginx
+vers `proxy-edge`, au lieu de dépendre de l'ordre implicite des réseaux. Une
+version plus ancienne peut refuser le manifeste ou choisir une route de sortie
+incorrecte.
 
-Le script ne supprime rien. Il refuse les racines système trop larges et crée
-les quatre sous-répertoires avec le propriétaire `10001:10001` et le mode
-`0750`. Il refuse aussi une collision avec un utilisateur ou groupe de l'hôte,
-car ce compte obtiendrait sinon un accès direct aux audios. Sur un chemin déjà
-présent, le script réapplique propriétaire et mode aux répertoires ciblés :
+## Configuration et secrets
+
+### Développement
+
+Créez les fichiers locaux à partir des contrats :
 
 ```bash
-cd /opt/glpi-ticketing-automation
-sudo ./infra/docker/prepare-host.sh \
-  /srv/glpi-ticketing-automation/audio
+cp infra/docker/environments/dev/compose.env.example \
+  infra/docker/environments/dev/compose.env
+cp infra/docker/environments/dev/services/database.env.example \
+  infra/docker/environments/dev/services/database.env
+cp infra/docker/environments/dev/services/migrations.env.example \
+  infra/docker/environments/dev/services/migrations.env
+cp infra/docker/environments/dev/services/web.env.example \
+  infra/docker/environments/dev/services/web.env
+cp infra/docker/environments/dev/services/worker-automation.env.example \
+  infra/docker/environments/dev/services/worker-automation.env
+cp infra/docker/environments/dev/services/worker-retention.env.example \
+  infra/docker/environments/dev/services/worker-retention.env
+install -d -m 0700 infra/docker/environments/dev/secrets
 ```
 
-Le script vérifie aussi que le GID `10002`, réservé par défaut à la lecture des
-secrets Nginx, n'appartient à aucun groupe de l'hôte et diffère du GID audio.
-Si un autre GID est nécessaire, utilisez la même valeur pendant la préparation
-et dans `compose.env` :
+Placez ensuite sous `environments/dev/secrets/` :
+
+- `postgres.password` en mode `0640`, groupe déclaré par
+  `GTA_POSTGRES_SECRET_GID` ;
+- `nginx.crt` en mode `0644` ;
+- `nginx.key` et `nginx.htpasswd` en mode `0640`, groupe déclaré par
+  `GTA_NGINX_SECRET_GID` ;
+- éventuellement un bundle de CA interne.
+
+Même en développement, les trois secrets privés restent propriété de root ;
+les GID dédiés donnent uniquement la lecture aux processus conteneurisés.
+
+Renseignez toutes les valeurs `CHANGE_ME`. Le mot de passe de
+`postgres.password` doit être le même que celui encodé dans le `DATABASE_URL`
+du fichier partagé `services/database.env`. Une valeur hexadécimale évite les
+ambiguïtés d'encodage d'URL.
+
+### Staging et production
+
+Les secrets ne sont pas copiés dans le checkout :
 
 ```bash
-sudo GTA_NGINX_SECRET_GID=12002 ./infra/docker/prepare-host.sh \
-  /srv/glpi-ticketing-automation/audio
+sudo install -d -m 0750 \
+  /etc/glpi-ticketing-automation/staging/services \
+  /etc/glpi-ticketing-automation/staging/secrets
+sudo install -m 0640 \
+  infra/docker/environments/staging/compose.env.example \
+  /etc/glpi-ticketing-automation/staging/compose.env
+sudo install -m 0600 \
+  infra/docker/environments/staging/services/database.env.example \
+  /etc/glpi-ticketing-automation/staging/services/database.env
+sudo install -m 0600 \
+  infra/docker/environments/staging/services/migrations.env.example \
+  /etc/glpi-ticketing-automation/staging/services/migrations.env
+sudo install -m 0600 \
+  infra/docker/environments/staging/services/web.env.example \
+  /etc/glpi-ticketing-automation/staging/services/web.env
+sudo install -m 0600 \
+  infra/docker/environments/staging/services/worker-automation.env.example \
+  /etc/glpi-ticketing-automation/staging/services/worker-automation.env
+sudo install -m 0600 \
+  infra/docker/environments/staging/services/worker-retention.env.example \
+  /etc/glpi-ticketing-automation/staging/services/worker-retention.env
 ```
 
-Un disque local est recommandé pour le POC. Les primitives de publication
-tolèrent des systèmes de fichiers distincts, mais un stockage réseau dont les
-garanties de synchronisation sont inconnues doit être qualifié avant usage.
+Répétez avec `prod`. Créez ensuite les quatre secrets indiqués par
+`compose.env`. `postgres.password` doit appartenir à
+`root:<GTA_POSTGRES_SECRET_GID>` avec le mode `0640`. La clé TLS et le
+`htpasswd` doivent appartenir à `root:<GTA_NGINX_SECRET_GID>` avec le même mode.
+Le certificat public reste propriété de root et peut être en `0644`.
 
-## 2. Installer la configuration hors du dépôt
+Avec les GID proposés par les exemples :
 
 ```bash
-sudo install -d -m 0750 /etc/glpi-ticketing-automation
-sudo install -m 0600 infra/docker/.env.example \
-  /etc/glpi-ticketing-automation/compose.env
-sudo install -m 0640 infra/docker/web/web.env.example \
-  /etc/glpi-ticketing-automation/web.env
-sudo install -m 0600 infra/docker/worker/worker.env.example \
-  /etc/glpi-ticketing-automation/worker.env
-sudo install -o root -g 10002 -m 0644 /path/to/fullchain.pem \
-  /etc/glpi-ticketing-automation/nginx.fullchain.pem
-sudo install -o root -g 10002 -m 0640 /path/to/private.key \
-  /etc/glpi-ticketing-automation/nginx.key
-sudo install -o root -g 10002 -m 0640 /dev/null \
-  /etc/glpi-ticketing-automation/nginx.htpasswd
-sudo htpasswd -B /etc/glpi-ticketing-automation/nginx.htpasswd poc-user
-sudo chown root:10002 /etc/glpi-ticketing-automation/nginx.htpasswd
-sudo chmod 0640 /etc/glpi-ticketing-automation/nginx.htpasswd
-sudoedit /etc/glpi-ticketing-automation/compose.env
-sudoedit /etc/glpi-ticketing-automation/web.env
-sudoedit /etc/glpi-ticketing-automation/worker.env
+sudo install -o root -g 20000 -m 0640 /path/to/postgres.password \
+  /etc/glpi-ticketing-automation/prod/secrets/postgres.password
+sudo install -o root -g 20001 -m 0640 /path/to/nginx.key \
+  /etc/glpi-ticketing-automation/prod/secrets/nginx.key
+sudo install -o root -g 20001 -m 0640 /path/to/nginx.htpasswd \
+  /etc/glpi-ticketing-automation/prod/secrets/nginx.htpasswd
+sudo install -o root -g root -m 0644 /path/to/nginx.crt \
+  /etc/glpi-ticketing-automation/prod/secrets/nginx.crt
 ```
 
-Toutes les valeurs `replace-with-...`, dont `GTA_VCS_REF`, doivent être
-remplacées. Les URL et les valeurs fixes ne doivent pas être laissées
-implicites. `PUBLIC_BASE_URL` doit être l'URL HTTPS réellement fournie par le
-reverse proxy, sans sous-chemin. Le script de démarrage refuse les placeholders
-ainsi qu'un `GTA_VCS_REF=unknown`, avant de démarrer le moindre conteneur.
-Si vous avez choisi un autre GID, remplacez aussi `GTA_NGINX_SECRET_GID=10002`.
+Adaptez le répertoire pour staging et les GID si l'hôte les réserve déjà.
+Éditez ensuite `compose.env` et les cinq fichiers `services/*.env`, remplacez
+tous les placeholders et ajoutez `GTA_RELEASE_DIGESTS_CONFIRMED=1` seulement
+après avoir inscrit les cinq vrais digests dans le `versions.env` suivi.
 
-Les valeurs sensibles de `worker.env` sont entourées d'apostrophes. Conservez
-ce quoting : Compose applique l'interpolation `$VAR` aux valeurs non quotées ou
-entre guillemets doubles, tandis qu'une valeur entre apostrophes est littérale.
-Une apostrophe appartenant au secret s'écrit `\'`. Le smoke test utilise
-volontairement des secrets synthétiques contenant `$` et `#`, puis compare leur
-empreinte dans le conteneur sans jamais les afficher.
+Avec les secrets `file`, Compose conserve les permissions de la source hôte et
+ne remappe pas son propriétaire pour l'utilisateur de l'image. Les groupes
+supplémentaires déclarés par le manifeste sont donc nécessaires : un secret en
+`0600 root:root` serait illisible par PostgreSQL ou Nginx non-root, tandis qu'un
+fichier world-readable exposerait inutilement la donnée aux comptes locaux.
+Choisissez deux GID dédiés, distincts et sans membre humain, puis reportez-les
+dans `compose.env` avant de créer les conteneurs.
 
-Les secrets applicatifs du worker sont absents des images et injectés par un
-`env_file` accessible seulement à root. Ils restent visibles à un
-administrateur Docker dans l'inspection du conteneur. La clé TLS et le
-`htpasswd` suivent déjà un contrat plus strict : secrets fichiers montés en
-lecture seule uniquement dans Nginx. Leur GID supplémentaire est nécessaire car
-Compose conserve les permissions réelles d'une source `file` et ne remappe pas
-son propriétaire. Un coffre externe reste attendu pour le MVP.
+Les fichiers de services contiennent notamment les URLs et secrets GLPI et
+Transcribe AI. Ils restent visibles pour un administrateur Docker via
+l'inspection du conteneur : un coffre externe et des secrets fichiers
+applicatifs restent une amélioration post-MVP.
 
-## 3. Valider et construire les images
+Dans un fichier `env_file`, placez entre apostrophes les secrets contenant
+notamment `$`, `#` ou des espaces afin d'éviter une interpolation involontaire.
+Ne journalisez jamais le résultat de `docker compose config` sur un système de
+CI : la forme développée peut contenir ces valeurs sensibles.
 
-Les commandes suivantes utilisent les chemins et tags du fichier externe :
+Le MVP utilise encore le même rôle PostgreSQL pour Alembic, le web et les deux
+workers. Cette simplicité donne aux runtimes des droits de schéma excessifs.
+Une production renforcée devra séparer le propriétaire de migration d'un rôle
+runtime limité au DML.
+
+## Commandes par environnement
+
+Toutes les commandes partent de la racine du dépôt et nomment explicitement le
+projet, le fichier d'environnement et les manifests. Cela évite qu'un
+`COMPOSE_FILE` ou `COMPOSE_PROJECT_NAME` hérité du shell cible le mauvais
+volume.
+
+### Développement
 
 ```bash
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env config --quiet
+docker compose --project-name gta-dev \
+  --env-file infra/docker/environments/dev/compose.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/dev/compose.override.yaml \
+  config --quiet
 
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env build --pull
+docker compose --project-name gta-dev \
+  --env-file infra/docker/environments/dev/compose.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/dev/compose.override.yaml \
+  up --detach --build --wait --wait-timeout 120
 ```
 
-`COMPOSE_FILE` est défini dans `compose.env` avec un chemin absolu. Il devient
-la source unique utilisée par les commandes manuelles, l'unité systemd et
-l'éventuel overlay de CA. Adaptez-le si le dépôt n'est pas installé sous
-`/opt/glpi-ticketing-automation`.
+### Staging
 
-Les images Python utilisent la racine du dépôt comme contexte : le verrou uv est
-commun à tout le workspace. Tous les manifests des membres sont donc copiés
-avant la résolution, mais chaque image n'installe que son application et les
-sources de ses dépendances d'exécution. Le contexte Nginx est au contraire
-limité à `infra/docker/nginx`. Les deux fichiers `.dockerignore` appliquent une
-allowlist ; les `.env`, tests, métadonnées Git, certificats et fichiers de
-travail ne sont pas transmis au daemon Docker.
-
-## 4. Configurer le reverse proxy Nginx
-
-Le service `nginx` fait partie de la stack et utilise la configuration
-versionnée [`nginx/nginx.conf`](nginx/nginx.conf). Il termine TLS sur son port
-interne `8443`, applique l'authentification Basic, puis résout dynamiquement
-`web:8000` sur le bridge `web-private`. Les identifiants Basic sont supprimés
-avant le proxy vers FastAPI. Nginx remplace aussi les en-têtes d'origine par le
-schéma HTTPS et l'adresse cliente qu'il observe. Uvicorn leur fait confiance
-uniquement dans cette stack, car `web-private` ne contient que Nginx et le web.
-Le web n'est jamais publié sur l'hôte.
-
-Seul HTTPS est exposé : cette stack n'ouvre volontairement aucun port HTTP de
-redirection. Le client doit donc utiliser directement l'URL `https://`.
-`GTA_NGINX_BIND_IP=127.0.0.1` conserve l'accès sur le serveur lui-même. Pour
-une démonstration depuis un autre poste, remplacez cette valeur par l'adresse IP
-dédiée du serveur, ou par `0.0.0.0` uniquement avec une règle pare-feu bornée
-aux postes autorisés. Le certificat doit couvrir le nom utilisé dans
-`PUBLIC_BASE_URL`.
-
-La limite Nginx est de 27 MiB afin d'inclure l'enveloppe multipart autour des
-25 MiB applicatifs. Le buffering des requêtes et des réponses est désactivé :
-un audio n'est pas recopié dans un répertoire persistant du proxy ; le spooling
-restant se fait dans les tmpfs Nginx et web. La sonde interne Nginx joint
-`GET /health` sans rendre un endpoint de santé non authentifié public.
-
-### Rotation TLS ou Basic Auth
-
-Installez les nouveaux fichiers de manière atomique avec le même GID et les
-mêmes modes, validez la configuration, puis recréez uniquement Nginx :
+Le checkout doit correspondre au commit manifeste `B` de `main` consigné pour
+le déploiement, et non au commit source `A` utilisé pour construire les images.
 
 ```bash
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env \
-  run --rm --no-deps nginx -t
+sudo docker compose --project-name gta-staging \
+  --env-file /etc/glpi-ticketing-automation/staging/compose.env \
+  --env-file infra/docker/environments/staging/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/staging/compose.override.yaml \
+  config --quiet
 
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env \
-  up --detach --no-deps --force-recreate --no-build --pull never \
-  --wait --wait-timeout 45 nginx
+sudo docker compose --project-name gta-staging \
+  --env-file /etc/glpi-ticketing-automation/staging/compose.env \
+  --env-file infra/docker/environments/staging/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/staging/compose.override.yaml \
+  pull
+
+sudo docker compose --project-name gta-staging \
+  --env-file /etc/glpi-ticketing-automation/staging/compose.env \
+  --env-file infra/docker/environments/staging/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/staging/compose.override.yaml \
+  up --detach --remove-orphans --wait --wait-timeout 120
 ```
 
-Le montage des secrets fichiers est résolu à la création du conteneur : un
-simple `nginx -s reload` ne constitue donc pas la procédure documentée. Cette
-rotation ne recrée ni le web ni le worker et ne modifie aucun fichier audio.
+### Production
 
-## 5. Démarrer et vérifier
-
-Démarrez d'abord le web et Nginx afin de vérifier le frontal sans consommer
-d'audio :
+Vérifiez d'abord que `git describe --tags --exact-match` retourne le tag
+`mvp-vX.Y.Z` attendu et que les cinq lignes de `prod/versions.env` sont
+identiques à celles validées en staging.
 
 ```bash
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env \
-  up --detach --no-build --pull never \
-  --wait --wait-timeout 45 web nginx
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  config --quiet
 
-curl --fail --silent --show-error \
-  --cacert /etc/glpi-ticketing-automation/nginx.fullchain.pem \
-  --resolve audio-poc.example.test:443:127.0.0.1 \
-  --user poc-user https://audio-poc.example.test/health
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  pull
+
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  up --detach --remove-orphans --wait --wait-timeout 120
 ```
 
-L'option `--resolve` ci-dessus correspond au binding prudent par défaut sur le
-loopback et au port `443`. Adaptez ses deux valeurs si `GTA_NGINX_BIND_IP` ou
-`GTA_NGINX_HTTPS_PORT` diffère.
+`gta-dev`, `gta-staging` et `gta-prod` produisent des volumes distincts. Ne
+changez jamais le nom d'un projet déjà initialisé sans procédure de migration :
+Compose créerait des volumes vides et donnerait l'impression d'une perte de
+données.
 
-Après validation des deux API et de `PUBLIC_BASE_URL`, démarrez le worker :
+## Migration one-shot et ordre de démarrage
+
+L'ordre effectif est :
+
+1. PostgreSQL devient `healthy` ;
+2. `database-migrations` exécute `alembic upgrade head` et sort avec le code
+   `0` ;
+3. le web et les deux workers peuvent démarrer ;
+4. Nginx attend que le web soit `healthy`.
+
+La migration utilise `restart: "no"`. Une sortie non nulle empêche les
+consommateurs dépendants de démarrer. Ne contournez pas cette barrière avec un
+`docker compose up --no-deps`.
 
 ```bash
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env \
-  up --detach --no-deps --no-build --pull never worker
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  ps --all
 
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env ps --all
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  logs --tail 200 database-migrations
 ```
 
-Un test fonctionnel utilise un audio **synthétique et non sensible** : dépôt
-via le frontal HTTPS, apparition transitoire dans `pending`/`processing`, ticket
-GLPI avec le même `external_id`, puis audio dans `completed`. Vérifiez aussi
-l'absence de transcription et de secret dans les logs.
+Une migration déjà appliquée est idempotente. Au redémarrage simple de l'hôte,
+le conteneur one-shot terminé peut rester à l'état `exited (0)` ; lors d'une
+mise à jour de son image, Compose le recrée avant les runtimes.
 
-## Politique de redémarrage et exploitation
+## Healthchecks et redémarrage
 
-Nginx et le web utilisent `restart: unless-stopped`. Le worker utilise
-volontairement `restart: "no"` : son code de sortie `3` signifie que le pipeline
-est bloqué et qu'une décision opérateur est requise. Une politique `always` ou
-`on-failure` masquerait ce signal, créerait une boucle de redémarrage et
-pourrait resoumettre un audio à Transcribe AI.
+| Service | Sonde | Politique de redémarrage |
+| --- | --- | --- |
+| PostgreSQL | `pg_isready` sur la base configurée | `unless-stopped` |
+| migration | code de sortie d'Alembic | aucun redémarrage |
+| web | `GET /health` local, liveness du processus | `unless-stopped` |
+| worker automation | heartbeat PostgreSQL frais et montage audio réellement en lecture seule | `on-failure:5` |
+| worker rétention | heartbeat PostgreSQL frais et montage audio réellement inscriptible | `on-failure:5` |
+| Nginx | proxy interne vers le `/health` du web | `unless-stopped` |
+
+Un état métier `degraded` ou `blocked` avec heartbeat frais reste sain au sens
+Docker : le processus est vivant, observable et applique sa politique de sonde.
+Docker ne doit pas le redémarrer en boucle. À l'inverse, un crash technique est
+redémarré au maximum cinq fois pour chaque worker. Une politique de restart ne
+réagit pas à elle seule à un conteneur seulement marqué `unhealthy` ; le
+dashboard et la supervision hôte doivent donc alerter l'opérateur.
+
+Le seuil conteneur `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS` vaut 45 secondes
+par défaut et doit rester strictement supérieur à
+`WORKER_HEARTBEAT_INTERVAL_SECONDS`, 10 secondes par défaut. La sonde n'affiche
+qu'un code technique expurgé.
+
+Le `/health` web ne prouve ni la disponibilité de PostgreSQL, ni celle de GLPI
+ou Transcribe AI. De même, `docker compose up --wait` ne constitue pas un test
+fonctionnel de création de ticket. Après chaque déploiement, déposez un audio
+synthétique non sensible et vérifiez le job, le ticket GLPI et les alertes du
+dashboard.
+
+Commandes d'exploitation courantes :
 
 ```bash
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env logs --tail 200 worker
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  ps --all
 
-sudo docker inspect \
-  --format '{{.State.Status}} exit={{.State.ExitCode}} restarts={{.RestartCount}}' \
-  "$(sudo docker compose \
-    --env-file /etc/glpi-ticketing-automation/compose.env \
-    ps --all --quiet worker)"
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  logs --tail 200 web worker-automation worker-retention nginx
 ```
 
-En cas de code `3`, inspectez `processing`, `failed` et le diagnostic expurgé,
-corrigez la configuration ou le contrat, puis relancez explicitement. Si
-l'unité systemd avait échoué, resynchronisez ensuite son état avec le conteneur :
+## Autorité de certification interne
+
+Lorsque GLPI ou Transcribe AI présente une chaîne signée par une CA privée,
+installez un bundle PEM sous `/etc/glpi-ticketing-automation/<env>/secrets/`,
+ajoutez son chemin absolu avec `GTA_CA_BUNDLE` dans `compose.env`, puis ajoutez
+le troisième manifeste à **toutes** les commandes :
 
 ```bash
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env \
-  up --detach --no-deps --no-build --pull never \
-  --wait --wait-timeout 45 worker
-
-sudo systemctl reset-failed glpi-ticketing-automation.service
-sudo systemctl start glpi-ticketing-automation.service
-sudo systemctl is-active glpi-ticketing-automation.service
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  --file infra/docker/compose.internal-ca.yaml \
+  config --quiet
 ```
 
-Ne déplacez pas automatiquement un fichier de `failed` vers `pending` : ce
-répertoire est terminal. Un audio conservé dans `processing` est en revanche
-repris conformément à la politique du POC et redemandera une transcription.
+Cet overlay monte le même bundle en lecture seule dans les deux workers et
+définit `SSL_CERT_FILE`. Il ne désactive jamais la validation TLS. Si systemd
+est utilisé, ajoutez aussi ce `--file` aux trois commandes de l'unité ; une
+validation ponctuelle qui ne serait pas reproduite au boot est insuffisante.
 
-Le fichier
-[`../systemd/glpi-ticketing-automation.service.example`](../systemd/glpi-ticketing-automation.service.example)
-permet un démarrage au boot sans ajouter de boucle au worker. Adaptez son
-`WorkingDirectory`, installez-le sous `/etc/systemd/system/`, puis activez-le :
+## Sauvegarde et restauration
+
+Une sauvegarde cohérente associe toujours :
+
+- un dump PostgreSQL ;
+- un instantané de `audio-data`, y compris `.purge` ;
+- le tag Git, les deux fichiers d'environnement versionnés et les digests ;
+- l'horodatage UTC et le nom de projet Compose.
+
+Avant l'instantané, empêchez les écritures et laissez PostgreSQL terminer les
+transactions en cours :
 
 ```bash
-sudo chown -R root:root /opt/glpi-ticketing-automation
-sudo chmod -R go-w /opt/glpi-ticketing-automation
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  stop web worker-automation worker-retention nginx
+```
+
+Produisez ensuite un `pg_dump --format=custom` depuis PostgreSQL, puis prenez un
+snapshot du volume `gta-prod_audio-data` avec l'outil de sauvegarde qualifié par
+l'exploitation. Ce snapshot doit préserver les fichiers cachés, permissions et
+liens durs. Redémarrez les services avec la commande `up --detach --wait`.
+
+Après avoir créé un répertoire de sauvegarde accessible uniquement à
+l'opérateur, le dump peut être produit sans afficher le mot de passe :
+
+```bash
+sudo docker compose --project-name gta-prod \
+  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
+  --env-file infra/docker/environments/prod/versions.env \
+  --file infra/docker/compose.yaml \
+  --file infra/docker/environments/prod/compose.override.yaml \
+  exec --no-tty postgres sh -ec \
+  'export PGPASSWORD="$(cat /run/secrets/postgres_password)"; exec pg_dump --format=custom --no-owner --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' \
+  > /srv/backups/gta-prod/postgres.dump
+```
+
+La redirection est effectuée par le shell appelant : le répertoire cible doit
+déjà être inscriptible par ce compte et rester en mode `0700`. Contrôlez le code
+de sortie et testez le dump avec `pg_restore --list` avant de le déclarer
+valide.
+
+La restauration doit être répétée régulièrement sur un projet isolé, par
+exemple `gta-restore-test`, jamais directement par-dessus les volumes actifs :
+
+1. conserver les volumes de production intacts ;
+2. créer des volumes PostgreSQL et audio neufs sous le projet de restauration ;
+3. démarrer uniquement PostgreSQL ;
+4. restaurer le dump avec `pg_restore --exit-on-error --no-owner` dans la base
+   vide ;
+5. restaurer intégralement `audio-data` ;
+6. exécuter la migration one-shot pour atteindre la révision attendue ;
+7. démarrer d'abord le web avec un port Nginx non conflictuel ;
+8. vérifier plusieurs UUID, la quarantaine `.purge`, les téléchargements et un
+   cycle fonctionnel synthétique.
+
+Ne démarrez jamais les workers d'un exercice de restauration avec les
+identifiants GLPI ou Transcribe AI de production : ils pourraient reprendre des
+jobs restaurés et produire des effets réels. Gardez-les arrêtés ou injectez des
+instances de test dédiées avant le cycle synthétique.
+
+Un dump SQL sans le volume audio, ou l'inverse, n'est pas une sauvegarde
+restaurable du service. Chiffrez les sauvegardes, limitez leur accès et appliquez
+une durée de conservation indépendante de celle des audios applicatifs.
+
+## Mise à jour et rollback
+
+### Mise à jour
+
+1. sauvegarder PostgreSQL et `audio-data` ;
+2. choisir le commit source `A`, construire ses cinq images une seule fois et
+   publier leurs digests ;
+3. créer sur `main` le commit manifeste `B` qui inscrit exactement ces cinq
+   digests dans `staging/versions.env` **et** `prod/versions.env` ;
+4. déployer `B` en staging et réaliser la recette ;
+5. créer le tag `mvp-vX.Y.Z` sur `B`, sans reconstruire les images ;
+6. en production, valider `docker compose config --quiet`, tirer les images
+   référencées par `prod/versions.env` dans le tag puis exécuter
+   `up --detach --wait` ;
+7. vérifier la migration, les healthchecks, le dashboard et un traitement
+   synthétique.
+
+Les conteneurs reçoivent `SIGTERM` et disposent d'une période d'arrêt avant
+recréation. Les workers reprennent depuis PostgreSQL ; aucun scan du volume
+audio n'est effectué.
+
+### Rollback
+
+Un rollback applicatif remet le checkout sur le tag précédent et restaure les
+anciens digests ensemble. Ne modifiez jamais seulement une des cinq images.
+
+Alembic n'effectue aucun downgrade automatique. Si la migration appliquée
+n'est pas rétrocompatible avec les anciennes images, un simple rollback
+d'images est dangereux : restaurez le couple dump PostgreSQL + snapshot audio
+pris avant mise à jour. Validez d'abord cette restauration sous un nom de
+projet isolé.
+
+`docker compose down` sans `-v` conserve normalement les volumes, mais `stop`
+est préféré pour une interruption temporaire. Vérifiez toujours les noms
+`gta-<env>_postgres-data` et `gta-<env>_audio-data` avant une opération manuelle.
+
+## Démarrage systemd
+
+L'[unité fournie](../systemd/glpi-ticketing-automation.service.example) appelle
+directement le socle et l'overlay production ; elle ne dépend plus d'un script
+intermédiaire :
+
+```bash
 sudo install -m 0644 \
   infra/systemd/glpi-ticketing-automation.service.example \
   /etc/systemd/system/glpi-ticketing-automation.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now glpi-ticketing-automation.service
+sudo systemctl status glpi-ticketing-automation.service
 ```
 
-L'unité s'exécute en root pour accéder au daemon Docker. Le checkout, le
-manifeste Compose et `worker/start-runtime.sh` doivent donc appartenir à root et
-ne jamais être modifiables par un compte non privilégié ; sinon une modification
-locale deviendrait une exécution privilégiée au prochain démarrage. Vérifiez
-les propriétaires et les droits de tous les composants du chemin avec
-`namei -l /opt/glpi-ticketing-automation/infra/docker/worker/start-runtime.sh`.
+`ExecStop` utilise `compose stop`, jamais `down -v`. Le checkout, les manifests
+et les `versions.env` doivent appartenir à root et ne pas être modifiables par
+le compte qui consulte le dashboard. Si l'overlay de CA est nécessaire,
+adaptez explicitement `ExecStartPre`, `ExecStart` et `ExecStop` avant
+l'activation.
 
-Le script appelé par l'unité démarre et attend les healthchecks du web et de
-Nginx, mais refuse un worker déjà actif mais `unhealthy` et ne redémarre pas un
-ancien worker sorti avec un code non nul. Le frontal reste disponible si ce
-garde arrête ensuite la reprise du worker. Avec `Type=oneshot`, le code `3`
-place l'unité systemd dans l'état `failed`, tandis que les conteneurs web et
-Nginx déjà démarrés restent disponibles. Le healthcheck worker crée puis
-supprime une sentinelle unique dans chacun des quatre volumes afin de vérifier
-leur écriture réelle. Seule la commande opérateur ci-dessus autorise sa reprise.
-Il n'existe volontairement pas d'`ExecReload`
-susceptible de relancer un audio. Après un redémarrage isolé du daemon Docker,
-utilisez `systemctl restart glpi-ticketing-automation` : le même garde est
-réappliqué. Le démarrage utilise `--no-build --pull never`, donc les images
-doivent avoir été construites et validées avant l'activation de l'unité.
-Un worker déjà `running` et `healthy` est volontairement laissé intact : ce
-garde ne réconcilie ni son image ni son hash Compose. Toute livraison doit donc
-suivre la procédure de mise à jour ci-dessous, qui arrête d'abord le worker.
+Cette unité `oneshot` orchestre le boot mais ne suit pas ensuite chaque
+conteneur détaché. Un worker qui épuise ses cinq redémarrages ne fait donc pas
+échouer rétroactivement systemd : l'état runtime, le dashboard et une sonde
+hôte de `docker compose ps` restent les sources d'alerte opérationnelle.
+L'unité ne tire pas d'image au boot ; la procédure de livraison effectue le
+`pull` explicite et le reboot utilise ensuite le digest présent en cache.
 
-## Autorité de certification interne
+## Tests de déploiement
 
-Placez hors du dépôt un bundle PEM complet, lisible par l'UID `10001` et
-contenant à la fois les autorités système nécessaires et l'autorité interne.
-`SSL_CERT_FILE` remplace en effet le chemin de confiance par défaut. Ajoutez son
-chemin à `compose.env`, puis composez l'overlay :
-
-```bash
-sudo install -m 0644 /path/to/combined-trust-bundle.pem \
-  /etc/glpi-ticketing-automation/trust-bundle.pem
-```
-
-```dotenv
-GTA_CA_BUNDLE=/etc/glpi-ticketing-automation/trust-bundle.pem
-COMPOSE_FILE=/opt/glpi-ticketing-automation/infra/docker/docker-compose.prod.yaml:/opt/glpi-ticketing-automation/infra/docker/worker/docker-compose.internal-ca.yaml
-```
-
-```bash
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env config --quiet
-```
-
-L'overlay monte le bundle en lecture seule et définit `SSL_CERT_FILE`. Il ne
-désactive jamais la vérification des certificats. Comme `COMPOSE_FILE` porte la
-combinaison, l'overlay reste actif au boot, lors d'une reprise et pendant une
-mise à jour ; il ne dépend pas d'un `--file` ponctuel oublié à la commande
-suivante.
-
-## Mise à jour, rollback et sauvegarde
-
-Avant une mise à jour, notez le commit et le tag actuellement déployés. Arrêtez
-le worker proprement, positionnez le nouveau commit et renseignez à la fois son
-tag immuable et son hash complet dans `GTA_IMAGE_TAG` et `GTA_VCS_REF`. Validez
-le manifeste, construisez les trois images, puis ne reprenez le worker qu'après
-les healthchecks du web et de Nginx. Un audio laissé dans `processing` sera
-repris :
-
-```bash
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env stop worker
-
-# checkout du commit validé, puis mise à jour de GTA_IMAGE_TAG et GTA_VCS_REF
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env config --quiet
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env build --pull
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env \
-  up --detach --no-build --pull never \
-  --wait --wait-timeout 45 web nginx
-curl --fail --silent --show-error \
-  --cacert /etc/glpi-ticketing-automation/nginx.fullchain.pem \
-  --resolve audio-poc.example.test:443:127.0.0.1 \
-  --user poc-user https://audio-poc.example.test/health
-sudo docker compose \
-  --env-file /etc/glpi-ticketing-automation/compose.env \
-  up --detach --no-deps --no-build --pull never \
-  --wait --wait-timeout 45 worker
-```
-
-Si l'unité systemd est installée, terminez par :
-
-```bash
-sudo systemctl restart glpi-ticketing-automation.service
-```
-
-Son état reflète alors le démarrage des trois conteneurs. Le rollback suit exactement
-la même procédure avec le commit, le lock, le tag et `GTA_VCS_REF` précédents.
-Si la nouvelle image échoue avant la
-reprise du worker, restaurez d'abord ces quatre références puis reconstruisez.
-Les répertoires audio ne sont jamais supprimés par `compose down`.
-Sauvegardez les quatre ensemble après arrêt du web et du worker pour obtenir un
-instantané cohérent. Le POC ne chiffre pas les audios au repos et n'applique
-pas de politique de rétention : ces deux règles doivent être imposées par le
-serveur de test et définies avant le MVP.
-
-## Smoke test automatisé des artefacts
-
-Cette suite construit les trois images une seule fois, démarre une file vide,
-valide réellement le certificat TLS et l'authentification Basic, puis effectue
-un upload synthétique à travers Nginx. Elle vérifie aussi que le web n'a aucun
-port hôte, que Nginx retrouve le web après sa recréation, les droits croisés,
-les rootfs en lecture seule, les UID non-root, l'absence des outils de
-développement et l'arrêt coopératif du worker. Elle couvre enfin les contextes
-de build séparés, le quoting de secrets synthétiques, l'overlay de CA et le refus
-du script systemd de relancer un worker bloqué. Elle n'appelle ni GLPI ni
-Transcribe AI :
+Le smoke test vérifie les manifests fusionnés, la migration one-shot, l'ordre
+de démarrage, les healthchecks, les permissions audio et la persistance après
+redémarrage. Il utilise un nom de projet et des volumes jetables :
 
 ```bash
 uv run pytest -m deployment tests/deployment -vv --maxfail=1
 ```
 
-La suite utilise un projet Compose, des images et des répertoires temporaires
-propres à la session, puis les détruit même en cas d'échec. Elle ne doit pas
-être parallélisée.
+Cette suite ne doit pas être parallélisée et ne doit jamais recevoir les
+fichiers `/etc` de staging ou production.
 
-## Limites assumées de cette itération
+## Limites du déploiement MVP
 
-- un seul serveur, un seul worker et aucune haute disponibilité ;
-- authentification uniquement au reverse proxy, pas dans l'application ;
-- secrets applicatifs du worker injectés par environnement et visibles aux
+- un seul hôte, un worker de chaque type et aucune haute disponibilité ;
+- authentification Basic au reverse proxy, sans comptes applicatifs ;
+- secrets applicatifs injectés par environnement et visibles aux
   administrateurs Docker ;
-- authentification Basic adaptée à un POC supervisé, sans comptes applicatifs
-  ni gestion fine des autorisations ;
-- le healthcheck Nginx vérifie le processus et le web en amont, mais pas la date
-  d'expiration du certificat ; une sonde HTTPS externe doit porter cette alerte ;
-- aucun heartbeat métier du worker ni alerte automatique sur le code `3` ;
-- aucune politique egress interdisant au web les connexions sortantes ;
-- aucune limite CPU/mémoire calibrée par mesure de charge ;
-- aucune politique applicative de sauvegarde, chiffrement ou rétention ;
-- construction sur le serveur possible, sans pipeline de signature ni registre
-  d'images dans cette itération.
+- rôle PostgreSQL partagé entre migration et runtimes ;
+- aucune notification externe des alertes ;
+- aucune signature d'image ni politique de registre imposée par le dépôt ;
+- sauvegarde, chiffrement au repos et supervision externe à opérer sur l'hôte ;
+- GLPI et Transcribe AI ne sont ni déployés ni sauvegardés par cette stack.
 
-Ces limites sont acceptables pour une démonstration avec données synthétiques
-sur un serveur de test isolé. Elles deviennent des chantiers explicites du MVP,
-pas des garanties de production.
-
-## Références techniques
-
-- [uv dans Docker](https://docs.astral.sh/uv/guides/integration/docker/) pour
-  le cache en deux temps, le lock et l'installation non éditable ;
-- [spécification des services Compose](https://docs.docker.com/reference/compose-file/services/)
-  pour `read_only`, `cap_drop`, `security_opt`, `init` et les bindings de port ;
-- [syntaxe des fichiers d'environnement Compose](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)
-  pour le quoting littéral des secrets ;
-- [politique de redémarrage Docker](https://docs.docker.com/engine/containers/start-containers-automatically/)
-  pour la distinction entre arrêt et redémarrage automatique ;
-- [notes Docker Engine 28.3.3](https://docs.docker.com/engine/release-notes/28/#2833)
-  pour le correctif de sécurité du binding loopback après rechargement du
-  pare-feu ;
-- [secrets Docker Compose](https://docs.docker.com/compose/how-tos/use-secrets/)
-  pour le montage fichier des secrets Nginx ;
-- [image officielle Nginx](https://hub.docker.com/_/nginx/) et
-  [authentification Basic](https://nginx.org/en/docs/http/ngx_http_auth_basic_module.html)
-  pour le frontal conteneurisé ;
-- [buffering du proxy Nginx](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering)
-  pour le streaming des uploads hors stockage temporaire persistant.
+Ces limites sont acceptables pour le MVP sur un réseau interne. Elles doivent
+être traitées avant une exposition ou une disponibilité de production plus
+exigeante.

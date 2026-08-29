@@ -6,7 +6,7 @@ déduit jamais l'état d'un job en parcourant le volume audio.
 
 Le tag `poc-v0.1.0` conserve l'ancienne application fondée sur `pending` et
 `completed`. La branche courante utilise le stockage canonique et PostgreSQL ;
-le Compose MVP complet appartient à une itération ultérieure.
+elle est assemblée dans la stack Docker Compose du MVP.
 
 ## Entrées et sorties
 
@@ -80,6 +80,21 @@ audio, ni message brut provenant d'une exception d'infrastructure. Un audio
 autorisé est servi comme pièce jointe sous son nom UUID canonique, avec
 `Cache-Control: private, no-store` afin d'éviter sa conservation par un cache
 HTTP partagé ou par le navigateur.
+
+## Image et stockage Docker
+
+Le [Dockerfile web](../../infra/docker/web/Dockerfile) produit une image
+multi-stage non-root contenant uniquement l'environnement Python installé
+depuis `uv.lock`. Dans Compose, le web monte le volume canonique
+`/data/audios` en lecture-écriture : il publie les uploads et sert les audios
+terminés, sans déduire leur état depuis ce volume.
+
+Le healthcheck de l'image appelle `/health`, qui reste une liveness locale et
+ne transforme pas PostgreSQL en dépendance de disponibilité HTTP. Le service
+web n'est pas publié directement sur l'hôte ; Nginx est son unique point
+d'entrée. Le démarrage et la configuration des environnements dev, staging et
+production sont détaillés dans le
+[runbook Docker Compose](../../infra/docker/README.md).
 
 ## Flux d'ingestion
 
@@ -264,5 +279,4 @@ uv run ruff check apps/web
   second UUID ;
 - pas encore de suppression des orphelins ;
 - pas encore de test E2E dans un navigateur réel ; les contrats JavaScript sont
-  vérifiés statiquement et l'API est testée avec FastAPI ;
-- Compose MVP PostgreSQL non encore assemblé.
+  vérifiés statiquement et l'API est testée avec FastAPI.

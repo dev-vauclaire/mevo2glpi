@@ -244,9 +244,9 @@ l'état final :
 | `failed` | Suppression absolue après 30 jours. |
 | `blocked` | Suppression absolue après 90 jours. |
 
-Le worker d'automatisation ne supprime lui-même aucun audio. L'exécution des
-contrôles GLPI et des purges appartient au futur worker de rétention prévu à
-l'itération 5.
+Le worker d'automatisation ne supprime lui-même aucun audio. Les contrôles GLPI
+et les purges sont exécutés par l'application `worker-retention` à partir des
+échéances qu'il persiste.
 
 ## Runtime, heartbeat et arrêt
 
@@ -284,10 +284,19 @@ d'utiliser exclusivement la connexion propriétaire du verrou advisory.
 Une requête HTTP synchrone déjà commencée n'est pas interrompue pour publier un
 heartbeat ; celui-ci est vérifié avant et après l'appel. Les timeouts HTTPX
 bornent l'inactivité des phases réseau, pas une deadline murale totale : un
-upload lent mais progressif peut donc dépasser le futur seuil d'alerte. En 6B,
-un heartbeat périmé signifiera « aucun checkpoint récent, processus
-potentiellement non réactif » et non une preuve d'arrêt. Cette détection et
-l'affichage des alertes appartiennent au sous-jalon 6B.
+upload lent mais progressif peut donc dépasser le seuil d'alerte. Un heartbeat
+périmé signifie « aucun checkpoint récent, processus potentiellement non
+réactif » et non une preuve d'arrêt ; le dashboard expose cette distinction.
+
+L'image exécute également le module
+`glpi_ticketing_worker_automation.runtime.healthcheck`. Cette sonde vérifie
+PostgreSQL, exige un heartbeat `worker_automation` présent, non `stopped` et
+récent, puis confirme que `/data/audios` est lisible mais réellement non
+inscriptible. Un état `blocked` ou `degraded` encore frais reste healthy : une
+indisponibilité métier ne demande pas un redémarrage aveugle du processus. Le
+seuil `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS`, fixé à `45` secondes par défaut,
+doit être strictement supérieur à `WORKER_HEARTBEAT_INTERVAL_SECONDS`. La sonde
+n'émet qu'un code technique expurgé et ne journalise ni URL SQL ni secret.
 
 `SIGINT` et `SIGTERM` demandent un arrêt coopératif et interrompent les attentes
 injectées. Si le signal survient pendant le polling Transcribe AI, le worker
@@ -324,6 +333,7 @@ apps/worker-automation/
 │   ├── runtime/
 │   │   ├── context.py       # ressources, verrou et nettoyage
 │   │   ├── heartbeat.py     # outcomes vers état runtime
+│   │   ├── healthcheck.py   # adaptateur PostgreSQL de la sonde conteneur
 │   │   └── signals.py       # arrêt coopératif SIGINT/SIGTERM
 │   ├── transcription/       # client HTTP, polling et contrats
 │   └── worker/
@@ -389,6 +399,7 @@ Principaux réglages optionnels :
 | `AUDIO_ROOT` | `/data/audios` | Racine du stockage canonique. |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Timeout de connexion PostgreSQL. |
 | `WORKER_HEARTBEAT_INTERVAL_SECONDS` | `10` | Cadence maximale des checkpoints de heartbeat pendant les attentes coopératives. |
+| `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS` | `45` | Âge maximal du heartbeat accepté par la sonde conteneur ; strictement supérieur à sa cadence. |
 | `WORKER_IDLE_INTERVAL_SECONDS` | `1` | Attente lorsqu'aucun job n'est éligible. |
 | `WORKER_RETRY_INITIAL_SECONDS` | `5` | Premier délai du backoff. |
 | `WORKER_RETRY_MAX_SECONDS` | `300` | Plafond du backoff. |
@@ -418,6 +429,14 @@ La forme module est équivalente :
 ```bash
 uv run python -m glpi_ticketing_worker_automation
 ```
+
+Le [Dockerfile du worker](../../infra/docker/worker-automation/Dockerfile)
+installe cette application sans dépendances de développement et l'exécute en
+non-root. Le volume partagé `/data/audios` est monté en lecture seule : le
+worker inspecte et transmet les octets, mais ne peut ni les modifier ni les
+supprimer. Le [runbook Docker Compose](../../infra/docker/README.md) décrit les
+commandes et configurations dev, staging et production ainsi que l'autorité de
+certification interne optionnelle.
 
 Suite unitaire du workspace :
 
@@ -480,10 +499,5 @@ conteneurs jetables et ne doivent pas être parallélisées.
 - Le backoff n'a pas de jitter et les retries ne sont pas plafonnés en nombre ;
   ce compromis est adapté au singleton du MVP mais devra être réévalué avant
   une parallélisation.
-- La détection des heartbeats périmés et le dashboard d'alertes ne sont pas
-  encore implémentés ; ils appartiennent au sous-jalon 6B.
 - Le heartbeat n'est pas émis au milieu d'une requête HTTP synchrone. Les
   timeouts configurés bornent cette fenêtre d'invisibilité.
-- Le Docker Compose présent dans le dépôt décrit encore le POC. Le packaging
-  complet du MVP — PostgreSQL, migration one-shot, web, deux workers et Nginx —
-  reste explicitement prévu à l'itération 7.

@@ -1,9 +1,9 @@
 # Package `glpi-ticketing-common`
 
-`glpi-ticketing-common` contient les primitives de stockage audio, de backoff
-et d'attente coopérative partagées par le web et les deux workers. Il ne
-connaît ni PostgreSQL, ni FastAPI, ni GLPI, ni Transcribe AI et ne porte aucune
-politique métier.
+`glpi-ticketing-common` contient les primitives de stockage audio, de backoff,
+d'attente coopérative et de healthcheck runtime partagées par le web et les
+deux workers. Il ne connaît ni PostgreSQL, ni FastAPI, ni GLPI, ni Transcribe AI
+et ne porte aucune politique métier.
 
 ## Stockage canonique unique
 
@@ -77,6 +77,20 @@ advisory. La primitive ne crée aucun thread, ne connaît ni PostgreSQL ni le
 heartbeat et propage toute erreur du checkpoint afin que l'application puisse
 échouer en mode fermé.
 
+`glpi_ticketing_common.runtime_healthcheck` porte la politique générique des
+sondes conteneur sans importer SQLAlchemy : configuration minimale, fraîcheur
+du heartbeat, codes d'erreur expurgés et vérification du mode d'accès au volume
+audio. Chaque worker fournit son propre adaptateur PostgreSQL et choisit le
+contrat attendu : lecture seule pour l'automatisation, lecture-écriture pour la
+rétention. Le seuil `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS` vaut `45` secondes
+par défaut et doit rester strictement supérieur à
+`WORKER_HEARTBEAT_INTERVAL_SECONDS`.
+
+Le volume Docker canonique est monté en lecture-écriture par le web et le
+worker de rétention, et en lecture seule par le worker d'automatisation. Le
+[runbook Docker Compose](../../infra/docker/README.md) décrit son cycle de vie
+et les configurations dev, staging et production.
+
 `parse_audio_filename()` accepte une extension en majuscules à la frontière du
 provider et retourne une représentation normalisée. En revanche,
 `parse_audio_storage_key()` n'effectue aucune correction silencieuse : une clé
@@ -146,12 +160,14 @@ packages/common/
 │   ├── audio_files.py
 │   ├── audio_purge.py
 │   ├── backoff.py
-│   └── cooperative_wait.py
+│   ├── cooperative_wait.py
+│   └── runtime_healthcheck.py
 └── tests/unit/
     ├── test_audio_storage.py
     ├── test_audio_purge.py
     ├── test_backoff.py
-    └── test_cooperative_wait.py
+    ├── test_cooperative_wait.py
+    └── test_runtime_healthcheck.py
 ```
 
 Depuis la racine :

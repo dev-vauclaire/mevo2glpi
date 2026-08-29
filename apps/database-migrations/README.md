@@ -37,6 +37,20 @@ uv run python -m glpi_ticketing_database_migrations
 Les ressources Alembic sont embarquées dans le package Python. Leur résolution
 ne dépend donc pas du répertoire courant du processus.
 
+## Image et déploiement
+
+Le [Dockerfile de migration](../../infra/docker/database-migrations/Dockerfile)
+construit une image multi-stage verrouillée par `uv.lock`, sans dépendances de
+développement ni installation editable. Le runtime non-root exécute uniquement
+`glpi-ticketing-database-migrations`, puis s'arrête : le service Compose est un
+one-shot sans healthcheck ni politique de redémarrage.
+
+Cette application accède seulement à PostgreSQL. Elle ne monte pas le volume
+audio `/data/audios`. PostgreSQL doit être healthy avant son lancement et sa
+réussite conditionne le démarrage du web et des deux workers. Les commandes et
+fichiers propres aux environnements dev, staging et production sont décrits
+dans le [runbook Docker Compose](../../infra/docker/README.md).
+
 ## Historique courant
 
 - `0001_initial_schema` crée les quatre tables du cycle de vie MVP ;
