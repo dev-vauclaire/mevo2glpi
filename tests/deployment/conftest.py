@@ -1,287 +1,56 @@
-"""Session fixture for the disposable runtime Compose smoke test."""
+"""Fixtures for the disposable multi-environment Compose deployment."""
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
 import secrets
+import ssl
 import subprocess
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
 import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-COMPOSE_FILE = REPOSITORY_ROOT / "infra" / "docker" / "docker-compose.prod.yaml"
-INTERNAL_CA_COMPOSE_FILE = (
-    REPOSITORY_ROOT / "infra" / "docker" / "worker" / "docker-compose.internal-ca.yaml"
+DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker"
+BASE_COMPOSE_FILE = DOCKER_ROOT / "compose.yaml"
+INTERNAL_CA_COMPOSE_FILE = DOCKER_ROOT / "compose.internal-ca.yaml"
+ENVIRONMENTS_ROOT = DOCKER_ROOT / "environments"
+CUSTOM_SERVICES = (
+    "database-migrations",
+    "web",
+    "worker-automation",
+    "worker-retention",
+    "nginx",
 )
-START_RUNTIME_SCRIPT = (
-    REPOSITORY_ROOT / "infra" / "docker" / "worker" / "start-runtime.sh"
-)
-COMPOSE_VARIABLE_NAMES = frozenset(
-    {
-        "COMPOSE_FILE",
-        "COMPOSE_PROJECT_NAME",
-        "GTA_DATA_ROOT",
-        "GTA_NGINX_BIND_IP",
-        "GTA_NGINX_HTTPS_PORT",
-        "GTA_NGINX_TLS_CERTIFICATE_FILE",
-        "GTA_NGINX_TLS_KEY_FILE",
-        "GTA_NGINX_HTPASSWD_FILE",
-        "GTA_NGINX_SECRET_GID",
-        "GTA_WEB_ENV_FILE",
-        "GTA_WORKER_ENV_FILE",
-        "GTA_IMAGE_TAG",
-        "GTA_VCS_REF",
-        "GTA_NGINX_IMAGE",
-        "GTA_WEB_IMAGE",
-        "GTA_WORKER_IMAGE",
-    }
-)
-LIFECYCLE_DIRECTORIES = ("pending", "processing", "completed", "failed")
-HTTP_READY_TIMEOUT_SECONDS = 30.0
+ALL_SERVICES = ("postgres", *CUSTOM_SERVICES)
 POLL_INTERVAL_SECONDS = 0.25
 
 
-@dataclass(frozen=True, slots=True)
-class DeploymentEnvironment:
-    """Own one isolated Compose project and its synthetic configuration."""
-
-    project_name: str
-    data_root: Path
-    base_url: str
-    nginx_certificate: Path
-    nginx_image: str
-    web_image: str
-    worker_image: str
-    nginx_username: str
-    compose_environment_path: Path
-    _environment: Mapping[str, str] = field(repr=False, compare=False)
-    _secrets: Mapping[str, str] = field(repr=False, compare=False)
-    _nginx_password: str = field(repr=False, compare=False)
-
-    @property
-    def nginx_basic_auth(self) -> tuple[str, str]:
-        """Return the synthetic credentials without including them in repr."""
-        return self.nginx_username, self._nginx_password
-
-    def _secret_values(self) -> tuple[str, ...]:
-        return (*self._secrets.values(), self._nginx_password)
-
-    def compose(
-        self,
-        *arguments: str,
-        check: bool = True,
-        timeout_seconds: float = 120.0,
-    ) -> subprocess.CompletedProcess[str]:
-        """Run Compose for this project without exposing synthetic secrets."""
-        return _run_command(
-            ["docker", "compose", *arguments],
-            environment=self._environment,
-            secrets_to_redact=self._secret_values(),
-            check=check,
-            timeout_seconds=timeout_seconds,
-        )
-
-    def compose_with_files(
-        self,
-        compose_files: Sequence[Path],
-        *arguments: str,
-        check: bool = True,
-    ) -> subprocess.CompletedProcess[str]:
-        """Run an isolated test overlay without changing the runtime contract."""
-        command_environment = {
-            **self._environment,
-            "COMPOSE_FILE": os.pathsep.join(str(path) for path in compose_files),
-        }
-        return _run_command(
-            ["docker", "compose", *arguments],
-            environment=command_environment,
-            secrets_to_redact=self._secret_values(),
-            check=check,
-        )
-
-    def inspect_service(self, service_name: str) -> dict[str, object]:
-        """Return Docker's inspect payload for one Compose service."""
-        container_id = self.compose("ps", "--all", "--quiet", service_name)
-        resolved_id = container_id.stdout.strip()
-        if not resolved_id:
-            raise RuntimeError(f"Compose service has no container: {service_name}")
-        result = _run_command(
-            ["docker", "inspect", resolved_id],
-            environment=self._environment,
-            secrets_to_redact=self._secret_values(),
-        )
-        payload = json.loads(result.stdout)
-        if not isinstance(payload, list) or len(payload) != 1:
-            raise RuntimeError("Docker inspect returned an unexpected contract")
-        return payload[0]
-
-    def inspect_image(self, image_reference: str) -> dict[str, object]:
-        """Return Docker's inspect payload for one image built by the fixture."""
-        result = _run_command(
-            ["docker", "image", "inspect", image_reference],
-            environment=self._environment,
-            secrets_to_redact=self._secret_values(),
-        )
-        payload = json.loads(result.stdout)
-        if not isinstance(payload, list) or len(payload) != 1:
-            raise RuntimeError("Docker image inspect returned an unexpected contract")
-        return payload[0]
-
-    def image_history(self, image_reference: str) -> str:
-        """Return full build commands so tests can detect leaked credentials."""
-        result = _run_command(
-            [
-                "docker",
-                "history",
-                "--no-trunc",
-                "--format",
-                "{{json .CreatedBy}}",
-                image_reference,
-            ],
-            environment=self._environment,
-            secrets_to_redact=self._secret_values(),
-        )
-        return result.stdout
-
-    def assert_image_contains_no_runtime_secret(self, image_reference: str) -> None:
-        """Check image metadata and history without exposing compared secrets."""
-        image_metadata = json.dumps(
-            self.inspect_image(image_reference),
-            sort_keys=True,
-        )
-        image_history = self.image_history(image_reference)
-        assert all(
-            secret_value not in image_metadata and secret_value not in image_history
-            for secret_value in self._secret_values()
-        )
-
-    def assert_worker_received_runtime_secrets(self) -> None:
-        """Compare hashes in-container without rendering a credential."""
-        for variable_name, secret_value in self._secrets.items():
-            expected_digest = hashlib.sha256(secret_value.encode()).hexdigest()
-            self.compose(
-                "exec",
-                "-T",
-                "worker",
-                "python",
-                "-c",
-                "import hashlib, os; "
-                f"value = os.environ.get({variable_name!r}, '').encode(); "
-                "actual = hashlib.sha256(value).hexdigest(); "
-                f"raise SystemExit(0 if actual == {expected_digest!r} else 1)",
-            )
-
-    def wait_for_healthy(
-        self,
-        service_name: str,
-        *,
-        timeout_seconds: float = HTTP_READY_TIMEOUT_SECONDS,
-    ) -> None:
-        """Wait for Docker's image healthcheck, not only a running PID."""
-        deadline = time.monotonic() + timeout_seconds
-        last_health = "missing"
-        while time.monotonic() < deadline:
-            inspect_payload = self.inspect_service(service_name)
-            state = inspect_payload.get("State")
-            if not isinstance(state, dict):
-                raise RuntimeError("Docker inspect returned no container state")
-            if state.get("Status") in {"dead", "exited"}:
-                break
-            health = state.get("Health")
-            if isinstance(health, dict):
-                last_health = str(health.get("Status", "missing"))
-                if last_health == "healthy":
-                    return
-                if last_health == "unhealthy":
-                    break
-            time.sleep(POLL_INTERVAL_SECONDS)
-        raise RuntimeError(
-            f"The {service_name} healthcheck did not pass (last status: {last_health})"
-        )
-
-    def start_runtime(self, *, check: bool) -> subprocess.CompletedProcess[str]:
-        """Invoke the same guarded startup used by the systemd example."""
-        command_environment = {
-            name: value
-            for name, value in self._environment.items()
-            if name not in COMPOSE_VARIABLE_NAMES
-        }
-        return _run_command(
-            [str(START_RUNTIME_SCRIPT), str(self.compose_environment_path)],
-            environment=command_environment,
-            secrets_to_redact=self._secret_values(),
-            check=check,
-            timeout_seconds=120.0,
-        )
-
-    def replace_worker_with_exit_code(self, exit_code: int) -> None:
-        """Create a deterministic previous worker state for startup policy tests."""
-        if isinstance(exit_code, bool) or not 1 <= exit_code <= 255:
-            raise ValueError("exit_code must be between 1 and 255")
-        blocked_overlay = self.data_root.parent / "worker-exit.yml"
-        blocked_overlay.write_text(
-            "services:\n"
-            "  worker:\n"
-            f'    command: ["python", "-c", "raise SystemExit({exit_code})"]\n',
-            encoding="utf-8",
-        )
-        self.compose_with_files(
-            [COMPOSE_FILE, blocked_overlay],
-            "config",
-            "--quiet",
-        )
-        self.compose_with_files(
-            [COMPOSE_FILE, blocked_overlay],
-            "up",
-            "--detach",
-            "--no-deps",
-            "--force-recreate",
-            "worker",
-        )
-
-    def replace_worker_with_failing_healthcheck(self) -> None:
-        """Keep the worker running while forcing Docker health to fail."""
-        unhealthy_overlay = self.data_root.parent / "worker-unhealthy.yml"
-        unhealthy_overlay.write_text(
-            "services:\n"
-            "  worker:\n"
-            "    healthcheck:\n"
-            '      test: ["CMD", "python", "-c", "raise SystemExit(1)"]\n'
-            "      interval: 1s\n"
-            "      timeout: 1s\n"
-            "      retries: 1\n"
-            "      start_period: 0s\n"
-            "      start_interval: 1s\n",
-            encoding="utf-8",
-        )
-        self.compose_with_files(
-            [COMPOSE_FILE, unhealthy_overlay],
-            "config",
-            "--quiet",
-        )
-        self.compose_with_files(
-            [COMPOSE_FILE, unhealthy_overlay],
-            "up",
-            "--detach",
-            "--no-deps",
-            "--force-recreate",
-            "worker",
-        )
+def _clean_environment() -> dict[str, str]:
+    """Avoid letting a developer's active Compose environment leak into tests."""
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name != "COMPOSE_FILE"
+        and name != "COMPOSE_PROJECT_NAME"
+        and not name.startswith("GTA_")
+    }
 
 
 def _run_command(
     command: Sequence[str],
     *,
     environment: Mapping[str, str],
-    secrets_to_redact: Sequence[str],
     check: bool = True,
-    timeout_seconds: float = 120.0,
+    timeout_seconds: float = 180.0,
+    secrets_to_redact: Sequence[str] = (),
 ) -> subprocess.CompletedProcess[str]:
     try:
         result = subprocess.run(
@@ -294,78 +63,391 @@ def _run_command(
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError(f"Unable to run command: {command[0]}") from error
+        raise RuntimeError(f"Unable to run {command[0]}") from error
 
     if check and result.returncode != 0:
-        diagnostic = _redact(f"{result.stdout}\n{result.stderr}", secrets_to_redact)
+        output = f"{result.stdout}\n{result.stderr}"
+        for secret_value in secrets_to_redact:
+            output = output.replace(secret_value, "[REDACTED]")
         raise RuntimeError(
-            f"Command failed with exit code {result.returncode}: {diagnostic.strip()}"
+            f"Command failed with exit code {result.returncode}: {output.strip()}"
         )
     return result
 
 
-def _redact(value: str, secrets_to_redact: Sequence[str]) -> str:
-    for secret_value in secrets_to_redact:
-        value = value.replace(secret_value, "[REDACTED]")
-    return value
+def _parse_environment_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, value = line.partition("=")
+        if not separator:
+            raise RuntimeError(f"Invalid environment example: {path.name}")
+        values[name] = value
+    return values
 
 
-def _write_runtime_environment(
-    destination: Path,
-) -> tuple[Path, Path, dict[str, str]]:
-    runtime_secrets = {
-        "LEGACY_TRANSCRIPTION_API_KEY": (
-            f"synthetic-$transcription#-{secrets.token_hex(16)}"
-        ),
-        "GLPI_PASSWORD": f"synthetic-$password#-{secrets.token_hex(16)}",
-        "GLPI_CLIENT_SECRET": f"synthetic-$client#-{secrets.token_hex(16)}",
-    }
+@pytest.fixture
+def render_compose(tmp_path: Path) -> Callable[..., dict[str, object]]:
+    """Render one environment without contacting the Docker daemon."""
 
-    web_environment = destination / "web.env"
-    web_environment.write_text("MAX_UPLOAD_BYTES=26214400\n", encoding="utf-8")
+    def render(
+        environment_name: str,
+        *,
+        release_confirmed: bool = True,
+        include_internal_ca: bool = False,
+        check: bool = True,
+    ) -> dict[str, object] | subprocess.CompletedProcess[str]:
+        environment_root = ENVIRONMENTS_ROOT / environment_name
+        compose_environment = _parse_environment_file(
+            environment_root / "compose.env.example"
+        )
+        versions_file = environment_root / "versions.env"
+        if versions_file.exists():
+            compose_environment.update(_parse_environment_file(versions_file))
 
-    worker_environment = destination / "worker.env"
-    worker_environment.write_text(
-        "\n".join(
-            (
-                "PUBLIC_BASE_URL=https://audio.example.test",
-                "LEGACY_TRANSCRIPTION_BASE_URL=https://transcribe.example.test",
-                "LEGACY_TRANSCRIPTION_API_KEY="
-                f"'{runtime_secrets['LEGACY_TRANSCRIPTION_API_KEY']}'",
-                "TRANSCRIPTION_HTTP_TIMEOUT_SECONDS=1",
-                "TRANSCRIPTION_POLL_INTERVAL_SECONDS=1",
-                "TRANSCRIPTION_JOB_TIMEOUT_SECONDS=10",
-                "GLPI_BASE_URL=https://glpi.example.test",
-                "GLPI_USERNAME=synthetic-worker",
-                f"GLPI_PASSWORD='{runtime_secrets['GLPI_PASSWORD']}'",
-                "GLPI_CLIENT_ID=synthetic-client",
-                f"GLPI_CLIENT_SECRET='{runtime_secrets['GLPI_CLIENT_SECRET']}'",
-                "GLPI_HTTP_TIMEOUT_SECONDS=1",
-                "GLPI_RETRY_INTERVAL_SECONDS=1",
-                "WORKER_SCAN_INTERVAL_SECONDS=1",
-                "GLPI_TICKET_TITLE=Demande audio synthetique",
-                "GLPI_TICKET_TYPE=2",
-                "GLPI_TICKET_URGENCY=3",
-                "GLPI_TICKET_IMPACT=3",
-                "",
+        service_env_names = (
+            "database",
+            "migrations",
+            "web",
+            "worker-automation",
+            "worker-retention",
+        )
+        variable_names = (
+            "GTA_DATABASE_ENV_FILE",
+            "GTA_MIGRATIONS_ENV_FILE",
+            "GTA_WEB_ENV_FILE",
+            "GTA_AUTOMATION_ENV_FILE",
+            "GTA_RETENTION_ENV_FILE",
+        )
+        for service_env_name, variable_name in zip(
+            service_env_names,
+            variable_names,
+            strict=True,
+        ):
+            compose_environment[variable_name] = str(
+                environment_root / "services" / f"{service_env_name}.env.example"
             )
-        ),
-        encoding="utf-8",
+
+        harmless_file = tmp_path / "compose-secret-placeholder"
+        harmless_file.write_text("not-a-secret\n", encoding="utf-8")
+        for variable_name in (
+            "GTA_POSTGRES_PASSWORD_FILE",
+            "GTA_NGINX_TLS_CERTIFICATE_FILE",
+            "GTA_NGINX_TLS_KEY_FILE",
+            "GTA_NGINX_HTPASSWD_FILE",
+        ):
+            compose_environment[variable_name] = str(harmless_file)
+        compose_environment["GTA_NGINX_SECRET_GID"] = str(os.getgid())
+        compose_environment["GTA_POSTGRES_SECRET_GID"] = str(os.getgid())
+        if release_confirmed:
+            compose_environment["GTA_RELEASE_DIGESTS_CONFIRMED"] = "1"
+
+        compose_files = [
+            BASE_COMPOSE_FILE,
+            environment_root / "compose.override.yaml",
+        ]
+        if include_internal_ca:
+            compose_files.append(INTERNAL_CA_COMPOSE_FILE)
+            compose_environment["GTA_CA_BUNDLE"] = str(harmless_file)
+
+        command = ["docker", "compose"]
+        for compose_file in compose_files:
+            command.extend(("-f", str(compose_file)))
+        command.extend(("config", "--format", "json"))
+        result = _run_command(
+            command,
+            environment={**_clean_environment(), **compose_environment},
+            check=check,
+        )
+        if not check:
+            return result
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Compose returned a non-object configuration")
+        return payload
+
+    return render
+
+
+@dataclass(slots=True)
+class DeploymentEnvironment:
+    """Own one isolated disposable development stack."""
+
+    project_name: str
+    compose_environment_file: Path
+    certificate: Path
+    username: str
+    _password: str = field(repr=False)
+    _runtime_secrets: tuple[str, ...] = field(repr=False)
+    _images: tuple[str, ...] = field(repr=False)
+
+    @property
+    def compose_files(self) -> tuple[Path, Path]:
+        return (
+            BASE_COMPOSE_FILE,
+            ENVIRONMENTS_ROOT / "dev" / "compose.override.yaml",
+        )
+
+    def compose(
+        self,
+        *arguments: str,
+        project_name: str | None = None,
+        extra_files: Sequence[Path] = (),
+        check: bool = True,
+        timeout_seconds: float = 180.0,
+    ) -> subprocess.CompletedProcess[str]:
+        command = [
+            "docker",
+            "compose",
+            "--project-name",
+            project_name or self.project_name,
+            "--env-file",
+            str(self.compose_environment_file),
+        ]
+        for compose_file in (*self.compose_files, *extra_files):
+            command.extend(("-f", str(compose_file)))
+        command.extend(arguments)
+        return _run_command(
+            command,
+            environment=_clean_environment(),
+            check=check,
+            timeout_seconds=timeout_seconds,
+            secrets_to_redact=(*self._runtime_secrets, self._password),
+        )
+
+    def inspect_service(
+        self,
+        service_name: str,
+        *,
+        project_name: str | None = None,
+    ) -> dict[str, object]:
+        container_id = self.compose(
+            "ps",
+            "--all",
+            "--quiet",
+            service_name,
+            project_name=project_name,
+        ).stdout.strip()
+        if not container_id:
+            raise RuntimeError(f"Service has no container: {service_name}")
+        result = _run_command(
+            ["docker", "inspect", container_id],
+            environment=_clean_environment(),
+            secrets_to_redact=(*self._runtime_secrets, self._password),
+        )
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, list) or len(payload) != 1:
+            raise RuntimeError("Docker inspect returned an invalid payload")
+        return payload[0]
+
+    def inspect_image_for_service(self, service_name: str) -> dict[str, object]:
+        """Inspect the exact image used by one container in the running stack."""
+        image_id = str(self.inspect_service(service_name)["Image"])
+        result = _run_command(
+            ["docker", "image", "inspect", image_id],
+            environment=_clean_environment(),
+            secrets_to_redact=(*self._runtime_secrets, self._password),
+        )
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, list) or len(payload) != 1:
+            raise RuntimeError("Docker image inspect returned an invalid payload")
+        return payload[0]
+
+    def assert_image_contains_no_runtime_secret(self, service_name: str) -> None:
+        """Scan metadata and full history without rendering a leaked value."""
+        image_id = str(self.inspect_service(service_name)["Image"])
+        metadata = json.dumps(self.inspect_image_for_service(service_name))
+        history = _run_command(
+            ["docker", "history", "--no-trunc", image_id],
+            environment=_clean_environment(),
+            secrets_to_redact=(*self._runtime_secrets, self._password),
+        ).stdout
+        if any(
+            secret in metadata or secret in history
+            for secret in (*self._runtime_secrets, self._password)
+        ):
+            raise AssertionError("A synthetic runtime secret leaked into an image")
+
+    def run_image_python(self, service_name: str, source: str) -> None:
+        """Run one image in isolation under its declared non-root user."""
+        image_id = str(self.inspect_service(service_name)["Image"])
+        _run_command(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--read-only",
+                "--entrypoint",
+                "python",
+                image_id,
+                "-c",
+                source,
+            ],
+            environment=_clean_environment(),
+            secrets_to_redact=(*self._runtime_secrets, self._password),
+        )
+
+    def wait_for_health(self, service_name: str, timeout_seconds: float = 60) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        last_status = "missing"
+        while time.monotonic() < deadline:
+            payload = self.inspect_service(service_name)
+            state = payload.get("State")
+            if not isinstance(state, dict):
+                raise RuntimeError("Container has no state")
+            health = state.get("Health")
+            if isinstance(health, dict):
+                last_status = str(health.get("Status", "missing"))
+                if last_status == "healthy":
+                    return
+            if state.get("Status") in {"dead", "exited"}:
+                break
+            time.sleep(POLL_INTERVAL_SECONDS)
+        raise RuntimeError(f"{service_name} did not become healthy: {last_status}")
+
+    def wait_for_migration(self, timeout_seconds: float = 60) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            payload = self.inspect_service("database-migrations")
+            state = payload.get("State")
+            if isinstance(state, dict) and state.get("Status") == "exited":
+                if state.get("ExitCode") != 0:
+                    raise RuntimeError("database migration failed")
+                return
+            time.sleep(POLL_INTERVAL_SECONDS)
+        raise RuntimeError("database migration did not complete")
+
+    @property
+    def base_url(self) -> str:
+        payload = self.inspect_service("nginx")
+        network = payload.get("NetworkSettings")
+        if not isinstance(network, dict):
+            raise RuntimeError("Nginx has no network settings")
+        ports = network.get("Ports")
+        if not isinstance(ports, dict):
+            raise RuntimeError("Nginx has no published ports")
+        bindings = ports.get("8443/tcp")
+        if not isinstance(bindings, list) or len(bindings) != 1:
+            raise RuntimeError("Nginx has no unique HTTPS binding")
+        return f"https://127.0.0.1:{bindings[0]['HostPort']}"
+
+    def client(self) -> httpx.Client:
+        return httpx.Client(
+            base_url=self.base_url,
+            verify=self.tls_context(),
+            auth=(self.username, self._password),
+            timeout=5,
+        )
+
+    def tls_context(self) -> ssl.SSLContext:
+        """Trust only the disposable certificate generated for this stack."""
+        return ssl.create_default_context(cafile=str(self.certificate))
+
+    def start(self) -> None:
+        self.compose(
+            "up",
+            "--detach",
+            "--wait",
+            "--wait-timeout",
+            "120",
+            timeout_seconds=240,
+        )
+        self.wait_for_migration()
+        services = (
+            "postgres",
+            "web",
+            "worker-automation",
+            "worker-retention",
+            "nginx",
+        )
+        for service_name in services:
+            self.wait_for_health(service_name)
+
+
+def _write_service_environments(
+    runtime_root: Path,
+    database_password: str,
+) -> tuple[dict[str, Path], tuple[str, ...]]:
+    database_url = (
+        "postgresql+psycopg://gta:"
+        f"{database_password}@postgres:5432/glpi_ticketing_automation"
     )
-    web_environment.chmod(0o600)
-    worker_environment.chmod(0o600)
-    return web_environment, worker_environment, runtime_secrets
+    api_key = secrets.token_hex(24)
+    glpi_password = secrets.token_hex(24)
+    glpi_client_secret = secrets.token_hex(24)
+    contents = {
+        "database": f"DATABASE_URL={database_url}\n",
+        "migrations": (
+            "DATABASE_CONNECT_TIMEOUT_SECONDS=2\n"
+            "DATABASE_READY_TIMEOUT_SECONDS=60\n"
+            "DATABASE_READY_INTERVAL_SECONDS=0.25\n"
+        ),
+        "web": (
+            "MAX_UPLOAD_BYTES=1048576\n"
+            "WORKER_HEARTBEAT_INTERVAL_SECONDS=1\n"
+            "DASHBOARD_WORKER_STALE_AFTER_SECONDS=8\n"
+        ),
+        "worker-automation": (
+            "PUBLIC_BASE_URL=https://localhost\n"
+            "WORKER_IDLE_INTERVAL_SECONDS=0.2\n"
+            "WORKER_HEARTBEAT_INTERVAL_SECONDS=1\n"
+            "WORKER_HEALTHCHECK_STALE_AFTER_SECONDS=8\n"
+            "WORKER_RETRY_INITIAL_SECONDS=1\n"
+            "WORKER_RETRY_MAX_SECONDS=2\n"
+            "WORKER_SYSTEM_PROBE_INTERVAL_SECONDS=2\n"
+            "COMPLETED_RETENTION_DAYS=90\n"
+            "FAILED_RETENTION_DAYS=30\n"
+            "BLOCKED_RETENTION_DAYS=90\n"
+            "RETENTION_CHECK_INTERVAL_HOURS=6\n"
+            "LEGACY_TRANSCRIPTION_BASE_URL=http://127.0.0.1:9\n"
+            f"LEGACY_TRANSCRIPTION_API_KEY={api_key}\n"
+            "TRANSCRIPTION_HTTP_TIMEOUT_SECONDS=1\n"
+            "TRANSCRIPTION_POLL_INTERVAL_SECONDS=0.2\n"
+            "TRANSCRIPTION_JOB_TIMEOUT_SECONDS=2\n"
+            "GLPI_BASE_URL=http://127.0.0.1:9\n"
+            "GLPI_USERNAME=synthetic-worker\n"
+            f"GLPI_PASSWORD={glpi_password}\n"
+            "GLPI_CLIENT_ID=synthetic-client\n"
+            f"GLPI_CLIENT_SECRET={glpi_client_secret}\n"
+            "GLPI_HTTP_TIMEOUT_SECONDS=1\n"
+            "GLPI_TICKET_TITLE=Synthetic audio request\n"
+            "GLPI_TICKET_TYPE=2\n"
+            "GLPI_TICKET_URGENCY=3\n"
+            "GLPI_TICKET_IMPACT=3\n"
+        ),
+        "worker-retention": (
+            "WORKER_HEARTBEAT_INTERVAL_SECONDS=1\n"
+            "WORKER_HEALTHCHECK_STALE_AFTER_SECONDS=8\n"
+            "RETENTION_POLL_INTERVAL_SECONDS=0.2\n"
+            "RETENTION_RETRY_INITIAL_SECONDS=1\n"
+            "RETENTION_RETRY_MAX_SECONDS=2\n"
+            "RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS=2\n"
+            "RETENTION_CHECK_INTERVAL_HOURS=6\n"
+            "GLPI_BASE_URL=http://127.0.0.1:9\n"
+            "GLPI_USERNAME=synthetic-worker\n"
+            f"GLPI_PASSWORD={glpi_password}\n"
+            "GLPI_CLIENT_ID=synthetic-client\n"
+            f"GLPI_CLIENT_SECRET={glpi_client_secret}\n"
+            "GLPI_HTTP_TIMEOUT_SECONDS=1\n"
+        ),
+    }
+    paths: dict[str, Path] = {}
+    for service_name, content in contents.items():
+        path = runtime_root / f"{service_name}.env"
+        path.write_text(content, encoding="utf-8")
+        path.chmod(0o600)
+        paths[service_name] = path
+    return paths, (database_password, api_key, glpi_password, glpi_client_secret)
 
 
-def _write_nginx_runtime_files(
-    destination: Path,
-) -> tuple[Path, Path, Path, str, str]:
-    certificate = destination / "nginx.crt"
-    private_key = destination / "nginx.key"
-    htpasswd = destination / "nginx.htpasswd"
-    username = "synthetic-proxy-user"
-    password = f"synthetic-$proxy#-{secrets.token_hex(16)}"
-
+def _write_proxy_secrets(runtime_root: Path) -> tuple[Path, Path, Path, str, str]:
+    certificate = runtime_root / "nginx.crt"
+    private_key = runtime_root / "nginx.key"
+    htpasswd = runtime_root / "nginx.htpasswd"
+    username = "synthetic-user"
+    password = secrets.token_hex(24)
     _run_command(
         [
             "openssl",
@@ -386,270 +468,113 @@ def _write_nginx_runtime_files(
             "-out",
             str(certificate),
         ],
-        environment=os.environ,
-        secrets_to_redact=(password,),
+        environment=_clean_environment(),
     )
-    try:
-        password_result = subprocess.run(
-            ["htpasswd", "-niB", username],
-            cwd=REPOSITORY_ROOT,
-            env=os.environ,
-            input=f"{password}\n",
-            text=True,
-            capture_output=True,
-            timeout=10.0,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError("Unable to generate synthetic proxy credentials") from error
-    password_record = password_result.stdout.strip()
-    expected_prefixes = (f"{username}:$2y$", f"{username}:$2b$")
-    if password_result.returncode != 0 or not password_record.startswith(
-        expected_prefixes
-    ):
-        raise RuntimeError("Unable to generate synthetic proxy credentials")
-
-    htpasswd.write_text(f"{password_record}\n", encoding="utf-8")
+    sha_digest = base64.b64encode(hashlib.sha1(password.encode()).digest()).decode()
+    htpasswd.write_text(f"{username}:{{SHA}}{sha_digest}\n", encoding="utf-8")
     certificate.chmod(0o644)
     private_key.chmod(0o640)
     htpasswd.chmod(0o640)
     return certificate, private_key, htpasswd, username, password
 
 
-def _published_loopback_port(
-    environment: DeploymentEnvironment,
-    service_name: str,
-    target_port: str,
-) -> str:
-    inspect_payload = environment.inspect_service(service_name)
-    network_settings = inspect_payload.get("NetworkSettings")
-    if not isinstance(network_settings, dict):
-        raise RuntimeError(f"The deployment {service_name} has no network settings")
-    ports = network_settings.get("Ports")
-    if not isinstance(ports, dict):
-        raise RuntimeError(f"The deployment {service_name} has no port bindings")
-    port_bindings = ports.get(target_port)
-    if not isinstance(port_bindings, list) or len(port_bindings) != 1:
-        raise RuntimeError(
-            f"The deployment {service_name} has no unique {target_port} binding"
-        )
-    binding = port_bindings[0]
-    if binding.get("HostIp") != "127.0.0.1":
-        raise RuntimeError(
-            f"The deployment {service_name} port is not bound to IPv4 loopback"
-        )
-    host_port = binding.get("HostPort")
-    if not isinstance(host_port, str) or not host_port.isdecimal():
-        raise RuntimeError(f"The deployment {service_name} port binding is invalid")
-    return host_port
-
-
-def _wait_for_nginx(environment: DeploymentEnvironment) -> str:
-    https_port = _published_loopback_port(environment, "nginx", "8443/tcp")
-    base_url = f"https://127.0.0.1:{https_port}"
-    environment.wait_for_healthy("web")
-    environment.wait_for_healthy("nginx")
-    return base_url
-
-
-def _assert_internal_ca_overlay_configuration(
-    runtime_root: Path,
-    command_environment: Mapping[str, str],
-    runtime_secrets: Mapping[str, str],
-) -> None:
-    trust_bundle = runtime_root / "trust-bundle.pem"
-    trust_bundle.write_text("synthetic test trust bundle\n", encoding="utf-8")
-    trust_bundle.chmod(0o644)
-    ca_environment = runtime_root / "compose-ca.env"
-    ca_values = {
-        **{name: command_environment[name] for name in COMPOSE_VARIABLE_NAMES},
-        "COMPOSE_FILE": os.pathsep.join(
-            (str(COMPOSE_FILE), str(INTERNAL_CA_COMPOSE_FILE))
-        ),
-        "GTA_CA_BUNDLE": str(trust_bundle),
-    }
-    ca_environment.write_text(
-        "\n".join(f"{name}={value}" for name, value in ca_values.items()) + "\n",
-        encoding="utf-8",
-    )
-    ca_environment.chmod(0o600)
-    clean_environment = {
-        name: value
-        for name, value in os.environ.items()
-        if name not in COMPOSE_VARIABLE_NAMES and name != "GTA_CA_BUNDLE"
-    }
-    result = _run_command(
-        [
-            "docker",
-            "compose",
-            "--env-file",
-            str(ca_environment),
-            "config",
-            "--format",
-            "json",
-        ],
-        environment=clean_environment,
-        secrets_to_redact=tuple(runtime_secrets.values()),
-    )
-    payload = json.loads(result.stdout)
-    try:
-        worker = payload["services"]["worker"]
-        ssl_cert_file = worker["environment"]["SSL_CERT_FILE"]
-        volume_targets = {volume["target"] for volume in worker["volumes"]}
-    except (KeyError, TypeError) as error:
-        raise RuntimeError(
-            "Internal CA overlay returned an invalid contract"
-        ) from error
-    expected_target = "/etc/ssl/certs/gta-trust-bundle.pem"
-    if ssl_cert_file != expected_target or expected_target not in volume_targets:
-        raise RuntimeError("Internal CA overlay is not present in resolved Compose")
-
-
-def _cleanup(environment: DeploymentEnvironment) -> None:
-    environment.compose(
-        "down",
-        "--remove-orphans",
-        "--timeout",
-        "10",
-        check=False,
-    )
-    _run_command(
-        [
-            "docker",
-            "image",
-            "rm",
-            environment.nginx_image,
-            environment.web_image,
-            environment.worker_image,
-        ],
-        environment=environment._environment,
-        secrets_to_redact=environment._secret_values(),
-        check=False,
-    )
-
-
 @pytest.fixture(scope="session")
 def deployment_environment(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[DeploymentEnvironment]:
-    """Build and start the runtime stack once with an empty audio queue."""
+    """Build, start and finally destroy one complete disposable MVP stack."""
     if os.environ.get("PYTEST_XDIST_WORKER") is not None:
-        pytest.fail("The deployment smoke test must not run with pytest-xdist")
+        pytest.fail("Deployment tests must not be parallelized")
 
-    runtime_root = tmp_path_factory.mktemp("gta-deployment")
-    data_root = runtime_root / "audio"
-    data_root.mkdir()
-    for directory_name in LIFECYCLE_DIRECTORIES:
-        lifecycle_directory = data_root / directory_name
-        lifecycle_directory.mkdir()
-        # Synthetic test data only: fixed runtime UID 10001 must traverse/write it.
-        lifecycle_directory.chmod(0o777)
-
-    web_env, worker_env, runtime_secrets = _write_runtime_environment(runtime_root)
-    (
-        nginx_certificate,
-        nginx_private_key,
-        nginx_htpasswd,
-        nginx_username,
-        nginx_password,
-    ) = _write_nginx_runtime_files(runtime_root)
-    project_name = f"gtadeploy{secrets.token_hex(6)}"
-    image_tag = "smoke"
-    nginx_image = f"{project_name}-nginx:{image_tag}"
-    web_image = f"{project_name}-web:{image_tag}"
-    worker_image = f"{project_name}-worker:{image_tag}"
-    command_environment: dict[str, str] = {
-        **os.environ,
-        "COMPOSE_FILE": str(COMPOSE_FILE),
+    runtime_root = tmp_path_factory.mktemp("gta-mvp-deployment")
+    database_password = secrets.token_hex(24)
+    postgres_password = runtime_root / "postgres.password"
+    postgres_password.write_text(f"{database_password}\n", encoding="utf-8")
+    postgres_password.chmod(0o640)
+    service_envs, runtime_secrets = _write_service_environments(
+        runtime_root,
+        database_password,
+    )
+    certificate, private_key, htpasswd, username, password = _write_proxy_secrets(
+        runtime_root
+    )
+    project_name = f"gtamvp{secrets.token_hex(5)}"
+    compose_environment_file = runtime_root / "compose.env"
+    values = {
         "COMPOSE_PROJECT_NAME": project_name,
-        "GTA_DATA_ROOT": str(data_root),
+        "GTA_POSTGRES_DB": "glpi_ticketing_automation",
+        "GTA_POSTGRES_USER": "gta",
+        "GTA_POSTGRES_PASSWORD_FILE": str(postgres_password),
+        "GTA_POSTGRES_SECRET_GID": str(os.getgid()),
+        "GTA_MIGRATIONS_IMAGE": f"{project_name}/database-migrations:smoke",
+        "GTA_WEB_IMAGE": f"{project_name}/web:smoke",
+        "GTA_AUTOMATION_IMAGE": f"{project_name}/worker-automation:smoke",
+        "GTA_RETENTION_IMAGE": f"{project_name}/worker-retention:smoke",
+        "GTA_NGINX_IMAGE": f"{project_name}/nginx:smoke",
+        "GTA_IMAGE_VERSION": "smoke",
+        "GTA_VCS_REF": "0" * 40,
+        "GTA_DATABASE_ENV_FILE": str(service_envs["database"]),
+        "GTA_MIGRATIONS_ENV_FILE": str(service_envs["migrations"]),
+        "GTA_WEB_ENV_FILE": str(service_envs["web"]),
+        "GTA_AUTOMATION_ENV_FILE": str(service_envs["worker-automation"]),
+        "GTA_RETENTION_ENV_FILE": str(service_envs["worker-retention"]),
         "GTA_NGINX_BIND_IP": "127.0.0.1",
         "GTA_NGINX_HTTPS_PORT": "0",
-        "GTA_NGINX_TLS_CERTIFICATE_FILE": str(nginx_certificate),
-        "GTA_NGINX_TLS_KEY_FILE": str(nginx_private_key),
-        "GTA_NGINX_HTPASSWD_FILE": str(nginx_htpasswd),
+        "GTA_NGINX_TLS_CERTIFICATE_FILE": str(certificate),
+        "GTA_NGINX_TLS_KEY_FILE": str(private_key),
+        "GTA_NGINX_HTPASSWD_FILE": str(htpasswd),
         "GTA_NGINX_SECRET_GID": str(os.getgid()),
-        "GTA_WEB_ENV_FILE": str(web_env),
-        "GTA_WORKER_ENV_FILE": str(worker_env),
-        "GTA_IMAGE_TAG": image_tag,
-        "GTA_VCS_REF": "0" * 40,
-        "GTA_NGINX_IMAGE": f"{project_name}-nginx",
-        "GTA_WEB_IMAGE": f"{project_name}-web",
-        "GTA_WORKER_IMAGE": f"{project_name}-worker",
     }
-    compose_environment_path = runtime_root / "compose.env"
-    compose_environment_path.write_text(
-        "\n".join(
-            f"{name}={command_environment[name]}"
-            for name in (
-                "COMPOSE_FILE",
-                "COMPOSE_PROJECT_NAME",
-                "GTA_DATA_ROOT",
-                "GTA_NGINX_BIND_IP",
-                "GTA_NGINX_HTTPS_PORT",
-                "GTA_NGINX_TLS_CERTIFICATE_FILE",
-                "GTA_NGINX_TLS_KEY_FILE",
-                "GTA_NGINX_HTPASSWD_FILE",
-                "GTA_NGINX_SECRET_GID",
-                "GTA_WEB_ENV_FILE",
-                "GTA_WORKER_ENV_FILE",
-                "GTA_IMAGE_TAG",
-                "GTA_VCS_REF",
-                "GTA_NGINX_IMAGE",
-                "GTA_WEB_IMAGE",
-                "GTA_WORKER_IMAGE",
-            )
-        )
-        + "\n",
+    compose_environment_file.write_text(
+        "\n".join(f"{name}={value}" for name, value in values.items()) + "\n",
         encoding="utf-8",
     )
-    compose_environment_path.chmod(0o600)
+    compose_environment_file.chmod(0o600)
     environment = DeploymentEnvironment(
         project_name=project_name,
-        data_root=data_root,
-        base_url="",
-        nginx_certificate=nginx_certificate,
-        nginx_image=nginx_image,
-        web_image=web_image,
-        worker_image=worker_image,
-        nginx_username=nginx_username,
-        compose_environment_path=compose_environment_path,
-        _environment=command_environment,
-        _secrets=runtime_secrets,
-        _nginx_password=nginx_password,
+        compose_environment_file=compose_environment_file,
+        certificate=certificate,
+        username=username,
+        _password=password,
+        _runtime_secrets=runtime_secrets,
+        _images=tuple(
+            values[variable_name]
+            for variable_name in (
+                "GTA_MIGRATIONS_IMAGE",
+                "GTA_WEB_IMAGE",
+                "GTA_AUTOMATION_IMAGE",
+                "GTA_RETENTION_IMAGE",
+                "GTA_NGINX_IMAGE",
+            )
+        ),
     )
-
+    environment.compose("build", timeout_seconds=10 * 60)
+    environment.start()
     try:
-        _run_command(
-            ["docker", "info", "--format", "{{json .ServerVersion}}"],
-            environment=command_environment,
-            secrets_to_redact=tuple(runtime_secrets.values()),
-        )
-        environment.compose("config", "--quiet")
-        _assert_internal_ca_overlay_configuration(
-            runtime_root,
-            command_environment,
-            runtime_secrets,
-        )
-        environment.compose("build", timeout_seconds=10 * 60.0)
-        environment.compose("up", "--detach", "web", "nginx")
-
-        base_url = _wait_for_nginx(environment)
-
-        ready_environment = DeploymentEnvironment(
-            project_name=environment.project_name,
-            data_root=environment.data_root,
-            base_url=base_url,
-            nginx_certificate=environment.nginx_certificate,
-            nginx_image=environment.nginx_image,
-            web_image=environment.web_image,
-            worker_image=environment.worker_image,
-            nginx_username=environment.nginx_username,
-            compose_environment_path=environment.compose_environment_path,
-            _environment=environment._environment,
-            _secrets=environment._secrets,
-            _nginx_password=environment._nginx_password,
-        )
-        yield ready_environment
+        yield environment
     finally:
-        _cleanup(environment)
+        environment.compose(
+            "down",
+            "--volumes",
+            "--remove-orphans",
+            "--timeout",
+            "10",
+            check=False,
+        )
+        _run_command(
+            ["docker", "image", "rm", "--force", *environment._images],
+            environment=_clean_environment(),
+            check=False,
+            secrets_to_redact=(*runtime_secrets, password),
+        )
+
+
+__all__ = [
+    "ALL_SERVICES",
+    "BASE_COMPOSE_FILE",
+    "CUSTOM_SERVICES",
+    "DOCKER_ROOT",
+    "DeploymentEnvironment",
+    "ENVIRONMENTS_ROOT",
+    "INTERNAL_CA_COMPOSE_FILE",
+]

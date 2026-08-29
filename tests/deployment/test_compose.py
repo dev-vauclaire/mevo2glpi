@@ -1,392 +1,631 @@
-"""Smoke the deployable images and their least-privilege Compose contract."""
+"""Validate the isolated dev, staging and production Compose contracts."""
 
 from __future__ import annotations
 
-import ssl
+import json
+import re
+import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 from uuid import UUID
 
 import httpx
 import pytest
 
-if TYPE_CHECKING:
-    from .conftest import DeploymentEnvironment
+from .conftest import (
+    ALL_SERVICES,
+    BASE_COMPOSE_FILE,
+    CUSTOM_SERVICES,
+    DOCKER_ROOT,
+    ENVIRONMENTS_ROOT,
+    DeploymentEnvironment,
+)
 
-pytestmark = [pytest.mark.deployment, pytest.mark.timeout(10 * 60)]
+pytestmark = [pytest.mark.deployment, pytest.mark.timeout(15 * 60)]
 
-
-def test_runtime_layout_separates_service_images() -> None:
-    repository_root = Path(__file__).resolve().parents[2]
-    docker_root = repository_root / "infra" / "docker"
-    compose_file = docker_root / "docker-compose.prod.yaml"
-    nginx_dockerfile = docker_root / "nginx" / "Dockerfile"
-    web_dockerfile = docker_root / "web" / "Dockerfile"
-    worker_dockerfile = docker_root / "worker" / "Dockerfile"
-
-    assert compose_file.is_file()
-    assert nginx_dockerfile.is_file()
-    assert web_dockerfile.is_file()
-    assert worker_dockerfile.is_file()
-    assert (docker_root / ".env.example").is_file()
-    assert (docker_root / "web" / "web.env.example").is_file()
-    assert (docker_root / "worker" / "worker.env.example").is_file()
-    assert (docker_root / "nginx" / "nginx.conf").is_file()
-    assert not (repository_root / "deploy").exists()
-
-    compose_contract = compose_file.read_text(encoding="utf-8")
-    assert "context: ./nginx" in compose_contract
-    assert "dockerfile: infra/docker/web/Dockerfile" in compose_contract
-    assert "dockerfile: infra/docker/worker/Dockerfile" in compose_contract
-    assert "target: web-runtime" not in compose_contract
-    assert "target: worker-runtime" not in compose_contract
-
-    assert 'ENTRYPOINT ["/usr/sbin/nginx"]' in nginx_dockerfile.read_text(
-        encoding="utf-8"
-    )
-    assert 'CMD ["glpi-ticketing-web"]' in web_dockerfile.read_text(encoding="utf-8")
-    assert 'CMD ["glpi-ticketing-worker"]' in worker_dockerfile.read_text(
-        encoding="utf-8"
-    )
+POSTGRES_REFERENCE = (
+    "postgres:16.10-alpine@"
+    "sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297"
+)
+ZERO_DIGEST = "0" * 64
+SYNTHETIC_AUDIO = b"RIFF\x10\x00\x00\x00WAVEfmt \x00\x00\x00\x00data"
 
 
-def _assert_runtime_hardening(
-    inspect_payload: dict[str, object],
-    *,
-    restart_policy: str,
-    runtime_user: str,
-    added_capabilities: frozenset[str] = frozenset(),
-) -> None:
-    config = inspect_payload["Config"]
-    host_config = inspect_payload["HostConfig"]
-    assert isinstance(config, dict)
-    assert isinstance(host_config, dict)
-    healthcheck = config.get("Healthcheck")
-    assert isinstance(healthcheck, dict)
-    assert healthcheck["Test"][0] == "CMD"
-    assert config["User"] == runtime_user
-    assert host_config["ReadonlyRootfs"] is True
-    assert host_config["CapDrop"] == ["ALL"]
-    actual_capabilities = {
-        str(capability).removeprefix("CAP_")
-        for capability in (host_config["CapAdd"] or [])
+def _services(config: dict[str, object]) -> dict[str, dict[str, Any]]:
+    services = config.get("services")
+    assert isinstance(services, dict)
+    return services
+
+
+def _volume_for(service: dict[str, Any], target: str) -> dict[str, Any] | None:
+    for volume in service.get("volumes", []):
+        if volume["target"] == target:
+            return volume
+    return None
+
+
+def test_runtime_layout_has_one_base_and_three_environment_overlays() -> None:
+    assert BASE_COMPOSE_FILE.is_file()
+    assert (DOCKER_ROOT / "compose.internal-ca.yaml").is_file()
+    assert not (DOCKER_ROOT / "docker-compose.prod.yaml").exists()
+    assert not (DOCKER_ROOT / "prepare-host.sh").exists()
+    assert not (DOCKER_ROOT / "worker" / "start-runtime.sh").exists()
+
+    dockerfiles = {
+        "database-migrations": "database-migrations/Dockerfile",
+        "web": "web/Dockerfile",
+        "worker-automation": "worker-automation/Dockerfile",
+        "worker-retention": "worker-retention/Dockerfile",
+        "nginx": "nginx/Dockerfile",
     }
-    assert actual_capabilities == added_capabilities
-    assert "no-new-privileges:true" in host_config["SecurityOpt"]
-    assert host_config["RestartPolicy"]["Name"] == restart_policy
+    for relative_path in dockerfiles.values():
+        assert (DOCKER_ROOT / relative_path).is_file()
+
+    for environment_name in ("dev", "staging", "prod"):
+        root = ENVIRONMENTS_ROOT / environment_name
+        assert (root / "compose.override.yaml").is_file()
+        assert (root / "compose.env.example").is_file()
+        for service_env in (
+            "database",
+            "migrations",
+            "web",
+            "worker-automation",
+            "worker-retention",
+        ):
+            assert (root / "services" / f"{service_env}.env.example").is_file()
+    assert (ENVIRONMENTS_ROOT / "staging" / "versions.env").is_file()
+    assert (ENVIRONMENTS_ROOT / "prod" / "versions.env").is_file()
 
 
-def _wait_for_running_worker(environment: DeploymentEnvironment) -> None:
-    deadline = time.monotonic() + 15.0
-    last_status = "missing"
-    while time.monotonic() < deadline:
-        payload = environment.inspect_service("worker")
-        state = payload["State"]
-        assert isinstance(state, dict)
-        last_status = str(state["Status"])
-        if last_status == "running":
-            return
-        if last_status in {"dead", "exited"}:
-            break
-        time.sleep(0.25)
-    raise AssertionError(f"worker did not remain running (last status: {last_status})")
+def test_compose_cli_supports_gateway_priority() -> None:
+    result = subprocess.run(
+        ["docker", "compose", "version", "--short"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    match = re.match(r"v?(\d+)\.(\d+)\.(\d+)", result.stdout.strip())
+    assert match is not None
+    version = tuple(int(component) for component in match.groups())
+    assert version >= (2, 33, 1)
 
 
-def _wait_for_worker_exit_code(
-    environment: DeploymentEnvironment,
-    expected_exit_code: int,
-) -> dict[str, object]:
-    deadline = time.monotonic() + 15.0
-    while time.monotonic() < deadline:
-        payload = environment.inspect_service("worker")
-        state = payload["State"]
-        assert isinstance(state, dict)
-        if state["Status"] == "exited":
-            assert state["ExitCode"] == expected_exit_code
-            return payload
-        time.sleep(0.25)
-    raise AssertionError("worker did not reach its expected terminal state")
+@pytest.mark.parametrize("environment_name", ["dev", "staging", "prod"])
+def test_every_environment_renders_an_isolated_complete_stack(
+    environment_name: str,
+    render_compose: Callable[..., dict[str, object]],
+) -> None:
+    config = render_compose(environment_name)
+    services = _services(config)
+
+    assert config["name"] == f"gta-{environment_name}"
+    assert set(services) == set(ALL_SERVICES)
+    assert services["postgres"]["image"] == POSTGRES_REFERENCE
+    assert set(config["volumes"]) == {"audio-data", "postgres-data"}
+    assert config["volumes"]["audio-data"]["name"] == (
+        f"gta-{environment_name}_audio-data"
+    )
+    assert config["volumes"]["postgres-data"]["name"] == (
+        f"gta-{environment_name}_postgres-data"
+    )
+
+    for service_name, service in services.items():
+        port_bindings = service.get("ports", [])
+        if service_name == "nginx":
+            assert len(port_bindings) == 1
+            assert port_bindings[0]["target"] == 8443
+        else:
+            assert not port_bindings
+
+    expected_database_url = (
+        "postgresql+psycopg://gta:CHANGE_ME@postgres:5432/glpi_ticketing_automation"
+    )
+    for service_name in (
+        "database-migrations",
+        "web",
+        "worker-automation",
+        "worker-retention",
+    ):
+        assert services[service_name]["environment"]["DATABASE_URL"] == (
+            expected_database_url
+        )
 
 
-def _wait_for_worker_health(
-    environment: DeploymentEnvironment,
-    expected_health: str,
-) -> dict[str, object]:
-    deadline = time.monotonic() + 15.0
-    while time.monotonic() < deadline:
-        payload = environment.inspect_service("worker")
-        state = payload["State"]
-        assert isinstance(state, dict)
-        health = state.get("Health")
-        assert isinstance(health, dict)
-        if health["Status"] == expected_health:
-            return payload
-        time.sleep(0.25)
-    raise AssertionError(f"worker did not become {expected_health}")
+def test_dependencies_and_networks_gate_application_startup(
+    render_compose: Callable[..., dict[str, object]],
+) -> None:
+    services = _services(render_compose("dev"))
+
+    assert services["database-migrations"]["depends_on"] == {
+        "postgres": {
+            "condition": "service_healthy",
+            "required": True,
+        }
+    }
+    for service_name in ("web", "worker-automation", "worker-retention"):
+        assert services[service_name]["depends_on"] == {
+            "database-migrations": {
+                "condition": "service_completed_successfully",
+                "required": True,
+            }
+        }
+    assert services["nginx"]["depends_on"] == {
+        "web": {
+            "condition": "service_healthy",
+            "required": True,
+        }
+    }
+
+    assert set(services["postgres"]["networks"]) == {"database-private"}
+    assert set(services["database-migrations"]["networks"]) == {"database-private"}
+    assert set(services["web"]["networks"]) == {
+        "database-private",
+        "web-private",
+    }
+    for worker_name in ("worker-automation", "worker-retention"):
+        assert set(services[worker_name]["networks"]) == {
+            "database-private",
+            "worker-egress",
+        }
+        assert services[worker_name]["networks"]["worker-egress"]["gw_priority"] == 1
+    assert set(services["nginx"]["networks"]) == {"proxy-edge", "web-private"}
+    assert services["nginx"]["networks"]["proxy-edge"]["gw_priority"] == 1
+    assert "database-private" not in services["nginx"]["networks"]
 
 
-def test_runtime_compose_smoke(
+def test_audio_access_is_least_privilege_and_migration_has_no_audio(
+    render_compose: Callable[..., dict[str, object]],
+) -> None:
+    services = _services(render_compose("dev"))
+
+    assert _volume_for(services["database-migrations"], "/data/audios") is None
+    web_audio = _volume_for(services["web"], "/data/audios")
+    automation_audio = _volume_for(services["worker-automation"], "/data/audios")
+    retention_audio = _volume_for(services["worker-retention"], "/data/audios")
+    assert web_audio is not None and web_audio.get("read_only", False) is False
+    assert automation_audio is not None and automation_audio["read_only"] is True
+    assert (
+        retention_audio is not None and retention_audio.get("read_only", False) is False
+    )
+    assert {
+        web_audio["source"],
+        automation_audio["source"],
+        retention_audio["source"],
+    } == {"audio-data"}
+
+
+def test_restart_and_hardening_contracts_are_explicit(
+    render_compose: Callable[..., dict[str, object]],
+) -> None:
+    services = _services(render_compose("dev"))
+
+    assert services["postgres"]["user"] == "70:70"
+    assert services["postgres"]["read_only"] is True
+    assert services["postgres"]["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in services["postgres"]["security_opt"]
+    assert services["postgres"]["restart"] == "unless-stopped"
+    assert services["database-migrations"]["restart"] == "no"
+    assert services["web"]["restart"] == "unless-stopped"
+    assert services["nginx"]["restart"] == "unless-stopped"
+    for worker_name in ("worker-automation", "worker-retention"):
+        assert services[worker_name]["restart"] == "on-failure:5"
+    for service_name in CUSTOM_SERVICES:
+        service = services[service_name]
+        assert service["read_only"] is True
+        assert service["cap_drop"] == ["ALL"]
+        assert "no-new-privileges:true" in service["security_opt"]
+
+
+def test_dev_builds_locally_while_promoted_environments_are_image_only(
+    render_compose: Callable[..., dict[str, object]],
+) -> None:
+    dev_services = _services(render_compose("dev"))
+    for service_name in CUSTOM_SERVICES:
+        assert "build" in dev_services[service_name]
+
+    digest_pattern = re.compile(r"@sha256:[0-9a-f]{64}\Z")
+    for environment_name in ("staging", "prod"):
+        promoted_services = _services(render_compose(environment_name))
+        for service_name in CUSTOM_SERVICES:
+            service = promoted_services[service_name]
+            assert "build" not in service
+            assert digest_pattern.search(service["image"])
+            assert service["pull_policy"] == "missing"
+
+
+@pytest.mark.parametrize("environment_name", ["staging", "prod"])
+def test_promoted_environment_refuses_unconfirmed_sentinel_digests(
+    environment_name: str,
+    render_compose: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    rejected = render_compose(
+        environment_name,
+        release_confirmed=False,
+        check=False,
+    )
+    assert rejected.returncode != 0
+    assert "replace zero digests" in rejected.stderr
+
+    versions = (ENVIRONMENTS_ROOT / environment_name / "versions.env").read_text(
+        encoding="utf-8"
+    )
+    assert versions.count(f"@sha256:{ZERO_DIGEST}") == len(CUSTOM_SERVICES)
+    assert not any(
+        line.startswith("GTA_RELEASE_DIGESTS_CONFIRMED=")
+        for line in versions.splitlines()
+    )
+
+
+def test_database_url_is_declared_once_per_environment() -> None:
+    for environment_name in ("dev", "staging", "prod"):
+        service_root = ENVIRONMENTS_ROOT / environment_name / "services"
+        database_example = service_root / "database.env.example"
+        assert database_example.read_text(encoding="utf-8").count("DATABASE_URL=") == 1
+        for service_name in (
+            "migrations",
+            "web",
+            "worker-automation",
+            "worker-retention",
+        ):
+            assert "DATABASE_URL=" not in (
+                service_root / f"{service_name}.env.example"
+            ).read_text(encoding="utf-8")
+
+
+def test_internal_ca_overlay_targets_both_workers_only(
+    render_compose: Callable[..., dict[str, object]],
+) -> None:
+    services = _services(render_compose("dev", include_internal_ca=True))
+    target = "/etc/ssl/certs/gta-trust-bundle.pem"
+    for worker_name in ("worker-automation", "worker-retention"):
+        assert services[worker_name]["environment"]["SSL_CERT_FILE"] == target
+        ca_volume = _volume_for(services[worker_name], target)
+        assert ca_volume is not None and ca_volume["read_only"] is True
+    for service_name in ("postgres", "database-migrations", "web", "nginx"):
+        assert "SSL_CERT_FILE" not in services[service_name].get("environment", {})
+
+
+def test_runtime_environment_examples_contain_no_real_secret() -> None:
+    for path in ENVIRONMENTS_ROOT.rglob("*.env*"):
+        content = path.read_text(encoding="utf-8")
+        if path.name.endswith(".example"):
+            assert re.search(r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])", content) is None
+        if path.name.endswith(".example") and "worker" in path.name:
+            assert "WORKER_HEALTHCHECK_STALE_AFTER_SECONDS=45" in content
+
+
+def test_runtime_stack_reports_fresh_workers_through_nginx(
     deployment_environment: DeploymentEnvironment,
 ) -> None:
     environment = deployment_environment
-    tls_context = ssl.create_default_context(cafile=str(environment.nginx_certificate))
-
     with httpx.Client(
         base_url=environment.base_url,
-        timeout=3.0,
-        verify=tls_context,
-    ) as anonymous_client:
-        unauthorized_response = anonymous_client.get("/")
+        verify=environment.tls_context(),
+        timeout=5,
+    ) as anonymous:
+        unauthorized = anonymous.get("/api/observability")
+    assert unauthorized.status_code == httpx.codes.UNAUTHORIZED
 
-    with httpx.Client(
-        base_url=environment.base_url,
-        timeout=3.0,
-        verify=tls_context,
-        auth=environment.nginx_basic_auth,
-    ) as client:
-        health_response = client.get("/health")
-        redirect_response = client.get("/health/", follow_redirects=False)
-        index_response = client.get("/")
-        upload_response = client.post(
-            "/audios",
-            files={"audio_file": ("smoke.wav", b"RIFFsynthetic", "audio/wav")},
-        )
-        nginx_id_before_web_recreate = environment.inspect_service("nginx")["Id"]
+    with environment.client() as client:
+        health = client.get("/health")
+        deadline = time.monotonic() + 10
+        observed: dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            response = client.get("/api/observability")
+            response.raise_for_status()
+            candidate = response.json()
+            if all(
+                worker["heartbeat_status"] == "fresh" for worker in candidate["workers"]
+            ):
+                observed = candidate
+                break
+            time.sleep(0.25)
+
+    assert health.json() == {"status": "ok"}
+    assert observed is not None
+    assert {worker["service_name"] for worker in observed["workers"]} == {
+        "worker_automation",
+        "worker_retention",
+    }
+
+    migration_state = environment.inspect_service("database-migrations")["State"]
+    assert isinstance(migration_state, dict)
+    assert migration_state["Status"] == "exited"
+    assert migration_state["ExitCode"] == 0
+
+
+def test_only_nginx_is_published_and_runtime_restart_is_bounded(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    environment = deployment_environment
+    for service_name in ALL_SERVICES:
+        payload = environment.inspect_service(service_name)
+        network = payload["NetworkSettings"]
+        assert isinstance(network, dict)
+        published = {
+            container_port: bindings
+            for container_port, bindings in (network.get("Ports") or {}).items()
+            if bindings is not None
+        }
+        if service_name == "nginx":
+            assert set(published) == {"8443/tcp"}
+            assert published["8443/tcp"][0]["HostIp"] == "127.0.0.1"
+        else:
+            assert published == {}
+
+    expected_policies = {
+        "postgres": ("unless-stopped", 0),
+        "database-migrations": ("no", 0),
+        "web": ("unless-stopped", 0),
+        "worker-automation": ("on-failure", 5),
+        "worker-retention": ("on-failure", 5),
+        "nginx": ("unless-stopped", 0),
+    }
+    for service_name, (policy_name, maximum_retries) in expected_policies.items():
+        host_config = environment.inspect_service(service_name)["HostConfig"]
+        assert isinstance(host_config, dict)
+        restart_policy = host_config["RestartPolicy"]
+        assert restart_policy["Name"] == policy_name
+        assert restart_policy["MaximumRetryCount"] == maximum_retries
+
+
+def test_runtime_images_are_minimal_non_root_and_contain_no_secret(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    environment = deployment_environment
+    postgres = environment.inspect_service("postgres")
+    postgres_config = postgres["Config"]
+    postgres_host_config = postgres["HostConfig"]
+    assert isinstance(postgres_config, dict)
+    assert isinstance(postgres_host_config, dict)
+    assert postgres_config["User"] == "70:70"
+    assert postgres_host_config["ReadonlyRootfs"] is True
+    assert postgres_host_config["CapDrop"] == ["ALL"]
+    assert "no-new-privileges:true" in postgres_host_config["SecurityOpt"]
+
+    expected_users = {
+        "database-migrations": "10001:10001",
+        "web": "10001:10001",
+        "worker-automation": "10001:10001",
+        "worker-retention": "10001:10001",
+        "nginx": "101:101",
+    }
+    python_probe = (
+        "import importlib.util, os, shutil; from pathlib import Path; "
+        "assert os.getuid() == 10001; "
+        "assert importlib.util.find_spec('pytest') is None; "
+        "assert shutil.which('uv') is None; "
+        "assert not Path('/app/.env').exists(); "
+        "assert not Path('/app/pyproject.toml').exists(); "
+        "assert not Path('/app/apps').exists(); "
+        "assert not Path('/app/packages').exists(); "
+        "assert not Path('/app/src').exists()"
+    )
+
+    for service_name, expected_user in expected_users.items():
+        container = environment.inspect_service(service_name)
+        host_config = container["HostConfig"]
+        assert isinstance(host_config, dict)
+        assert host_config["ReadonlyRootfs"] is True
+        assert host_config["CapDrop"] == ["ALL"]
+        assert "no-new-privileges:true" in host_config["SecurityOpt"]
+        image = environment.inspect_image_for_service(service_name)
+        image_config = image["Config"]
+        assert isinstance(image_config, dict)
+        assert image_config["User"] == expected_user
+        labels = image_config["Labels"]
+        assert labels["org.opencontainers.image.version"] == "smoke"
+        assert labels["org.opencontainers.image.revision"] == "0" * 40
+        environment.assert_image_contains_no_runtime_secret(service_name)
+        if service_name != "nginx":
+            environment.run_image_python(service_name, python_probe)
+
+
+def test_named_audio_permissions_and_secret_mounts_are_effective(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    environment = deployment_environment
+    write_probe = (
+        "from pathlib import Path; "
+        "path=Path('/data/audios/.deployment-probe'); "
+        "path.write_text('ok'); path.unlink()"
+    )
+    environment.compose("exec", "-T", "web", "python", "-c", write_probe)
+    automation_write = environment.compose(
+        "exec",
+        "-T",
+        "worker-automation",
+        "python",
+        "-c",
+        write_probe,
+        check=False,
+    )
+    assert automation_write.returncode != 0
+    environment.compose("exec", "-T", "worker-retention", "python", "-c", write_probe)
+
+    migration_mounts = environment.inspect_service("database-migrations")["Mounts"]
+    assert all(mount["Destination"] != "/data/audios" for mount in migration_mounts)
+    postgres = environment.inspect_service("postgres")
+    postgres_mounts = {mount["Destination"]: mount for mount in postgres["Mounts"]}
+    assert postgres_mounts["/run/secrets/postgres_password"]["RW"] is False
+    environment.compose(
+        "exec",
+        "-T",
+        "postgres",
+        "sh",
+        "-ec",
+        "test -r /run/secrets/postgres_password",
+    )
+    assert all(
+        secret not in json.dumps(postgres) for secret in environment._runtime_secrets
+    )
+
+
+def test_migration_is_idempotent(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    first = deployment_environment.compose("run", "--rm", "database-migrations")
+    second = deployment_environment.compose("run", "--rm", "database-migrations")
+    assert first.returncode == 0
+    assert second.returncode == 0
+
+
+def test_cooperative_worker_stop_does_not_trigger_restart(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    environment = deployment_environment
+    environment.compose("stop", "--timeout", "15", "worker-automation")
+    stopped = environment.inspect_service("worker-automation")
+    state = stopped["State"]
+    assert isinstance(state, dict)
+    assert state["Status"] == "exited"
+    assert state["ExitCode"] == 0
+    assert stopped["RestartCount"] == 0
+
+    environment.compose("up", "--detach", "--no-deps", "worker-automation")
+    environment.wait_for_health("worker-automation")
+
+
+def test_unexpected_worker_failure_restarts_five_times_then_stops(
+    deployment_environment: DeploymentEnvironment,
+    tmp_path: Path,
+) -> None:
+    environment = deployment_environment
+    project_name = f"{environment.project_name}restart"
+    overlay = tmp_path / "worker-failure.yaml"
+    overlay.write_text(
+        "services:\n"
+        "  worker-automation:\n"
+        '    entrypoint: ["python", "-c"]\n'
+        '    command: ["raise SystemExit(1)"]\n',
+        encoding="utf-8",
+    )
+    try:
         environment.compose(
             "up",
             "--detach",
-            "--no-deps",
-            "--force-recreate",
-            "web",
+            "worker-automation",
+            project_name=project_name,
+            extra_files=(overlay,),
         )
-        environment.wait_for_healthy("web")
-        deadline = time.monotonic() + 15.0
-        recovered_health_response: httpx.Response | None = None
+        deadline = time.monotonic() + 30
+        terminal: dict[str, object] | None = None
         while time.monotonic() < deadline:
-            try:
-                candidate = client.get("/health")
-                if candidate.status_code == httpx.codes.OK:
-                    recovered_health_response = candidate
-                    break
-            except httpx.HTTPError:
-                pass
+            candidate = environment.inspect_service(
+                "worker-automation",
+                project_name=project_name,
+            )
+            state = candidate["State"]
+            assert isinstance(state, dict)
+            if state["Status"] == "exited" and candidate["RestartCount"] == 5:
+                terminal = candidate
+                break
             time.sleep(0.25)
-
-    assert unauthorized_response.status_code == httpx.codes.UNAUTHORIZED
-    assert unauthorized_response.headers["www-authenticate"].startswith("Basic")
-    assert health_response.json() == {"status": "ok"}
-    assert redirect_response.status_code == httpx.codes.TEMPORARY_REDIRECT
-    assert redirect_response.headers["location"] == f"{environment.base_url}/health"
-    assert recovered_health_response is not None
-    assert recovered_health_response.json() == {"status": "ok"}
-    assert environment.inspect_service("nginx")["Id"] == nginx_id_before_web_recreate
-    assert "Déposer un audio" in index_response.text
-    assert 'action="/audios"' in index_response.text
-    assert upload_response.status_code == httpx.codes.ACCEPTED
-
-    location = upload_response.headers["location"]
-    audio_uuid = UUID(location.removeprefix("/audios/"))
-    pending_audio = environment.data_root / "pending" / f"{audio_uuid}.wav"
-    assert pending_audio.read_bytes() == b"RIFFsynthetic"
-    pending_audio.unlink()
-
-    web_inspect = environment.inspect_service("web")
-    _assert_runtime_hardening(
-        web_inspect,
-        restart_policy="unless-stopped",
-        runtime_user="10001:10001",
-    )
-    network_settings = web_inspect["NetworkSettings"]
-    assert isinstance(network_settings, dict)
-    port_bindings = network_settings["Ports"]["8000/tcp"]
-    assert port_bindings is None
-    assert set(network_settings["Networks"]) == {
-        f"{environment.project_name}_web-private"
-    }
-
-    nginx_inspect = environment.inspect_service("nginx")
-    _assert_runtime_hardening(
-        nginx_inspect,
-        restart_policy="unless-stopped",
-        runtime_user="101:101",
-    )
-    nginx_network_settings = nginx_inspect["NetworkSettings"]
-    assert isinstance(nginx_network_settings, dict)
-    nginx_ports = nginx_network_settings["Ports"]
-    assert nginx_ports["8443/tcp"][0]["HostIp"] == "127.0.0.1"
-    assert set(nginx_network_settings["Networks"]) == {
-        f"{environment.project_name}_proxy-edge",
-        f"{environment.project_name}_web-private",
-    }
-    nginx_secret_targets = {
-        mount["Destination"]: mount["RW"]
-        for mount in nginx_inspect["Mounts"]
-        if str(mount["Destination"]).startswith("/run/secrets/")
-    }
-    assert nginx_secret_targets == {
-        "/run/secrets/nginx_htpasswd": False,
-        "/run/secrets/nginx_tls_certificate": False,
-        "/run/secrets/nginx_tls_key": False,
-    }
-    assert environment.nginx_basic_auth[1] not in str(nginx_inspect)
-    environment.compose(
-        "exec",
-        "-T",
-        "nginx",
-        "/bin/sh",
-        "-c",
-        'test "$(id -u)" -eq 101; '
-        "test -r /run/secrets/nginx_tls_certificate; "
-        "test -r /run/secrets/nginx_tls_key; "
-        "test -r /run/secrets/nginx_htpasswd; "
-        'probe=$(mktemp /tmp/nginx-smoke.XXXXXX); rm -f "$probe"',
-    )
-    nginx_rootfs_write = environment.compose(
-        "exec",
-        "-T",
-        "nginx",
-        "/bin/sh",
-        "-c",
-        "touch /etc/nginx/forbidden",
-        check=False,
-    )
-    assert nginx_rootfs_write.returncode != 0
-    nginx_logs = environment.compose("logs", "--no-color", "nginx")
-    assert environment.nginx_basic_auth[1] not in nginx_logs.stdout
-
-    completed_write = environment.compose(
-        "exec",
-        "-T",
-        "web",
-        "python",
-        "-c",
-        "from pathlib import Path; "
-        "Path('/data/audio-completed/forbidden').write_bytes(b'x')",
-        check=False,
-    )
-    assert completed_write.returncode != 0
-    environment.compose(
-        "exec",
-        "-T",
-        "web",
-        "python",
-        "-c",
-        "from pathlib import Path; "
-        "assert not Path('/data/audio-processing').exists(); "
-        "assert not Path('/data/audio-failed').exists()",
-    )
-
-    environment.compose("up", "--detach", "--no-deps", "worker")
-    _wait_for_running_worker(environment)
-    environment.wait_for_healthy("worker")
-    environment.assert_worker_received_runtime_secrets()
-    worker_inspect = environment.inspect_service("worker")
-    _assert_runtime_hardening(
-        worker_inspect,
-        restart_policy="no",
-        runtime_user="10001:10001",
-    )
-    worker_networks = worker_inspect["NetworkSettings"]
-    assert isinstance(worker_networks, dict)
-    assert set(worker_networks["Networks"]) == {
-        f"{environment.project_name}_worker-egress"
-    }
-
-    environment.compose(
-        "exec",
-        "-T",
-        "worker",
-        "python",
-        "-c",
-        "from pathlib import Path; "
-        "paths = [Path('/data') / f'audio-{name}' "
-        "for name in ('pending', 'processing', 'completed', 'failed')]; "
-        "[(path / '.smoke').write_bytes(b'ok') for path in paths]; "
-        "[(path / '.smoke').unlink() for path in paths]",
-    )
-
-    for service_name in ("web", "worker"):
+        assert terminal is not None
+        terminal_state = terminal["State"]
+        assert isinstance(terminal_state, dict)
+        assert terminal_state["ExitCode"] == 1
+    finally:
         environment.compose(
-            "exec",
-            "-T",
-            service_name,
-            "python",
-            "-c",
-            "import importlib.util, shutil; from pathlib import Path; "
-            "assert importlib.util.find_spec('pytest') is None; "
-            "assert importlib.util.find_spec('httpx2') is None; "
-            "assert shutil.which('uv') is None; "
-            "assert not Path('/app/.env').exists(); "
-            "assert not Path('/app/pyproject.toml').exists()",
+            "down",
+            "--volumes",
+            "--remove-orphans",
+            project_name=project_name,
+            extra_files=(overlay,),
+            check=False,
         )
 
-    for image_reference in (
-        environment.nginx_image,
-        environment.web_image,
-        environment.worker_image,
-    ):
-        image_metadata = environment.inspect_image(image_reference)
-        image_config = image_metadata["Config"]
-        assert isinstance(image_config, dict)
-        image_labels = image_config["Labels"]
-        assert isinstance(image_labels, dict)
-        assert image_labels["org.opencontainers.image.version"] == "smoke"
-        assert image_labels["org.opencontainers.image.revision"] == "0" * 40
-        environment.assert_image_contains_no_runtime_secret(image_reference)
 
-    environment.compose("stop", "--timeout", "15", "worker")
-    stopped_worker = environment.inspect_service("worker")
-    stopped_state = stopped_worker["State"]
-    assert isinstance(stopped_state, dict)
-    assert stopped_state["Status"] == "exited"
-    assert stopped_state["ExitCode"] == 0
-    assert stopped_worker["RestartCount"] == 0
-
-    frontend_ids_before_worker_guards = {
-        service_name: environment.inspect_service(service_name)["Id"]
-        for service_name in ("web", "nginx")
-    }
-
-    environment.replace_worker_with_failing_healthcheck()
-    unhealthy_worker = _wait_for_worker_health(environment, "unhealthy")
-    unhealthy_start = environment.start_runtime(check=False)
-    assert unhealthy_start.returncode == 1
-    assert "refusing running worker with health=unhealthy" in unhealthy_start.stderr
-    unhealthy_worker_after_guard = environment.inspect_service("worker")
-    assert unhealthy_worker_after_guard["Id"] == unhealthy_worker["Id"]
-    unhealthy_state_after_guard = unhealthy_worker_after_guard["State"]
-    assert isinstance(unhealthy_state_after_guard, dict)
-    assert unhealthy_state_after_guard["Status"] == "running"
-    assert unhealthy_state_after_guard["Health"]["Status"] == "unhealthy"
-    assert {
-        service_name: environment.inspect_service(service_name)["Id"]
-        for service_name in ("web", "nginx")
-    } == frontend_ids_before_worker_guards
-
-    environment.replace_worker_with_exit_code(3)
-    blocked_worker = _wait_for_worker_exit_code(environment, 3)
-    guarded_start = environment.start_runtime(check=False)
-    assert guarded_start.returncode == 3
-    assert "refusing to restart worker" in guarded_start.stderr
-    blocked_worker_after_guard = environment.inspect_service("worker")
-    assert blocked_worker_after_guard["Id"] == blocked_worker["Id"]
-    blocked_state_after_guard = blocked_worker_after_guard["State"]
-    assert isinstance(blocked_state_after_guard, dict)
-    assert blocked_state_after_guard["Status"] == "exited"
-    assert blocked_state_after_guard["ExitCode"] == 3
-    assert blocked_worker_after_guard["RestartCount"] == 0
-    assert {
-        service_name: environment.inspect_service(service_name)["Id"]
-        for service_name in ("web", "nginx")
-    } == frontend_ids_before_worker_guards
-    assert not (environment.data_root / "completed" / "forbidden").exists()
-    assert all(
-        not (environment.data_root / name / ".smoke").exists()
-        for name in ("pending", "processing", "completed", "failed")
+def test_failed_migration_gates_every_application_and_cleanup_removes_resources(
+    deployment_environment: DeploymentEnvironment,
+    tmp_path: Path,
+) -> None:
+    environment = deployment_environment
+    project_name = f"{environment.project_name}fail"
+    overlay = tmp_path / "migration-failure.yaml"
+    overlay.write_text(
+        "services:\n"
+        "  database-migrations:\n"
+        '    entrypoint: ["python", "-c"]\n'
+        '    command: ["raise SystemExit(4)"]\n',
+        encoding="utf-8",
     )
-    assert all(
-        not tuple((environment.data_root / name).glob(".gta-health.*"))
-        for name in ("pending", "processing", "completed", "failed")
+    try:
+        result = environment.compose(
+            "up",
+            "--detach",
+            project_name=project_name,
+            extra_files=(overlay,),
+            check=False,
+        )
+        assert result.returncode != 0
+        for service_name in (
+            "web",
+            "worker-automation",
+            "worker-retention",
+            "nginx",
+        ):
+            running_service = environment.compose(
+                "ps",
+                "--quiet",
+                "--status",
+                "running",
+                service_name,
+                project_name=project_name,
+                extra_files=(overlay,),
+            )
+            assert running_service.stdout.strip() == ""
+    finally:
+        environment.compose(
+            "down",
+            "--volumes",
+            "--remove-orphans",
+            project_name=project_name,
+            extra_files=(overlay,),
+            check=False,
+        )
+    leftovers = subprocess.run(
+        [
+            "docker",
+            "volume",
+            "ls",
+            "--quiet",
+            "--filter",
+            f"label=com.docker.compose.project={project_name}",
+        ],
+        text=True,
+        capture_output=True,
+        check=True,
     )
-    assert environment.data_root.is_dir()
+    assert leftovers.stdout.strip() == ""
+
+
+def test_postgres_and_audio_survive_down_without_volume_removal(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    environment = deployment_environment
+    environment.compose("stop", "worker-automation", "worker-retention")
+    with environment.client() as client:
+        upload = client.post(
+            "/api/jobs",
+            files={"audio_file": ("persistent.wav", SYNTHETIC_AUDIO, "audio/wav")},
+        )
+        upload.raise_for_status()
+        audio_uuid = UUID(upload.json()["audio_uuid"])
+        location = upload.headers["location"]
+        assert client.get(location).status_code == httpx.codes.OK
+
+    audio_probe = (
+        "from pathlib import Path; "
+        f"raise SystemExit(0 if Path('/data/audios/{audio_uuid}.wav').is_file() else 1)"
+    )
+    environment.compose("exec", "-T", "web", "python", "-c", audio_probe)
+    environment.compose("down", "--remove-orphans", "--timeout", "10")
+    environment.start()
+
+    with environment.client() as client:
+        persisted = client.get(location)
+    assert persisted.status_code == httpx.codes.OK
+    environment.compose("exec", "-T", "web", "python", "-c", audio_probe)
