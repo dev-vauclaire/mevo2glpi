@@ -571,7 +571,7 @@ def test_cooperative_worker_stop_does_not_trigger_restart(
     deployment_environment: DeploymentEnvironment,
 ) -> None:
     environment = deployment_environment
-    environment.compose("stop", "--timeout", "15", "worker-automation")
+    environment.stop_service("worker-automation")
     stopped = environment.inspect_service("worker-automation")
     state = stopped["State"]
     assert isinstance(state, dict)
@@ -579,8 +579,20 @@ def test_cooperative_worker_stop_does_not_trigger_restart(
     assert state["ExitCode"] == 0
     assert stopped["RestartCount"] == 0
 
-    environment.compose("up", "--detach", "--no-deps", "worker-automation")
-    environment.wait_for_health("worker-automation")
+    environment.start_service("worker-automation")
+
+
+def test_worker_service_controls_reject_every_non_worker_service(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    environment = deployment_environment
+    for service_name in ("", "postgres", "web", "nginx", "unknown"):
+        with pytest.raises(ValueError, match="not controllable"):
+            environment.stop_service(service_name)
+        with pytest.raises(ValueError, match="not controllable"):
+            environment.start_service(service_name)
+        with pytest.raises(ValueError, match="not controllable"):
+            environment.crash_service(service_name)
 
 
 def test_unexpected_worker_failure_restarts_five_times_then_stops(

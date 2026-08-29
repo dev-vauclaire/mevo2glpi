@@ -11,6 +11,7 @@ import tarfile
 import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -29,9 +30,11 @@ POLL_INTERVAL_SECONDS = 1.0
 SERVICE_STATE_TIMEOUT_SECONDS = 30.0
 SERVICE_STOP_GRACE_SECONDS = 10
 API_SERVICE_NAME = "api"
+BATCH_WORKER_SERVICE_NAME = "mono-voice-worker"
+BATCH_WORKER_READY_LOG_MARKER = b"Worker d\xc3\xa9marr\xc3\xa9 avec le contexte"
 TRANSCRIBE_AI_NETWORK_LOGICAL_NAME = "transcribe_ai_test"
 TRANSCRIBE_AI_INTERNAL_BASE_URL = "http://api:5000"
-CONTROLLABLE_SERVICES = frozenset({API_SERVICE_NAME})
+CONTROLLABLE_SERVICES = frozenset({API_SERVICE_NAME, BATCH_WORKER_SERVICE_NAME})
 SYNTHETIC_AUDIO_CONTAINER_PATH = "/tmp/transcribe-ai-fixture.wav"
 SYNTHETIC_AUDIO_FILTER = (
     "flite=text='Bonjour. Ceci est un court test automatique de "
@@ -56,26 +59,29 @@ class TranscribeAiTestEnvironment:
     _compose_environment: Mapping[str, str] = field(repr=False, compare=False)
 
     def stop_service(self, service_name: str) -> None:
-        """Stop the allowlisted API service for a bounded outage scenario."""
+        """Stop one allowlisted Transcribe AI service for an outage scenario."""
         _require_controllable_service(service_name)
         with patch.dict(os.environ, self._compose_environment, clear=False):
             _stop_service(self._compose, self._docker_client, service_name)
 
     def start_service(self, service_name: str) -> None:
-        """Start an allowlisted service and wait for its public API contract."""
+        """Start an allowlisted service and wait for its specific readiness."""
         _require_controllable_service(service_name)
         with patch.dict(os.environ, self._compose_environment, clear=False):
             _start_service(self._compose, self._docker_client, service_name)
-            self.base_url = _get_loopback_base_url(
-                self._compose,
-                self._docker_client,
-            )
-            _wait_for_healthy_service(
-                self._compose,
-                self._docker_client,
-                service_name,
-            )
-            _wait_for_api(self.base_url, self.api_key)
+            if service_name == API_SERVICE_NAME:
+                self.base_url = _get_loopback_base_url(
+                    self._compose,
+                    self._docker_client,
+                )
+                _wait_for_healthy_service(
+                    self._compose,
+                    self._docker_client,
+                    service_name,
+                )
+                _wait_for_api(self.base_url, self.api_key)
+            else:
+                _wait_for_batch_worker(self._compose, self._docker_client)
 
 
 def _requested_device() -> str:
@@ -275,6 +281,59 @@ def _wait_for_api(base_url: str, api_key: SecretStr) -> None:
     )
 
 
+def _wait_for_batch_worker(
+    compose: DockerCompose,
+    docker_client: DockerClient,
+    *,
+    timeout_seconds: float = SERVICE_READY_TIMEOUT_SECONDS,
+) -> None:
+    """Wait until the pinned batch worker has completed application startup."""
+    container = _get_service_container(
+        compose,
+        docker_client,
+        BATCH_WORKER_SERVICE_NAME,
+    )
+    deadline = time.monotonic() + timeout_seconds
+    last_state = "unknown"
+
+    while time.monotonic() < deadline:
+        try:
+            container.reload()
+            state = container.attrs.get("State", {})
+            last_state = str(state.get("Status", "missing"))
+            if last_state in {"dead", "exited"}:
+                raise RuntimeError(
+                    "The Transcribe AI batch worker stopped before readiness"
+                )
+            started_at = state.get("StartedAt")
+            if last_state == "running" and isinstance(started_at, str):
+                logs = container.logs(since=_parse_docker_timestamp(started_at))
+                if isinstance(logs, bytes) and BATCH_WORKER_READY_LOG_MARKER in logs:
+                    return
+        except RuntimeError:
+            raise
+        except Exception:
+            raise RuntimeError(
+                "Unable to observe the Transcribe AI batch worker readiness"
+            ) from None
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+    raise RuntimeError(
+        "The Transcribe AI batch worker did not become ready "
+        f"(last state: {last_state})"
+    )
+
+
+def _parse_docker_timestamp(value: str) -> datetime:
+    """Parse Docker's RFC3339 start timestamp for a bounded log query."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise RuntimeError(
+            "The Transcribe AI batch worker has an invalid start timestamp"
+        ) from None
+
+
 def _read_runtime_device(
     compose: DockerCompose,
     docker_client: DockerClient,
@@ -433,6 +492,7 @@ def transcribe_ai_environment(
             _wait_for_healthy_service(compose, docker_client, "redis")
             _wait_for_healthy_service(compose, docker_client, "api")
             _wait_for_healthy_service(compose, docker_client, "mono-voice-stt")
+            _wait_for_batch_worker(compose, docker_client)
 
             base_url = _get_loopback_base_url(compose, docker_client)
             _wait_for_api(base_url, api_key)

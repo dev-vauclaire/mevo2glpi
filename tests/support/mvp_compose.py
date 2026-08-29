@@ -31,6 +31,7 @@ CUSTOM_SERVICES = (
     "nginx",
 )
 ALL_SERVICES = ("postgres", *CUSTOM_SERVICES)
+CONTROLLABLE_MVP_SERVICES = frozenset({"worker-automation", "worker-retention"})
 POLL_INTERVAL_SECONDS = 0.25
 DEFAULT_TEST_NGINX_HTTP_PORT = 18080
 DEFAULT_TEST_NGINX_HTTPS_PORT = 18443
@@ -262,6 +263,54 @@ class MvpComposeEnvironment:
                 return
             time.sleep(POLL_INTERVAL_SECONDS)
         raise RuntimeError("database migration did not complete")
+
+    def stop_service(self, service_name: str) -> None:
+        """Stop one allowlisted worker and wait for its cooperative exit."""
+        _require_controllable_mvp_service(service_name)
+        self.compose("stop", "--timeout", "15", service_name)
+        self._wait_for_service_status(
+            service_name,
+            expected_statuses=frozenset({"exited"}),
+            transition="stop",
+        )
+
+    def start_service(self, service_name: str) -> None:
+        """Start one allowlisted worker and wait for its healthcheck."""
+        _require_controllable_mvp_service(service_name)
+        self.compose("start", service_name)
+        self.wait_for_health(service_name)
+
+    def crash_service(self, service_name: str) -> None:
+        """Stop one worker abruptly with SIGKILL and wait for its exit."""
+        _require_controllable_mvp_service(service_name)
+        self.compose("kill", "--signal", "SIGKILL", service_name)
+        self._wait_for_service_status(
+            service_name,
+            expected_statuses=frozenset({"exited"}),
+            transition="crash",
+        )
+
+    def _wait_for_service_status(
+        self,
+        service_name: str,
+        *,
+        expected_statuses: frozenset[str],
+        transition: str,
+        timeout_seconds: float = 30,
+    ) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        last_status = "missing"
+        while time.monotonic() < deadline:
+            payload = self.inspect_service(service_name)
+            state = payload.get("State")
+            if isinstance(state, dict):
+                last_status = str(state.get("Status", "missing"))
+                if last_status in expected_statuses:
+                    return
+            time.sleep(POLL_INTERVAL_SECONDS)
+        raise RuntimeError(
+            f"{service_name} did not {transition} (last status: {last_status})"
+        )
 
     @property
     def base_url(self) -> str:
@@ -565,6 +614,11 @@ def _validate_explicit_port(port: object, field_name: str) -> None:
         raise ValueError(f"{field_name} must be between 1 and 65535")
 
 
+def _require_controllable_mvp_service(service_name: str) -> None:
+    if service_name not in CONTROLLABLE_MVP_SERVICES:
+        raise ValueError("service_name is not controllable by the MVP test harness")
+
+
 def _reserve_loopback_ports(*ports: int) -> tuple[socket.socket, ...]:
     reservations: list[socket.socket] = []
     try:
@@ -608,9 +662,9 @@ def _write_service_environments(
             "WORKER_IDLE_INTERVAL_SECONDS=0.2\n"
             "WORKER_HEARTBEAT_INTERVAL_SECONDS=1\n"
             "WORKER_HEALTHCHECK_STALE_AFTER_SECONDS=8\n"
-            "WORKER_RETRY_INITIAL_SECONDS=1\n"
-            "WORKER_RETRY_MAX_SECONDS=2\n"
-            "WORKER_SYSTEM_PROBE_INTERVAL_SECONDS=2\n"
+            "WORKER_RETRY_INITIAL_SECONDS=30\n"
+            "WORKER_RETRY_MAX_SECONDS=30\n"
+            "WORKER_SYSTEM_PROBE_INTERVAL_SECONDS=30\n"
             "COMPLETED_RETENTION_DAYS=90\n"
             "FAILED_RETENTION_DAYS=30\n"
             "BLOCKED_RETENTION_DAYS=90\n"
@@ -635,9 +689,9 @@ def _write_service_environments(
             "WORKER_HEARTBEAT_INTERVAL_SECONDS=1\n"
             "WORKER_HEALTHCHECK_STALE_AFTER_SECONDS=8\n"
             "RETENTION_POLL_INTERVAL_SECONDS=0.2\n"
-            "RETENTION_RETRY_INITIAL_SECONDS=1\n"
-            "RETENTION_RETRY_MAX_SECONDS=2\n"
-            "RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS=2\n"
+            "RETENTION_RETRY_INITIAL_SECONDS=30\n"
+            "RETENTION_RETRY_MAX_SECONDS=30\n"
+            "RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS=30\n"
             "RETENTION_CHECK_INTERVAL_HOURS=6\n"
             f"GLPI_BASE_URL={providers.glpi_base_url}\n"
             f"GLPI_USERNAME={providers.glpi_username}\n"
@@ -695,6 +749,7 @@ def _write_proxy_secrets(runtime_root: Path) -> tuple[Path, Path, Path, str, str
 __all__ = [
     "ALL_SERVICES",
     "BASE_COMPOSE_FILE",
+    "CONTROLLABLE_MVP_SERVICES",
     "CUSTOM_SERVICES",
     "DEFAULT_TEST_NGINX_HTTP_PORT",
     "DEFAULT_TEST_NGINX_HTTPS_PORT",

@@ -123,14 +123,17 @@ def test_transcribe_ai_fixture_exposes_safe_internal_network_contract(
 def test_transcribe_ai_fixture_service_control_is_allowlisted_and_restores_readiness(
     transcribe_ai_environment,
 ) -> None:
-    for forbidden_service in ("", "postgres", "mono-voice-worker", "unknown"):
+    for forbidden_service in ("", "postgres", "redis", "mono-voice-stt", "unknown"):
         with pytest.raises(ValueError, match="not controllable"):
             transcribe_ai_environment.start_service(forbidden_service)
         with pytest.raises(ValueError, match="not controllable"):
             transcribe_ai_environment.stop_service(forbidden_service)
 
-    transcribe_ai_environment.stop_service("api")
-    transcribe_ai_environment.start_service("api")
+    for service_name in ("api", "mono-voice-worker"):
+        try:
+            transcribe_ai_environment.stop_service(service_name)
+        finally:
+            transcribe_ai_environment.start_service(service_name)
 
     response = httpx.get(
         f"{transcribe_ai_environment.base_url}/api/batchTranscription/result",
