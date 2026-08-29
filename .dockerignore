@@ -15,6 +15,8 @@
 !apps/worker-automation/pyproject.toml
 !apps/worker-automation/src/
 !apps/worker-automation/src/**
+!apps/worker-retention/
+!apps/worker-retention/pyproject.toml
 
 !packages/
 !packages/common/
@@ -25,6 +27,10 @@
 !packages/database/pyproject.toml
 !packages/database/src/
 !packages/database/src/**
+!packages/glpi-client/
+!packages/glpi-client/pyproject.toml
+!packages/glpi-client/src/
+!packages/glpi-client/src/**
 
 **/__pycache__/
 **/*.py[cod]

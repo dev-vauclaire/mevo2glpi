@@ -341,6 +341,177 @@ def test_checking_retry_checking_chain_honours_due_boundary(
     assert checking.last_error_code is None
 
 
+def test_future_glpi_retry_probe_suspends_ordinary_checks(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    ordinary_job_uuid = _uuid(41)
+    retry_probe_uuid = _uuid(42)
+    retry_at = NOW + timedelta(minutes=5)
+
+    _add_retention(
+        session_factory,
+        ordinary_job_uuid,
+        policy=RetentionPolicy.TICKET_OR_DEADLINE,
+        hard_delete_at=NOW + timedelta(days=2),
+        next_check_at=NOW - timedelta(hours=1),
+    )
+    _add_retention(
+        session_factory,
+        retry_probe_uuid,
+        policy=RetentionPolicy.TICKET_OR_DEADLINE,
+        hard_delete_at=NOW + timedelta(days=2),
+        next_check_at=NOW - timedelta(minutes=1),
+    )
+    with session_factory.begin() as session:
+        repository = AudioRetentionRepository(session)
+        repository.start_glpi_check(retry_probe_uuid, now=NOW)
+        repository.schedule_retry(
+            retry_probe_uuid,
+            error_category="glpi_unavailable",
+            error_code="http_503",
+            next_check_at=retry_at,
+            now=NOW + timedelta(seconds=1),
+        )
+
+    with session_factory() as session:
+        probe = AudioRetentionRepository(session).get_glpi_probe_gate()
+
+    assert probe is not None
+    assert probe.job_uuid == retry_probe_uuid
+    assert probe.next_check_at == retry_at
+    assert _find_candidate(session_factory, NOW) is None
+
+
+def test_due_glpi_retry_probe_precedes_ordinary_checks(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    ordinary_job_uuid = _uuid(43)
+    retry_probe_uuid = _uuid(44)
+
+    _add_retention(
+        session_factory,
+        ordinary_job_uuid,
+        policy=RetentionPolicy.TICKET_OR_DEADLINE,
+        hard_delete_at=NOW + timedelta(days=2),
+        next_check_at=NOW - timedelta(hours=1),
+    )
+    _add_retention(
+        session_factory,
+        retry_probe_uuid,
+        policy=RetentionPolicy.TICKET_OR_DEADLINE,
+        hard_delete_at=NOW + timedelta(days=2),
+        next_check_at=NOW - timedelta(minutes=2),
+    )
+    with session_factory.begin() as session:
+        repository = AudioRetentionRepository(session)
+        repository.start_glpi_check(
+            retry_probe_uuid,
+            now=NOW - timedelta(minutes=1),
+        )
+        repository.schedule_retry(
+            retry_probe_uuid,
+            error_category="glpi_unavailable",
+            error_code="http_503",
+            next_check_at=NOW,
+            now=NOW - timedelta(seconds=30),
+        )
+
+    candidate = _find_candidate(session_factory, NOW)
+    _assert_candidate(
+        candidate,
+        kind=RetentionCandidateKind.START_GLPI_CHECK,
+        job_uuid=retry_probe_uuid,
+    )
+
+
+def test_future_deletion_retry_does_not_gate_ordinary_glpi_checks(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    ordinary_job_uuid = _uuid(47)
+    deletion_retry_uuid = _uuid(48)
+
+    _add_retention(
+        session_factory,
+        ordinary_job_uuid,
+        policy=RetentionPolicy.TICKET_OR_DEADLINE,
+        hard_delete_at=NOW + timedelta(days=2),
+        next_check_at=NOW - timedelta(minutes=1),
+    )
+    _add_retention(
+        session_factory,
+        deletion_retry_uuid,
+        policy=RetentionPolicy.DEADLINE_ONLY,
+        hard_delete_at=NOW - timedelta(hours=2),
+        next_check_at=None,
+    )
+    with session_factory.begin() as session:
+        repository = AudioRetentionRepository(session)
+        repository.start_deletion(
+            deletion_retry_uuid,
+            reason=DeletionReason.FAILED_TTL,
+            now=NOW - timedelta(hours=1),
+        )
+        repository.schedule_retry(
+            deletion_retry_uuid,
+            error_category="storage_unavailable",
+            error_code="filesystem_busy",
+            next_check_at=NOW + timedelta(minutes=5),
+            now=NOW - timedelta(minutes=30),
+        )
+
+    with session_factory() as session:
+        assert AudioRetentionRepository(session).get_glpi_probe_gate() is None
+    candidate = _find_candidate(session_factory, NOW)
+    _assert_candidate(
+        candidate,
+        kind=RetentionCandidateKind.START_GLPI_CHECK,
+        job_uuid=ordinary_job_uuid,
+    )
+
+
+def test_future_glpi_retry_probe_does_not_suspend_local_deadline(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    deadline_job_uuid = _uuid(45)
+    retry_probe_uuid = _uuid(46)
+
+    _add_retention(
+        session_factory,
+        deadline_job_uuid,
+        policy=RetentionPolicy.DEADLINE_ONLY,
+        hard_delete_at=NOW,
+        next_check_at=None,
+    )
+    _add_retention(
+        session_factory,
+        retry_probe_uuid,
+        policy=RetentionPolicy.TICKET_OR_DEADLINE,
+        hard_delete_at=NOW + timedelta(days=2),
+        next_check_at=NOW - timedelta(minutes=1),
+    )
+    with session_factory.begin() as session:
+        repository = AudioRetentionRepository(session)
+        repository.start_glpi_check(retry_probe_uuid, now=NOW)
+        repository.schedule_retry(
+            retry_probe_uuid,
+            error_category="glpi_unavailable",
+            error_code="http_503",
+            next_check_at=NOW + timedelta(minutes=5),
+            now=NOW + timedelta(seconds=1),
+        )
+
+    candidate = _find_candidate(session_factory, NOW)
+    _assert_candidate(
+        candidate,
+        kind=RetentionCandidateKind.START_DELETION_AT_DEADLINE,
+        job_uuid=deadline_job_uuid,
+    )
+
+
 def test_deadline_deleting_deleted_chain_is_durable(
     migrated_engine: Engine,
 ) -> None:

@@ -1,0 +1,28 @@
+"""Static contracts for the automation worker runtime image context."""
+
+import tomllib
+from pathlib import Path
+
+
+def test_worker_image_context_includes_its_workspace_packages() -> None:
+    repository_root = Path(__file__).resolve().parents[4]
+    dockerignore_rules = set(
+        (repository_root / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    )
+    dockerfile = (repository_root / "infra/docker/worker/Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    workspace = tomllib.loads(
+        (repository_root / "pyproject.toml").read_text(encoding="utf-8")
+    )
+
+    for member in workspace["tool"]["uv"]["workspace"]["members"]:
+        manifest = f"{member}/pyproject.toml"
+        assert f"COPY {manifest} {manifest}" in dockerfile
+        assert f"!{member}/" in dockerignore_rules
+        assert f"!{manifest}" in dockerignore_rules
+
+    for package in ("common", "database", "glpi-client"):
+        source = f"packages/{package}/src"
+        assert f"COPY {source} {source}" in dockerfile
+        assert f"!{source}/**" in dockerignore_rules

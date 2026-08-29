@@ -125,7 +125,7 @@ def build_automation_worker(
         failed_ttl=timedelta(days=settings.failed_retention_days),
         blocked_ttl=timedelta(days=settings.blocked_retention_days),
         first_completed_check_after=timedelta(
-            hours=settings.retention_first_check_hours
+            hours=settings.retention_check_interval_hours
         ),
     )
     transitions = JobTransitionService(

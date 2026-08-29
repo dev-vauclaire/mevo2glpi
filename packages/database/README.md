@@ -60,6 +60,12 @@ GLPI qu'une reprise de purge locale. Elle possède donc toujours une date de
 reprise, y compris avec la politique `deadline_only`. Seul l'état `checking`
 est réservé à la politique `ticket_or_deadline`.
 
+Un retry GLPI sans contexte de suppression devient la sonde persistée de la
+dépendance. Tant que cette sonde existe, les contrôles `scheduled` ordinaires
+sont suspendus afin de ne pas propager une panne globale à toute la file. Les
+deadlines absolues, les purges engagées et leurs retries locaux restent
+prioritaires et ne sont jamais bloqués par cette barrière.
+
 `last_glpi_status_id` stocke uniquement l'identifiant numérique positif du
 statut GLPI. Le libellé n'est pas persisté car il peut être traduit. Cette
 observation n'est autorisée que pour `ticket_or_deadline` ; le package database

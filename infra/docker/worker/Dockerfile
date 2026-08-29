@@ -20,8 +20,10 @@ COPY pyproject.toml uv.lock README.md ./
 COPY apps/database-migrations/pyproject.toml apps/database-migrations/pyproject.toml
 COPY apps/web/pyproject.toml apps/web/pyproject.toml
 COPY apps/worker-automation/pyproject.toml apps/worker-automation/pyproject.toml
+COPY apps/worker-retention/pyproject.toml apps/worker-retention/pyproject.toml
 COPY packages/common/pyproject.toml packages/common/pyproject.toml
 COPY packages/database/pyproject.toml packages/database/pyproject.toml
+COPY packages/glpi-client/pyproject.toml packages/glpi-client/pyproject.toml
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
@@ -29,6 +31,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY apps/worker-automation/src apps/worker-automation/src
 COPY packages/common/src packages/common/src
+COPY packages/database/src packages/database/src
+COPY packages/glpi-client/src packages/glpi-client/src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \

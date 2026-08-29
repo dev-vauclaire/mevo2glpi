@@ -1,8 +1,8 @@
 # Package `glpi-ticketing-common`
 
-`glpi-ticketing-common` contient les primitives de stockage audio partagées par
-le web et le worker d'automatisation. Il ne connaît ni PostgreSQL, ni FastAPI,
-ni GLPI, ni Transcribe AI et ne porte aucune politique métier.
+`glpi-ticketing-common` contient les primitives de stockage audio et de backoff
+partagées par le web et les deux workers. Il ne connaît ni PostgreSQL, ni
+FastAPI, ni GLPI, ni Transcribe AI et ne porte aucune politique métier.
 
 ## Stockage canonique unique
 
@@ -38,7 +38,8 @@ flowchart LR
 
 ## API publique
 
-L'API se trouve dans `glpi_ticketing_common.audio_files`.
+Les primitives de stockage courant se trouvent dans
+`glpi_ticketing_common.audio_files`.
 
 | Primitive | Responsabilité |
 | --- | --- |
@@ -48,6 +49,24 @@ L'API se trouve dans `glpi_ticketing_common.audio_files`.
 | `publish_audio()` | Publier un flux sans écrasement, avec mémoire bornée et durabilité disque |
 | `delete_audio()` | Supprimer exactement une clé puis synchroniser le répertoire |
 | `parse_audio_filename()` | Valider le nom canonique attendu par l'adaptateur Transcribe AI |
+
+`glpi_ticketing_common.audio_purge` expose une suppression spécialisée pour le
+worker de rétention. `purge_audio()` valide une clé canonique exacte, publie le
+nom `.purge/{storage_key}` de façon create-only par lien dur sur le même volume,
+retire le nom canonique, synchronise les deux répertoires puis supprime les
+octets. Elle reprend de manière idempotente si un crash a laissé les deux noms
+du même inode, le seul nom en quarantaine ou des octets déjà absents. Deux noms
+pointant vers des inodes distincts restent ambigus. Elle refuse également les
+liens symboliques, entrées non régulières et chemins non canoniques.
+
+Cette primitive cible le volume Linux local du déploiement Docker : la racine
+et `.purge` doivent partager le même système de fichiers, avec prise en charge
+des liens durs et de `fsync` sur les répertoires.
+
+`glpi_ticketing_common.backoff.ExponentialBackoffPolicy` calcule un délai
+exponentiel plafonné sans dormir ni connaître le mécanisme de persistance. Le
+worker appelant reste responsable du compteur consécutif et de la date de
+prochaine tentative.
 
 `parse_audio_filename()` accepte une extension en majuscules à la frontière du
 provider et retourne une représentation normalisée. En revanche,
@@ -115,9 +134,13 @@ packages/common/
 ├── README.md
 ├── src/glpi_ticketing_common/
 │   ├── __init__.py
-│   └── audio_files.py
+│   ├── audio_files.py
+│   ├── audio_purge.py
+│   └── backoff.py
 └── tests/unit/
-    └── test_audio_storage.py
+    ├── test_audio_storage.py
+    ├── test_audio_purge.py
+    └── test_backoff.py
 ```
 
 Depuis la racine :

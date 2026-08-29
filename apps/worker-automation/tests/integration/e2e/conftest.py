@@ -8,15 +8,12 @@ from importlib import import_module
 
 import pytest
 
-# The service-specific conftests remain the single owners of stack startup,
-# readiness and cleanup.  Importing their fixture functions here makes both
-# sibling fixtures available without copying either bootstrap implementation.
-_glpi_fixtures = import_module("packages.glpi-client.tests.integration.glpi.conftest")
+# Transcribe AI still owns a subtree fixture. GLPI is registered once through
+# the workspace-level lazy plugin, so the end-to-end suite requests it by name.
 _transcribe_ai_fixtures = import_module(
     "apps.worker-automation.tests.integration.transcribe-ai.conftest"
 )
 
-glpi_environment = _glpi_fixtures.glpi_environment
 transcribe_ai_environment = _transcribe_ai_fixtures.transcribe_ai_environment
 
 

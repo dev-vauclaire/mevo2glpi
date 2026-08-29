@@ -7,6 +7,11 @@
 > Compose conserve encore les quatre répertoires du POC. La branche MVP ne doit
 > donc pas être déployée avec ce manifeste avant l'itération dédiée au packaging
 > PostgreSQL, aux migrations et aux deux workers.
+>
+> Le futur volume audio MVP devra être un système de fichiers Linux local
+> prenant en charge les liens durs POSIX et `fsync` sur les répertoires. Les
+> montages CIFS et stockages objets ne sont pas validés pour la purge
+> crash-safe.
 
 Ce répertoire transforme le workspace en trois images et une stack Docker
 Compose destinée à **un seul serveur de démonstration** : Nginx, l'application
@@ -193,10 +198,12 @@ l'éventuel overlay de CA. Adaptez-le si le dépôt n'est pas installé sous
 `/opt/glpi-ticketing-automation`.
 
 Les images Python utilisent la racine du dépôt comme contexte : le verrou uv est
-commun aux deux applications et au package partagé. Le contexte Nginx est au
-contraire limité à `infra/docker/nginx`. Les deux fichiers `.dockerignore`
-appliquent une allowlist ; les `.env`, tests, métadonnées Git, certificats et
-fichiers de travail ne sont pas transmis au daemon Docker.
+commun à tout le workspace. Tous les manifests des membres sont donc copiés
+avant la résolution, mais chaque image n'installe que son application et les
+sources de ses dépendances d'exécution. Le contexte Nginx est au contraire
+limité à `infra/docker/nginx`. Les deux fichiers `.dockerignore` appliquent une
+allowlist ; les `.env`, tests, métadonnées Git, certificats et fichiers de
+travail ne sont pas transmis au daemon Docker.
 
 ## 4. Configurer le reverse proxy Nginx
 

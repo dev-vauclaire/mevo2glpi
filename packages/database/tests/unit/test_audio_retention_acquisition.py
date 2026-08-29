@@ -88,6 +88,34 @@ def test_find_next_candidate_rejects_a_naive_clock_before_reading() -> None:
     session.scalars.assert_not_called()
 
 
+def test_get_glpi_probe_gate_returns_a_read_only_snapshot() -> None:
+    session = create_autospec(Session, instance=True)
+    retention = _retention(status=RetentionStatus.RETRY_SCHEDULED)
+    retention.deletion_reason = None
+    retention.deletion_started_at = None
+    session.scalars.return_value = _scalar_result(retention)
+
+    probe = AudioRetentionRepository(session).get_glpi_probe_gate()
+
+    assert probe is not None
+    assert probe.job_uuid == JOB_UUID
+    assert probe.status is RetentionStatus.RETRY_SCHEDULED
+    assert probe.deletion_started_at is None
+    statement = session.scalars.call_args.args[0]
+    assert statement._for_update_arg is None
+    session.get.assert_not_called()
+    session.flush.assert_not_called()
+
+
+def test_get_glpi_probe_gate_returns_none_when_no_retry_is_persisted() -> None:
+    session = create_autospec(Session, instance=True)
+    session.scalars.return_value = _scalar_result(None)
+
+    assert AudioRetentionRepository(session).get_glpi_probe_gate() is None
+
+    session.flush.assert_not_called()
+
+
 def _scalar_result(retention: AudioRetention | None) -> Mock:
     result = Mock()
     result.first.return_value = retention

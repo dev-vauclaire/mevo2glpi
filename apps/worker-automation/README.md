@@ -379,7 +379,7 @@ Principaux réglages optionnels :
 | `COMPLETED_RETENTION_DAYS` | `90` | Deadline absolue d'un succès. |
 | `FAILED_RETENTION_DAYS` | `30` | Deadline absolue d'un échec terminal. |
 | `BLOCKED_RETENTION_DAYS` | `90` | Deadline absolue d'un job bloqué. |
-| `RETENTION_FIRST_CHECK_HOURS` | `6` | Premier contrôle futur d'un ticket terminé. |
+| `RETENTION_CHECK_INTERVAL_HOURS` | `6` | Intervalle entre les contrôles d'un ticket terminé, également utilisé avant le premier contrôle. |
 | `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une requête Transcribe AI. |
 | `TRANSCRIPTION_POLL_INTERVAL_SECONDS` | `2` | Intervalle de polling distant. |
 | `TRANSCRIPTION_JOB_TIMEOUT_SECONDS` | `900` | Durée maximale d'un polling. |

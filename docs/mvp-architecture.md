@@ -122,17 +122,23 @@ pour le MVP.
 │   │   │       └── runner.py                          🟦 autonomie singleton
 │   │   └── tests/                                     🟦 unitaires + intégration DB
 │   │
-│   └── worker-retention/                              ⬜ nouvelle application
+│   └── worker-retention/                              🟦 worker de rétention persistant
 │       ├── pyproject.toml
 │       ├── README.md
 │       ├── src/glpi_ticketing_worker_retention/
-│       │   ├── __init__.py
-│       │   ├── __main__.py
-│       │   ├── application.py
-│       │   ├── settings.py
+│       │   ├── __main__.py                            🟦
+│       │   ├── application.py                         🟦 CLI + boucle
+│       │   ├── composition.py                         🟦 assemblage des services
+│       │   ├── settings.py                            🟦 contrat d'environnement
+│       │   ├── runtime/                               🟦 verrou + heartbeat + signaux
 │       │   └── retention/
-│       │       ├── processor.py
-│       │       └── runner.py
+│       │       ├── lifecycle.py                       🟦 transactions multi-modèles
+│       │       ├── outcomes.py                        🟦 résultats expurgés
+│       │       ├── policies.py                        🟦 contrôles et deadlines
+│       │       ├── ports.py                           🟦 contrats internes
+│       │       ├── service.py                         🟦 orchestration run_once
+│       │       ├── runner.py                          🟦 boucle autonome
+│       │       └── stages/                            🟦 lecture GLPI + purge
 │       └── tests/
 │           ├── unit/
 │           └── integration/
@@ -140,7 +146,9 @@ pour le MVP.
 ├── packages/
 │   ├── common/                                        🟦
 │   │   └── src/glpi_ticketing_common/
-│   │       └── audio_files.py                         🟦 stockage canonique unique
+│   │       ├── audio_files.py                         🟦 stockage canonique unique
+│   │       ├── audio_purge.py                         🟦 quarantaine crash-safe
+│   │       └── backoff.py                             🟦 retry exponentiel partagé
 │   │
 │   ├── database/                                      🟦 fondation persistante
 │   │   ├── pyproject.toml
@@ -369,10 +377,10 @@ qui confirme une transition, l'application respecte toujours l'ordre
 `ticket_creation_job_events`. Le job et la rétention sont verrouillés par leur
 clé primaire ; l'événement append-only est ensuite inséré avant le commit.
 Cet ordre unique évite que le worker de rétention et les autres applications
-prennent les mêmes lignes dans un ordre inverse. L'orchestration de cette
-transaction appartient au worker du sous-jalon 5C ; 5B expose les repositories
-et les invariants nécessaires sans effectuer d'appel GLPI ni d'accès au
-volume audio.
+prennent les mêmes lignes dans un ordre inverse. Le sous-jalon 5B expose les
+repositories et leurs invariants ; le service de cycle de vie du sous-jalon 5C
+orchestre désormais ces transactions sans les maintenir ouvertes pendant un
+appel GLPI ou un accès au volume audio.
 
 Une relance opérateur place la rétention existante en `inactive` et remet
 `hard_delete_at` et `next_check_at` à `NULL` dans la même transaction que le
@@ -386,7 +394,7 @@ empêche une transition répétée d'effacer un contrôle, son backoff ou un
 contexte de purge durable.
 
 Cette relance est refusée dès que `deletion_started_at` existe, y compris si
-la purge est en retry ou bloquée : l'audio peut déjà avoir été renommé vers
+la purge est en retry ou bloquée : l'audio peut déjà avoir été publié vers
 `.purge` ou supprimé. Effacer ce contexte rendrait alors possible un nouveau
 traitement sans octets canoniques et ferait perdre la reprise crash-safe.
 
@@ -405,9 +413,9 @@ brute.
 
 Le schéma du sous-jalon 5B autorise les événements
 `retention_retry_scheduled`, `retention_blocked`, `audio_deletion_started` et
-`audio_deleted`. Leur écriture coordonnée avec les transitions de rétention
-sera portée par l'application au sous-jalon 5C ; un repository de modèle ne
-crée jamais implicitement l'événement d'un autre modèle.
+`audio_deleted`. Depuis le sous-jalon 5C, l'application les écrit dans la même
+transaction que la transition de rétention correspondante ; un repository de
+modèle ne crée jamais implicitement l'événement d'un autre modèle.
 
 ### `worker_runtime_status`
 
@@ -693,37 +701,37 @@ scanne jamais le volume, ne déplace aucun fichier et ne crée aucun sidecar ;
 
 ```mermaid
 flowchart TD
-    Start[Démarrage]:::future --> Lock[Acquérir le verrou advisory rétention]:::future
-    Lock -->|déjà pris| Duplicate[Refuser une seconde instance]:::future
-    Lock -->|acquis| Heartbeat[Heartbeat running]:::future
-    Heartbeat --> RecoverDelete{Une suppression<br/>est à reprendre ?}:::future
-    RecoverDelete -->|oui| Deleting[status deleting]:::future
-    RecoverDelete -->|non| RecoverCheck{Un checking interrompu<br/>est à replanifier ?}:::future
-    RecoverCheck -->|oui| Reschedule[Programmer le prochain contrôle]:::future
-    RecoverCheck -->|non| Expired{Rétention non inactive et non deleted<br/>avec hard_delete_at ≤ now ?}:::future
-    Expired -->|oui| DeadlineReason[Choisir deadline_expired,<br/>failed_ttl ou blocked_ttl]:::future
-    Expired -->|non| Select[Sélectionner un contrôle GLPI actif<br/>avec next_check_at ≤ now]:::future
-    Select -->|aucun| Wait[Attendre]:::future
+    Start[Démarrage]:::implemented --> Lock[Acquérir le verrou advisory rétention]:::implemented
+    Lock -->|déjà pris| Duplicate[Refuser une seconde instance]:::implemented
+    Lock -->|acquis| Heartbeat[Heartbeat running]:::implemented
+    Heartbeat --> RecoverDelete{Une suppression<br/>est à reprendre ?}:::implemented
+    RecoverDelete -->|oui| Deleting[status deleting]:::implemented
+    RecoverDelete -->|non| RecoverCheck{Un checking interrompu<br/>est à replanifier ?}:::implemented
+    RecoverCheck -->|oui| Reschedule[Programmer le prochain contrôle]:::implemented
+    RecoverCheck -->|non| Expired{Rétention non inactive et non deleted<br/>avec hard_delete_at ≤ now ?}:::implemented
+    Expired -->|oui| DeadlineReason[Choisir deadline_expired,<br/>failed_ttl ou blocked_ttl]:::implemented
+    Expired -->|non| Select[Sélectionner un contrôle GLPI actif<br/>avec next_check_at ≤ now]:::implemented
+    Select -->|aucun| Wait[Attendre]:::implemented
     Wait --> Heartbeat
 
-    Select -->|completed| Snapshot[Lire GLPI et vérifier external_id]:::future
+    Select -->|completed| Snapshot[Lire GLPI et vérifier external_id]:::implemented
 
-    Snapshot -->|CLOSED| ClosedReason[raison ticket_closed]:::future
-    Snapshot -->|SOLVED ou ouvert| Reschedule[Programmer le prochain contrôle]:::future
-    Snapshot -->|indisponible| Retry[retry_scheduled + backoff]:::future
-    Snapshot -->|404 ou incohérence propre au job| RetentionJobBlocked[Rétention blocked<br/>+ alerte job]:::future
-    Snapshot -->|auth ou contrat global| RetentionSystemBlocked[Heartbeat blocked<br/>+ suspendre les contrôles]:::future
+    Snapshot -->|CLOSED| ClosedReason[raison ticket_closed]:::implemented
+    Snapshot -->|SOLVED ou ouvert| Reschedule[Programmer le prochain contrôle]:::implemented
+    Snapshot -->|indisponible| Retry[retry_scheduled + backoff]:::implemented
+    Snapshot -->|404 ou incohérence propre au job| RetentionJobBlocked[Rétention blocked<br/>+ alerte job]:::implemented
+    Snapshot -->|auth ou contrat global| RetentionSystemBlocked[Heartbeat blocked<br/>+ suspendre les contrôles]:::implemented
 
     DeadlineReason --> Deleting
     ClosedReason --> Deleting
-    Deleting --> Quarantine[Renommer vers .purge sur le même volume]:::future
-    Quarantine --> Unlink[Supprimer et synchroniser]:::future
-    Unlink --> Deleted[deleted + audio_deleted_at + événement]:::future
+    Deleting --> Quarantine[Publier create-only vers .purge<br/>sur le même volume]:::implemented
+    Quarantine --> Unlink[Supprimer et synchroniser]:::implemented
+    Unlink --> Deleted[deleted + audio_deleted_at + événement]:::implemented
 
     Reschedule --> Heartbeat
     Retry --> Heartbeat
     RetentionJobBlocked --> Heartbeat
-    RetentionSystemBlocked --> Probe[Attendre, revalider et<br/>contrôler les deadlines]:::future
+    RetentionSystemBlocked --> Probe[Attendre, revalider et<br/>contrôler les deadlines]:::implemented
     Probe -->|deadline atteinte| DeadlineReason
     Probe -->|toujours bloqué, aucune deadline| RetentionSystemBlocked
     Probe -->|dépendance rétablie| Heartbeat
@@ -734,12 +742,12 @@ flowchart TD
 ```
 
 La mise en quarantaine `.purge` rend chaque crash récupérable : le worker sait
-reprendre si le fichier est encore à son emplacement canonique, déjà dans
-`.purge` ou déjà absent. Pour un job, il ne supprime que sa clé de stockage
-validée. Pour un orphelin découvert par la maintenance, il valide d'abord le
-nom comme une clé canonique, vérifie son absence en base, puis supprime ce
-chemin exact ; le glob de découverte n'est jamais utilisé directement comme
-cible de suppression.
+reprendre si le fichier est encore à son emplacement canonique, si les deux
+noms désignent le même inode, s'il est uniquement dans `.purge` ou s'il est
+déjà absent. Deux noms désignant des inodes distincts sont bloqués sans
+écrasement. Pour un job, le worker ne supprime que sa clé de stockage validée.
+Le scan borné et la suppression d'orphelins restent hors du sous-jalon 5C : le
+worker actuel ne découvre jamais de cible en parcourant le volume.
 
 Si une suppression déjà engagée doit être réessayée ou bloquée, la rétention
 conserve ensemble `deletion_reason` et `deletion_started_at`. Le prochain
@@ -790,8 +798,9 @@ Avant la deadline d'un job `completed` :
 - `CLOSED` autorise la purge ;
 - `SOLVED` ou un statut ouvert conserve l'audio ;
 - une indisponibilité GLPI conserve l'audio et programme un backoff plafonné ;
-- `401`, `403`, `404`, statut inconnu ou `external_id` incohérent bloque la
-  rétention et alerte, sans suppression anticipée.
+- `404` ou un `external_id` incohérent bloque seulement la rétention concernée ;
+- `401`, `403` ou un contrat/statut inconnu bloque la dépendance GLPI et
+  programme une sonde unique, sans fan-out vers les autres contrôles.
 
 À la deadline absolue, la purge ne dépend plus de GLPI. La raison exacte est
 persistée afin que le dashboard explique pourquoi l'audio a disparu.
@@ -968,14 +977,15 @@ l'authentification applicative est reportée avant toute exposition élargie.
 Périmètre : extraction de `packages/glpi-client`, lecture du statut du ticket,
 application `worker-retention`, deadlines et purge crash-safe.
 
-État : 🟦 sous-jalons 5A et 5B implémentés sur la branche. Le client GLPI, ses
+État : 🟦 sous-jalons 5A, 5B et 5C implémentés sur la branche. Le client GLPI, ses
 contrats et sa stack Testcontainers appartiennent désormais au package
 partagé. La lecture directe par identifiant est épinglée sur l'API V2.3.0 et
 retourne le statut numérique GLPI 11.0.8. Le sous-jalon 5B ajoute la migration,
 les contraintes, la sélection priorisée et les transitions atomiques de
-`audio_retentions`, ainsi que les valeurs d'événement associées. Il n'appelle
-pas GLPI et ne touche pas aux fichiers. L'application `worker-retention`,
-l'orchestration multi-modèles et la purge crash-safe restent au sous-jalon 5C.
+`audio_retentions`, ainsi que les valeurs d'événement associées. Le sous-jalon
+5C ajoute l'application `worker-retention`, l'orchestration multi-modèles en
+transactions courtes, la barrière de sonde GLPI et la purge crash-safe via
+`.purge`.
 
 - Tests unitaires : statuts GLPI, correspondance `external_id`, planification,
   priorité de deadline, quarantaine `.purge` et reprise de chaque point de
@@ -983,11 +993,11 @@ l'orchestration multi-modèles et la purge crash-safe restent au sous-jalon 5C.
   deadline absolue est atteinte.
 - Tests d'intégration : client sur GLPI Testcontainers, singleton de rétention,
   conservation de `SOLVED`, purge de `CLOSED`, indisponibilité et incohérence.
-- Tests POC à déplacer : tests unitaires et contractuels du client GLPI
-  quittent l'application worker pour le package partagé ; ils ne sont pas
-  supprimés.
-- Code POC à déplacer : client GLPI et ses contrats, après migration de tous
-  les imports du worker d'automatisation.
+- Tests déplacés : les tests contractuels du client GLPI vivent dans le package
+  partagé ; la fixture Testcontainers est enregistrée une seule fois pour le
+  client, le worker de rétention et le pipeline E2E.
+- Code déplacé : le client GLPI et ses contrats sont désormais dans
+  `packages/glpi-client`, consommé par les deux workers.
 - Sortie : la suppression anticipée exige `CLOSED` et un `external_id` exact.
 
 ### Itération 6 — Heartbeats, alertes et autonomie

@@ -2,53 +2,12 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class RetryBackoffPolicy:
-    """Compute a capped exponential retry without sleeping in the worker."""
-
-    initial_seconds: float
-    maximum_seconds: float
-
-    def __post_init__(self) -> None:
-        initial = _positive_seconds(self.initial_seconds, "initial_seconds")
-        maximum = _positive_seconds(self.maximum_seconds, "maximum_seconds")
-        if initial > maximum:
-            raise ValueError("initial_seconds must not exceed maximum_seconds")
-        object.__setattr__(self, "initial_seconds", initial)
-        object.__setattr__(self, "maximum_seconds", maximum)
-
-    def next_attempt_at(
-        self,
-        *,
-        now: datetime,
-        consecutive_retry_count: int,
-    ) -> datetime:
-        """Return the deadline for the next failure in the consecutive series.
-
-        ``consecutive_retry_count`` is the value already persisted before the new
-        failure. Zero therefore yields the initial delay.
-        """
-
-        _aware_datetime(now, "now")
-        if isinstance(consecutive_retry_count, bool) or not isinstance(
-            consecutive_retry_count, int
-        ):
-            raise TypeError("consecutive_retry_count must be an integer")
-        if consecutive_retry_count < 0:
-            raise ValueError("consecutive_retry_count must be non-negative")
-
-        delay = self.initial_seconds
-        for _ in range(consecutive_retry_count):
-            if delay >= self.maximum_seconds / 2:
-                delay = self.maximum_seconds
-                break
-            delay *= 2
-        return now + timedelta(seconds=min(delay, self.maximum_seconds))
+from glpi_ticketing_common.backoff import (
+    ExponentialBackoffPolicy as RetryBackoffPolicy,
+)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -94,15 +53,6 @@ class RetentionSchedulePolicy:
 
         _aware_datetime(now, "now")
         return now + self.blocked_ttl
-
-
-def _positive_seconds(value: object, field_name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise TypeError(f"{field_name} must be a number")
-    normalized = float(value)
-    if not math.isfinite(normalized) or normalized <= 0:
-        raise ValueError(f"{field_name} must be finite and positive")
-    return normalized
 
 
 def _aware_datetime(value: object, field_name: str) -> None:

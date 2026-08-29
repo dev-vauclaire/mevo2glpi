@@ -7,8 +7,8 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import Select, select
-from sqlalchemy.orm import Session
+from sqlalchemy import Select, and_, case, exists, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from ..models import (
     AudioRetention,
@@ -154,6 +154,26 @@ class AudioRetentionRepository:
         """Return the retention record associated with a job UUID."""
         validate_uuid(job_uuid, "job_uuid")
         retention = self._session.get(AudioRetention, job_uuid)
+        return _to_snapshot(retention) if retention is not None else None
+
+    def get_glpi_probe_gate(self) -> AudioRetentionSnapshot | None:
+        """Return the persisted GLPI retry probe, including a future one.
+
+        A GLPI retry has no deletion context. While it exists, it gates ordinary
+        scheduled checks so one persisted row probes dependency recovery. The
+        query is deliberately read-only and deterministic if inconsistent legacy
+        data contains more than one probe.
+        """
+        retention = self._session.scalars(
+            select(AudioRetention)
+            .where(
+                AudioRetention.policy == RetentionPolicy.TICKET_OR_DEADLINE.value,
+                AudioRetention.status == RetentionStatus.RETRY_SCHEDULED.value,
+                AudioRetention.deletion_started_at.is_(None),
+            )
+            .order_by(AudioRetention.next_check_at, AudioRetention.job_uuid)
+            .limit(1)
+        ).first()
         return _to_snapshot(retention) if retention is not None else None
 
     def find_next_candidate(self, now: datetime) -> RetentionCandidate | None:
@@ -535,20 +555,40 @@ class AudioRetentionRepository:
         self,
         now: datetime,
     ) -> Select[tuple[AudioRetention]]:
+        retry_probe = aliased(AudioRetention)
+        retry_probe_exists = exists(
+            select(retry_probe.job_uuid).where(
+                retry_probe.policy == RetentionPolicy.TICKET_OR_DEADLINE.value,
+                retry_probe.status == RetentionStatus.RETRY_SCHEDULED.value,
+                retry_probe.deletion_started_at.is_(None),
+            )
+        )
         return (
             select(AudioRetention)
             .where(
                 AudioRetention.policy == RetentionPolicy.TICKET_OR_DEADLINE.value,
-                AudioRetention.status.in_(
-                    (
-                        RetentionStatus.SCHEDULED.value,
-                        RetentionStatus.RETRY_SCHEDULED.value,
-                    )
+                or_(
+                    AudioRetention.status == RetentionStatus.RETRY_SCHEDULED.value,
+                    and_(
+                        AudioRetention.status == RetentionStatus.SCHEDULED.value,
+                        ~retry_probe_exists,
+                    ),
                 ),
                 AudioRetention.next_check_at <= now,
+                AudioRetention.hard_delete_at > now,
                 AudioRetention.deletion_started_at.is_(None),
             )
-            .order_by(AudioRetention.next_check_at, AudioRetention.job_uuid)
+            .order_by(
+                case(
+                    (
+                        AudioRetention.status == RetentionStatus.RETRY_SCHEDULED.value,
+                        0,
+                    ),
+                    else_=1,
+                ),
+                AudioRetention.next_check_at,
+                AudioRetention.job_uuid,
+            )
             .limit(1)
         )
 
@@ -637,8 +677,13 @@ class AudioRetentionRepository:
             raise InvalidRetentionTransitionError(
                 f"{reason.value} deletion is incompatible with {policy.value} policy"
             )
-        if last_glpi_status_id is not None:
-            raise ValueError("deadline deletion does not accept last_glpi_status_id")
+        if (
+            last_glpi_status_id is not None
+            and reason is not DeletionReason.DEADLINE_EXPIRED
+        ):
+            raise ValueError(
+                "deadline-only deletion does not accept last_glpi_status_id"
+            )
         if retention.hard_delete_at is None or retention.hard_delete_at > now:
             raise InvalidRetentionTransitionError(
                 f"retention for job {retention.job_uuid} has not reached its deadline"

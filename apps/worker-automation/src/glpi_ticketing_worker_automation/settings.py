@@ -52,7 +52,7 @@ class WorkerSettings(BaseSettings):
     completed_retention_days: int = Field(default=90, gt=0)
     failed_retention_days: int = Field(default=30, gt=0)
     blocked_retention_days: int = Field(default=90, gt=0)
-    retention_first_check_hours: int = Field(default=6, gt=0)
+    retention_check_interval_hours: int = Field(default=6, gt=0)
 
     legacy_transcription_base_url: HttpUrl
     legacy_transcription_api_key: SecretStr = Field(repr=False)
@@ -105,7 +105,7 @@ class WorkerSettings(BaseSettings):
         "completed_retention_days",
         "failed_retention_days",
         "blocked_retention_days",
-        "retention_first_check_hours",
+        "retention_check_interval_hours",
         mode="before",
     )
     @classmethod
@@ -212,9 +212,9 @@ class WorkerSettings(BaseSettings):
             raise ValueError(
                 "WORKER_RETRY_INITIAL_SECONDS must not exceed WORKER_RETRY_MAX_SECONDS"
             )
-        if self.retention_first_check_hours >= self.completed_retention_days * 24:
+        if self.retention_check_interval_hours >= self.completed_retention_days * 24:
             raise ValueError(
-                "RETENTION_FIRST_CHECK_HOURS must precede the completed retention "
+                "RETENTION_CHECK_INTERVAL_HOURS must precede the completed retention "
                 "deadline"
             )
         return self

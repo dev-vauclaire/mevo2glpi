@@ -88,6 +88,7 @@ def test_worker_settings_read_environment_overrides(
     monkeypatch.setenv("WORKER_RETRY_INITIAL_SECONDS", "4")
     monkeypatch.setenv("WORKER_RETRY_MAX_SECONDS", "120")
     monkeypatch.setenv("WORKER_SYSTEM_PROBE_INTERVAL_SECONDS", "45")
+    monkeypatch.setenv("RETENTION_CHECK_INTERVAL_HOURS", "8")
 
     settings = WorkerSettings(_env_file=None)
 
@@ -100,6 +101,7 @@ def test_worker_settings_read_environment_overrides(
     assert settings.worker_retry_initial_seconds == 4
     assert settings.worker_retry_max_seconds == 120
     assert settings.worker_system_probe_interval_seconds == 45
+    assert settings.retention_check_interval_hours == 8
 
 
 def test_runner_intervals_have_safe_defaults(
@@ -173,12 +175,12 @@ def test_retry_initial_delay_cannot_exceed_cap() -> None:
         )
 
 
-def test_first_retention_check_must_precede_completed_deadline() -> None:
+def test_retention_check_interval_must_precede_completed_deadline() -> None:
     with pytest.raises(ValidationError, match="must precede"):
         WorkerSettings(
             public_base_url="http://localhost:8000",
             completed_retention_days=1,
-            retention_first_check_hours=24,
+            retention_check_interval_hours=24,
             _env_file=None,
         )
 

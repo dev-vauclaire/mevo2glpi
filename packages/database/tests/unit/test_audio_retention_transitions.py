@@ -276,6 +276,24 @@ def test_start_deletion_for_closed_ticket_records_status_and_context() -> None:
     assert snapshot.consecutive_retry_count == 0
 
 
+def test_deadline_deletion_records_a_status_observed_during_the_glpi_check() -> None:
+    session, _retention = _repository_with(
+        status=RetentionStatus.CHECKING,
+        hard_delete_at=NOW,
+    )
+
+    snapshot = AudioRetentionRepository(session).start_deletion(
+        JOB_UUID,
+        reason=DeletionReason.DEADLINE_EXPIRED,
+        last_glpi_status_id=4,
+        now=NOW,
+    )
+
+    assert snapshot.status is RetentionStatus.DELETING
+    assert snapshot.last_glpi_status_id == 4
+    assert snapshot.deletion_reason is DeletionReason.DEADLINE_EXPIRED
+
+
 @pytest.mark.parametrize(
     ("policy", "reason"),
     [
