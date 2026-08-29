@@ -446,9 +446,13 @@ services externes. PostgreSQL conserve le cycle de vie dans `postgres-data` et
 les trois applications métier partagent les octets immuables de `audio-data`.
 
 Les overlays `dev`, `staging` et `prod` isolent les projets Compose, réseaux et
-volumes. Seul Nginx publie un port. Les secrets réels de staging et production
-résident sous `/etc/glpi-ticketing-automation/<environnement>/`, jamais dans le
-checkout. La migration doit réussir avant que le web ou les workers démarrent.
+volumes. Seul Nginx publie les ports HTTP et HTTPS ; HTTP répond uniquement par
+une redirection `308` vers le port HTTPS externe configuré. Les ports hôte sont
+pilotés par `GTA_NGINX_HTTP_PORT` et `GTA_NGINX_HTTPS_PORT`, avec `80` et `443`
+par défaut ; `GTA_NGINX_PUBLIC_HOST` fixe l'hôte sûr de cette redirection. Les
+secrets réels de staging et production résident sous
+`/etc/glpi-ticketing-automation/<environnement>/`, jamais dans le checkout. La
+migration doit réussir avant que le web ou les workers démarrent.
 
 Commandes principales, détaillées dans le
 [runbook Docker](infra/docker/README.md) :
@@ -594,7 +598,7 @@ d'import `importlib`. Les marqueurs enregistrés sont :
 | `deployment` | Valide les images, overlays, migrations, healthchecks et volumes du Compose MVP sans appeler les API externes |
 | `transcribe_ai` | Démarre une stack Transcribe AI v1 jetable et exécute le contrat POST/polling réel |
 | `glpi` | Démarre une seule stack GLPI 11/MySQL jetable et teste le client V2.3.0 réel |
-| `e2e` | Assemble PostgreSQL migré et le worker réel avec les stacks Transcribe AI et GLPI jetables |
+| `e2e` | Assemble la stack Compose MVP et les instances GLPI et Transcribe AI jetables ; cette suite de release reste strictement séquentielle |
 
 La suite `database` lance une seule image PostgreSQL épinglée par digest sur un
 réseau privé et un port loopback aléatoire. Chaque test reçoit une base isolée,
@@ -626,13 +630,19 @@ corrélé le purge et qu'une corrélation incohérente bloque uniquement la
 rétention. Le teardown supprime les conteneurs, le réseau, les volumes Compose
 et l'image custom construite pour la session.
 
-La suite `e2e` réutilise ces deux fixtures de session, une base PostgreSQL
-migrée et la vraie racine de composition du worker. Elle génère un UUID, publie
-le WAV synthétique à sa clé canonique, crée le job `pending`, puis vérifie le
-ticket corrélé par `external_id`, l'état `completed`, la rétention et
-l'historique d'événements. Elle confirme que l'audio est inchangé et qu'aucun
-artefact de cycle de vie n'a été créé. Les fixtures restent responsables de
-leur teardown. Cette suite ne doit pas être parallélisée.
+Le test E2E ciblé du worker sous
+`apps/worker-automation/tests/integration/e2e` réutilise ces deux fixtures de
+session, une base PostgreSQL migrée et la vraie racine de composition du
+worker. Il conserve une régression directe du pipeline nominal sans démarrer
+la façade web ni les images du déploiement.
+
+La suite de release racine sous [`tests/e2e`](tests/e2e/README.md) assemble au
+contraire la stack Compose MVP complète — PostgreSQL, migration one-shot, web,
+deux workers et Nginx — avec les instances GLPI et Transcribe AI jetables. Le
+sous-jalon 8A porte uniquement ce socle, ses sondes de disponibilité, ses
+identifiants éphémères et son nettoyage borné. Les scénarios métier upload,
+retry, reprise, alertes et purge appartiennent au sous-jalon 8B. Toute la suite
+E2E s'exécute seule, sans `pytest-xdist` ni autre stack Docker concurrente.
 
 ## Commandes de validation depuis la racine
 
@@ -716,24 +726,27 @@ TRANSCRIBE_AI_TEST_DEVICE=gpu \
 uv run --all-packages pytest -m transcribe_ai -vv --maxfail=1
 ```
 
-Flux E2E complet sur CPU, utilisé par défaut :
+Socle E2E racine sur CPU, validation obligatoire de l'itération 8A :
 
 ```bash
-uv run pytest -m e2e \
-apps/worker-automation/tests/integration/e2e -vv --maxfail=1
+TRANSCRIBE_AI_TEST_DEVICE=cpu \
+uv run pytest -m e2e tests/e2e -vv --maxfail=1
 ```
 
-Le même flux sur GPU :
+Le mode GPU est une validation optionnelle qui ne remplace jamais le passage
+CPU obligatoire :
 
 ```bash
 TRANSCRIBE_AI_TEST_DEVICE=gpu \
-uv run pytest -m e2e \
-apps/worker-automation/tests/integration/e2e -vv --maxfail=1
+uv run pytest -m e2e tests/e2e -vv --maxfail=1
 ```
 
-Chaque session télécharge le modèle Whisper `tiny` ; le premier lancement
-télécharge aussi les images, dont l'image STT volumineuse. Les détails du flux,
-des prérequis GPU et du teardown sont documentés dans
-[`apps/worker-automation/tests/integration/transcribe-ai/README.md`](apps/worker-automation/tests/integration/transcribe-ai/README.md).
-Le scénario combiné est détaillé dans
-[`apps/worker-automation/tests/integration/e2e/README.md`](apps/worker-automation/tests/integration/e2e/README.md).
+N'ajoutez pas `-n` et ne lancez pas cette commande en même temps que les suites
+`deployment`, `glpi` ou `transcribe_ai`. Chaque session télécharge le modèle
+Whisper `tiny` ; le premier lancement télécharge aussi les images, dont l'image
+STT volumineuse. La topologie, la frontière 8A/8B et le teardown de la suite de
+release sont documentés dans [`tests/e2e/README.md`](tests/e2e/README.md). Les
+détails de Transcribe AI et du test ciblé du worker restent disponibles dans
+leurs documentations
+[`transcribe-ai`](apps/worker-automation/tests/integration/transcribe-ai/README.md)
+et [`e2e`](apps/worker-automation/tests/integration/e2e/README.md).

@@ -209,7 +209,9 @@ pour le MVP.
 │   ├── web/Dockerfile                                 🟦
 │   └── nginx/Dockerfile                               🟦
 │
-└── tests/deployment/                                  🟦 smoke tests Compose MVP
+└── tests/
+    ├── deployment/                                   🟦 smoke tests Compose MVP
+    └── e2e/                                          🟦 socle de release racine 8A
 ```
 
 Les modèles sont séparés par table afin que chaque module porte ses colonnes,
@@ -928,8 +930,8 @@ healthcheck ainsi qu'une procédure documentée de sauvegarde et restauration.
 
 `infra/docker/compose.yaml` décrit les invariants des six services. Les
 overlays `dev`, `staging` et `prod` ne recopient pas ce socle : ils définissent
-uniquement les différences de construction, de publication du port Nginx et de
-configuration propres à l'environnement. Un overlay optionnel
+uniquement les différences de construction, de publication des ports Nginx et
+de configuration propres à l'environnement. Un overlay optionnel
 `compose.internal-ca.yaml` ajoute un bundle de confiance sans désactiver la
 validation TLS.
 
@@ -943,7 +945,9 @@ PostgreSQL et les quatre applications partagent uniquement le réseau interne
 `database-private`. Nginx et le web communiquent sur `web-private` ; Nginx ne
 possède donc aucune route directe vers la base. Les workers rejoignent en plus
 `worker-egress` pour les API externes, tandis que seul Nginx rejoint
-`proxy-edge` et publie un port.
+`proxy-edge` et publie les ports HTTP et HTTPS. HTTP ne porte aucun trafic
+applicatif : il retourne un `308` vers le port HTTPS externe configuré, y
+compris lorsque celui-ci diffère de `443`.
 
 Les configurations et secrets réels de staging et production résident hors
 Git sous `/etc/glpi-ticketing-automation/<environnement>/`. Le dépôt conserve
@@ -1237,12 +1241,44 @@ POC reste consultable exclusivement depuis `poc-v0.1.0`.
 Périmètre : scénario complet upload, retry, reprise, ticket GLPI, dashboard,
 fermeture du ticket, purge et audit persistant.
 
+L'itération est découpée en trois frontières afin de ne pas confondre un défaut
+de bootstrap Docker avec une régression métier ou un défaut de publication.
+
+#### Sous-jalon 8A — Socle E2E racine
+
+`tests/e2e` assemble la stack Compose MVP complète — PostgreSQL, migration
+one-shot, web, worker d'automatisation, worker de rétention et Nginx — avec les
+stacks GLPI et Transcribe AI jetables. Les ports, réseaux, volumes, bases et
+identifiants sont propres à la session ; aucune configuration staging ou
+production n'est consommée. Le sous-jalon attend chaque service par une sonde
+bornée puis détruit les ressources qu'il a créées, mais ne porte encore aucun
+scénario métier.
+
+La validation CPU est obligatoire et doit être exécutée seule, sans
+`pytest-xdist` :
+
+```bash
+TRANSCRIBE_AI_TEST_DEVICE=cpu \
+uv run pytest -m e2e tests/e2e -vv --maxfail=1
+```
+
+Le même socle peut être validé sur GPU en complément, jamais à la place du
+CPU, avec `TRANSCRIBE_AI_TEST_DEVICE=gpu`. Les identifiants sont exclusivement
+éphémères et ne doivent jamais provenir des fichiers `/etc` de staging ou de
+production.
+
+#### Sous-jalon 8B — Scénarios métier
+
 - Tests unitaires : uniquement les cas limites découverts pendant l'E2E.
-- Tests d'intégration/E2E : stack complète, plusieurs audios, panne externe,
-  redémarrage pendant `processing`, absence de doublon GLPI, alerte
-  `failed`/`blocked`, purge anticipée et purge par deadline avec horloge
-  contrôlée.
+- Tests d'intégration/E2E : plusieurs audios, panne externe, redémarrage
+  pendant `processing`, absence de doublon GLPI, alerte `failed`/`blocked`,
+  purge anticipée et purge par deadline avec horloge contrôlée.
 - Tests ou code POC à retirer : aucun par principe ; tout reliquat est d'abord
   qualifié par une recherche d'usage et par sa valeur de régression.
-- Sortie : runbook de démonstration, limites résiduelles documentées et tag
-  candidat `mvp-v1.0.0`.
+- Sortie : runbook de démonstration et limites résiduelles documentées.
+
+#### Sous-jalon 8C — Publication (à définir après 8A et 8B)
+
+La publication des images, leur consommation par Dokploy et les règles de
+promotion entre environnements seront décidées après validation des scénarios
+métier. Le tag candidat validé pour cette publication est `mvp-v0.1.0`.

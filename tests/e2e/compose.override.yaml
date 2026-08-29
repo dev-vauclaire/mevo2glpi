@@ -1,0 +1,34 @@
+services:
+  postgres:
+    ports:
+      - target: 5432
+        published: "${GTA_E2E_POSTGRES_PORT:?GTA_E2E_POSTGRES_PORT must be set}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      database-private:
+        aliases:
+          # Transcribe AI also owns a `postgres` alias on its native network.
+          - mvp-postgres
+      # Docker does not publish host ports for a container attached exclusively
+      # to an internal network. This test-only network enables the loopback
+      # administration channel required by the controlled-clock scenarios.
+      e2e-control:
+
+  worker-automation:
+    networks:
+      glpi-e2e:
+      transcribe-ai-e2e:
+
+  worker-retention:
+    networks:
+      glpi-e2e:
+
+networks:
+  e2e-control:
+  glpi-e2e:
+    external: true
+    name: ${GTA_E2E_GLPI_NETWORK:?GTA_E2E_GLPI_NETWORK must be set}
+  transcribe-ai-e2e:
+    external: true
+    name: ${GTA_E2E_TRANSCRIBE_AI_NETWORK:?GTA_E2E_TRANSCRIBE_AI_NETWORK must be set}

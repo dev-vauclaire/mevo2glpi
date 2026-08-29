@@ -44,10 +44,10 @@ testpaths = ["apps", "packages", "tests"]
 pythonpath = ["."]
 markers = [
     "database: démarre une instance PostgreSQL jetable pour valider le schéma et les migrations",
-    "deployment: construit et démarre les images runtime et le reverse proxy Docker du POC",
+    "deployment: construit et démarre les images runtime et le reverse proxy Docker du MVP",
     "glpi: démarre une instance GLPI jetable avec Testcontainers",
     "transcribe_ai: démarre une stack Transcribe AI jetable avec Testcontainers",
-    "e2e: exécute le flux complet avec services externes",
+    "e2e: assemble la stack MVP complète avec GLPI et Transcribe AI jetables",
 ]
 
 [tool.ruff]
