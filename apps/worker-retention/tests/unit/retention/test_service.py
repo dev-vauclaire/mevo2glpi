@@ -227,6 +227,7 @@ def test_open_or_solved_ticket_keeps_audio_and_schedules_next_check(
     ("glpi_response", "expected_observed_status"),
     [
         (ticket_snapshot(status=TicketStatus.ASSIGNED), TicketStatus.ASSIGNED),
+        (ticket_snapshot(status=TicketStatus.CLOSED), TicketStatus.CLOSED),
         (GlpiTransportError(GlpiOperation.GET_TICKET), None),
     ],
 )

@@ -163,6 +163,12 @@ class RetentionWorker:
         decision_time = self._current_time()
 
         if isinstance(result, GlpiCheckSuccess):
+            if decision_time >= work.hard_delete_at:
+                return self._delete_expired_check(
+                    work,
+                    decision_time,
+                    ticket_status=result.snapshot.status,
+                )
             if result.snapshot.status is TicketStatus.CLOSED:
                 purge_work = self._lifecycle.start_deletion_after_check(
                     work,
@@ -171,12 +177,6 @@ class RetentionWorker:
                     ticket_status=result.snapshot.status,
                 )
                 return self._execute_audio_purge(purge_work)
-            if decision_time >= work.hard_delete_at:
-                return self._delete_expired_check(
-                    work,
-                    decision_time,
-                    ticket_status=result.snapshot.status,
-                )
 
             next_check_at = self._check_policy.next_check_at(
                 now=decision_time,
