@@ -36,6 +36,9 @@ dist/
 /infra/docker/nginx/*.credentials.env
 /infra/docker/docker-compose.local.yaml
 /infra/docker/runtime/
+/infra/docker/environments/*/compose.env
+/infra/docker/environments/*/services/*.env
+/infra/docker/environments/*/secrets/
 
 # Editors and operating systems
 .idea/

@@ -1,0 +1,22 @@
+services:
+  worker-automation:
+    environment:
+      SSL_CERT_FILE: /etc/ssl/certs/gta-trust-bundle.pem
+    volumes:
+      - type: bind
+        source: ${GTA_CA_BUNDLE:?GTA_CA_BUNDLE must be set}
+        target: /etc/ssl/certs/gta-trust-bundle.pem
+        read_only: true
+        bind:
+          create_host_path: false
+
+  worker-retention:
+    environment:
+      SSL_CERT_FILE: /etc/ssl/certs/gta-trust-bundle.pem
+    volumes:
+      - type: bind
+        source: ${GTA_CA_BUNDLE:?GTA_CA_BUNDLE must be set}
+        target: /etc/ssl/certs/gta-trust-bundle.pem
+        read_only: true
+        bind:
+          create_host_path: false

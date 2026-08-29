@@ -1,0 +1,211 @@
+name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME must identify the environment}
+
+x-application-runtime: &application-runtime
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+    init: true
+    user: "70:70"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_DB: ${GTA_POSTGRES_DB:?GTA_POSTGRES_DB must be set}
+      POSTGRES_USER: ${GTA_POSTGRES_USER:?GTA_POSTGRES_USER must be set}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    group_add:
+      - "${GTA_POSTGRES_SECRET_GID:?GTA_POSTGRES_SECRET_GID must be set}"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready --username "$${POSTGRES_USER}"
+          --dbname "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+      start_interval: 1s
+    volumes:
+      - type: volume
+        source: postgres-data
+        target: /var/lib/postgresql/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=70,gid=70,mode=1777
+      - /var/run/postgresql:rw,noexec,nosuid,nodev,size=16m,uid=70,gid=70,mode=3777
+    secrets:
+      - postgres_password
+    networks:
+      - database-private
+    restart: unless-stopped
+    stop_grace_period: 60s
+    shm_size: 128m
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  database-migrations:
+    <<: *application-runtime
+    image: ${GTA_MIGRATIONS_IMAGE:?GTA_MIGRATIONS_IMAGE must be set}
+    env_file:
+      - path: ${GTA_DATABASE_ENV_FILE:?GTA_DATABASE_ENV_FILE must be set}
+        required: true
+      - path: ${GTA_MIGRATIONS_ENV_FILE:?GTA_MIGRATIONS_ENV_FILE must be set}
+        required: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    networks:
+      - database-private
+    restart: "no"
+
+  web:
+    <<: *application-runtime
+    image: ${GTA_WEB_IMAGE:?GTA_WEB_IMAGE must be set}
+    env_file:
+      - path: ${GTA_DATABASE_ENV_FILE:?GTA_DATABASE_ENV_FILE must be set}
+        required: true
+      - path: ${GTA_WEB_ENV_FILE:?GTA_WEB_ENV_FILE must be set}
+        required: true
+    environment:
+      AUDIO_ROOT: /data/audios
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8000"
+      # Safe because web-private contains only Nginx and this application.
+      WEB_TRUST_PROXY_HEADERS: "true"
+    depends_on:
+      database-migrations:
+        condition: service_completed_successfully
+    expose:
+      - "8000"
+    volumes:
+      - type: volume
+        source: audio-data
+        target: /data/audios
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=${GTA_WEB_TMPFS_SIZE:-128m},mode=1777
+    networks:
+      - database-private
+      - web-private
+    restart: unless-stopped
+
+  worker-automation:
+    <<: *application-runtime
+    image: ${GTA_AUTOMATION_IMAGE:?GTA_AUTOMATION_IMAGE must be set}
+    env_file:
+      - path: ${GTA_DATABASE_ENV_FILE:?GTA_DATABASE_ENV_FILE must be set}
+        required: true
+      - path: ${GTA_AUTOMATION_ENV_FILE:?GTA_AUTOMATION_ENV_FILE must be set}
+        required: true
+    environment:
+      AUDIO_ROOT: /data/audios
+    depends_on:
+      database-migrations:
+        condition: service_completed_successfully
+    volumes:
+      - type: volume
+        source: audio-data
+        target: /data/audios
+        read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    networks:
+      database-private:
+      worker-egress:
+        # Keep provider traffic off the internal database gateway.
+        gw_priority: 1
+    restart: "on-failure:5"
+
+  worker-retention:
+    <<: *application-runtime
+    image: ${GTA_RETENTION_IMAGE:?GTA_RETENTION_IMAGE must be set}
+    env_file:
+      - path: ${GTA_DATABASE_ENV_FILE:?GTA_DATABASE_ENV_FILE must be set}
+        required: true
+      - path: ${GTA_RETENTION_ENV_FILE:?GTA_RETENTION_ENV_FILE must be set}
+        required: true
+    environment:
+      AUDIO_ROOT: /data/audios
+    depends_on:
+      database-migrations:
+        condition: service_completed_successfully
+    volumes:
+      - type: volume
+        source: audio-data
+        target: /data/audios
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    networks:
+      database-private:
+      worker-egress:
+        # Keep provider traffic off the internal database gateway.
+        gw_priority: 1
+    restart: "on-failure:5"
+
+  nginx:
+    <<: *application-runtime
+    image: ${GTA_NGINX_IMAGE:?GTA_NGINX_IMAGE must be set}
+    depends_on:
+      web:
+        condition: service_healthy
+    group_add:
+      - "${GTA_NGINX_SECRET_GID:?GTA_NGINX_SECRET_GID must be set}"
+    ports:
+      - target: 8443
+        published: "${GTA_NGINX_HTTPS_PORT:-443}"
+        host_ip: ${GTA_NGINX_BIND_IP:-127.0.0.1}
+        protocol: tcp
+    secrets:
+      - nginx_tls_certificate
+      - nginx_tls_key
+      - nginx_htpasswd
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=101,gid=101,mode=0700
+    networks:
+      proxy-edge:
+        gw_priority: 1
+      web-private:
+    restart: unless-stopped
+
+networks:
+  proxy-edge:
+  database-private:
+    internal: true
+  web-private:
+    internal: true
+  worker-egress:
+
+volumes:
+  postgres-data:
+  audio-data:
+
+secrets:
+  postgres_password:
+    file: ${GTA_POSTGRES_PASSWORD_FILE:?GTA_POSTGRES_PASSWORD_FILE must be set}
+  nginx_tls_certificate:
+    file: ${GTA_NGINX_TLS_CERTIFICATE_FILE:?GTA_NGINX_TLS_CERTIFICATE_FILE must be set}
+  nginx_tls_key:
+    file: ${GTA_NGINX_TLS_KEY_FILE:?GTA_NGINX_TLS_KEY_FILE must be set}
+  nginx_htpasswd:
+    file: ${GTA_NGINX_HTPASSWD_FILE:?GTA_NGINX_HTPASSWD_FILE must be set}

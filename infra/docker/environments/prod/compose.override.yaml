@@ -1,0 +1,19 @@
+x-release-guard:
+  # Keep production undeployable until immutable registry digests have replaced
+  # the tracked zero sentinels and the promotion has been explicitly confirmed.
+  confirmed: ${GTA_RELEASE_DIGESTS_CONFIRMED:?replace zero digests before production}
+
+services:
+  database-migrations:
+    pull_policy: missing
+  web:
+    pull_policy: missing
+  worker-automation:
+    pull_policy: missing
+  worker-retention:
+    pull_policy: missing
+  nginx:
+    pull_policy: missing
+    labels:
+      org.glpi-ticketing-automation.environment: production
+      org.glpi-ticketing-automation.release-confirmed: ${GTA_RELEASE_DIGESTS_CONFIRMED:?replace zero digests before production}

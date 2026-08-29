@@ -1,0 +1,40 @@
+services:
+  database-migrations:
+    build:
+      context: ../..
+      dockerfile: infra/docker/database-migrations/Dockerfile
+      args:
+        IMAGE_VERSION: ${GTA_IMAGE_VERSION:-dev}
+        VCS_REF: ${GTA_VCS_REF:-unknown}
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web/Dockerfile
+      args:
+        IMAGE_VERSION: ${GTA_IMAGE_VERSION:-dev}
+        VCS_REF: ${GTA_VCS_REF:-unknown}
+
+  worker-automation:
+    build:
+      context: ../..
+      dockerfile: infra/docker/worker-automation/Dockerfile
+      args:
+        IMAGE_VERSION: ${GTA_IMAGE_VERSION:-dev}
+        VCS_REF: ${GTA_VCS_REF:-unknown}
+
+  worker-retention:
+    build:
+      context: ../..
+      dockerfile: infra/docker/worker-retention/Dockerfile
+      args:
+        IMAGE_VERSION: ${GTA_IMAGE_VERSION:-dev}
+        VCS_REF: ${GTA_VCS_REF:-unknown}
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+      args:
+        IMAGE_VERSION: ${GTA_IMAGE_VERSION:-dev}
+        VCS_REF: ${GTA_VCS_REF:-unknown}
