@@ -7,6 +7,8 @@
 !apps/
 !apps/database-migrations/
 !apps/database-migrations/pyproject.toml
+!apps/database-migrations/src/
+!apps/database-migrations/src/**
 !apps/web/
 !apps/web/pyproject.toml
 !apps/web/src/
@@ -17,6 +19,8 @@
 !apps/worker-automation/src/**
 !apps/worker-retention/
 !apps/worker-retention/pyproject.toml
+!apps/worker-retention/src/
+!apps/worker-retention/src/**
 
 !packages/
 !packages/common/

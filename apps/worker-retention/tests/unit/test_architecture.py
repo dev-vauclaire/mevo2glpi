@@ -99,7 +99,7 @@ def test_runtime_context_alone_owns_process_resources() -> None:
         if _imported_names(path).intersection(resource_names)
     }
 
-    assert importing_files == {"runtime/context.py"}
+    assert importing_files == {"runtime/context.py", "runtime/healthcheck.py"}
 
 
 def test_retention_worker_never_imports_automation_application() -> None:

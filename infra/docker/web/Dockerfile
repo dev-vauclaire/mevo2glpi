@@ -39,7 +39,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM ${PYTHON_IMAGE} AS runtime
 
-ARG IMAGE_VERSION=0.1.0-poc
+ARG IMAGE_VERSION=0.1.0-mvp
 ARG VCS_REF=unknown
 
 LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-ticketing-automation" \
