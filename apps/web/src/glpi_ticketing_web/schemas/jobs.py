@@ -76,6 +76,10 @@ class JobEventName(StrEnum):
     JOB_FAILED = "job_failed"
     JOB_BLOCKED = "job_blocked"
     OPERATOR_RETRY_REQUESTED = "operator_retry_requested"
+    RETENTION_RETRY_SCHEDULED = "retention_retry_scheduled"
+    RETENTION_BLOCKED = "retention_blocked"
+    AUDIO_DELETION_STARTED = "audio_deletion_started"
+    AUDIO_DELETED = "audio_deleted"
 
 
 class JobAcceptedResponse(BaseModel):

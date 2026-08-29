@@ -47,6 +47,15 @@ def test_dashboard_uses_cursor_and_separate_event_endpoint() -> None:
     assert "ACTOR_LABELS" in dashboard
 
 
+def test_dashboard_names_every_retention_lifecycle_event() -> None:
+    dashboard = (JAVASCRIPT_ROOT / "dashboard.js").read_text(encoding="utf-8")
+
+    assert '["retention_retry_scheduled",' in dashboard
+    assert '["retention_blocked",' in dashboard
+    assert '["audio_deletion_started",' in dashboard
+    assert '["audio_deleted",' in dashboard
+
+
 def test_dashboard_serializes_polling_and_ignores_stale_detail_requests() -> None:
     dashboard = (JAVASCRIPT_ROOT / "dashboard.js").read_text(encoding="utf-8")
 

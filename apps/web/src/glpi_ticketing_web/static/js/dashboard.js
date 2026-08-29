@@ -42,6 +42,10 @@ const EVENT_LABELS = new Map([
   ["job_failed", "Traitement en échec"],
   ["job_blocked", "Traitement bloqué"],
   ["operator_retry_requested", "Relance opérateur demandée"],
+  ["retention_retry_scheduled", "Nouvelle tentative de rétention planifiée"],
+  ["retention_blocked", "Rétention bloquée"],
+  ["audio_deletion_started", "Suppression de l’audio démarrée"],
+  ["audio_deleted", "Audio supprimé"],
 ]);
 
 const ACTOR_LABELS = new Map([

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from io import BytesIO
 from types import SimpleNamespace
 from uuid import UUID
@@ -12,12 +13,20 @@ import pytest
 from fastapi import HTTPException, Response
 
 import glpi_ticketing_web.controllers.jobs as jobs_controller_module
-from glpi_ticketing_database import AudioExtension, JobStatus
+from glpi_ticketing_database import (
+    AudioExtension,
+    JobEventActor,
+    JobEventType,
+    JobStage,
+    JobStatus,
+)
 from glpi_ticketing_web.controllers import JobController, ManagedStreamingResponse
 from glpi_ticketing_web.services import (
     AudioStorageUnavailableError,
     DownloadableAudio,
     InvalidCursorError,
+    JobEventListPage,
+    JobEventView,
     JobListPage,
     JobRetryConflictError,
     RetriedJob,
@@ -54,6 +63,64 @@ class FakeListService:
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        JobEventType.RETENTION_RETRY_SCHEDULED,
+        JobEventType.RETENTION_BLOCKED,
+        JobEventType.AUDIO_DELETION_STARTED,
+        JobEventType.AUDIO_DELETED,
+    ],
+)
+def test_event_history_exposes_retention_lifecycle_events(
+    event_type: JobEventType,
+) -> None:
+    event = JobEventView(
+        event_id=1,
+        event_type=event_type,
+        occurred_at=datetime(2026, 8, 29, tzinfo=UTC),
+        state=JobStatus.COMPLETED,
+        stage=JobStage.FINALIZATION,
+        actor=JobEventActor.WORKER_RETENTION,
+        error_scope=None,
+        error_category=None,
+        technical_code=None,
+    )
+    event_service = SimpleNamespace(
+        execute=lambda *_args, **_kwargs: JobEventListPage(
+            items=(event,),
+            next_cursor=None,
+        )
+    )
+    controller = JobController(
+        submit_audio_job=object(),  # type: ignore[arg-type]
+        list_audio_jobs=object(),  # type: ignore[arg-type]
+        get_audio_job=object(),  # type: ignore[arg-type]
+        list_audio_job_events=event_service,  # type: ignore[arg-type]
+        retry_audio_job=object(),  # type: ignore[arg-type]
+        get_downloadable_audio=object(),  # type: ignore[arg-type]
+    )
+
+    response = controller.list_job_events(AUDIO_UUID, limit=25, cursor=None)
+
+    assert response.model_dump(mode="json") == {
+        "items": [
+            {
+                "event_id": 1,
+                "event_type": event_type.value,
+                "occurred_at": "2026-08-29T00:00:00Z",
+                "state": "completed",
+                "stage": "finalization",
+                "actor": "worker_retention",
+                "error_scope": None,
+                "error_category": None,
+                "technical_code": None,
+            }
+        ],
+        "next_cursor": None,
+    }
 
 
 def test_download_closes_audio_if_response_construction_fails(
