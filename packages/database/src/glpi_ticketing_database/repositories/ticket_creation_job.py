@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -16,11 +16,13 @@ from ..models import (
     JobStatus,
     TicketCreationJob,
 )
+from ._alerting import AlertAggregate
 from ._validation import (
     validate_aware_datetime,
     validate_page_limit,
     validate_positive_integer,
     validate_safe_identifier,
+    validate_utc_datetime,
     validate_uuid,
 )
 
@@ -99,6 +101,16 @@ class JobMutation:
 
     job: JobSnapshot
     changed: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class JobAlertSummary:
+    """Bounded dashboard aggregates computed from job lifecycle rows."""
+
+    pending_overdue: AlertAggregate
+    retry_overdue: AlertAggregate
+    failed: AlertAggregate
+    blocked: AlertAggregate
 
 
 class TicketCreationJobRepository:
@@ -196,6 +208,66 @@ class TicketCreationJobRepository:
             items=items,
             next_cursor=next_cursor,
             has_more=has_more,
+        )
+
+    def get_alert_summary(
+        self,
+        *,
+        pending_before: datetime,
+        retry_before: datetime,
+    ) -> JobAlertSummary:
+        """Aggregate active dashboard conditions using strict UTC cutoffs."""
+        pending_before = validate_utc_datetime(pending_before, "pending_before")
+        retry_before = validate_utc_datetime(retry_before, "retry_before")
+
+        pending_overdue = and_(
+            TicketCreationJob.status == JobStatus.PENDING.value,
+            TicketCreationJob.updated_at < pending_before,
+        )
+        retry_overdue = and_(
+            TicketCreationJob.status == JobStatus.RETRY_SCHEDULED.value,
+            TicketCreationJob.next_attempt_at < retry_before,
+        )
+        failed = TicketCreationJob.status == JobStatus.FAILED.value
+        blocked = TicketCreationJob.status == JobStatus.BLOCKED.value
+
+        values = self._session.execute(
+            select(
+                select(func.count())
+                .select_from(TicketCreationJob)
+                .where(pending_overdue)
+                .scalar_subquery(),
+                select(func.min(TicketCreationJob.updated_at))
+                .where(pending_overdue)
+                .scalar_subquery(),
+                select(func.count())
+                .select_from(TicketCreationJob)
+                .where(retry_overdue)
+                .scalar_subquery(),
+                select(func.min(TicketCreationJob.next_attempt_at))
+                .where(retry_overdue)
+                .scalar_subquery(),
+                select(func.count())
+                .select_from(TicketCreationJob)
+                .where(failed)
+                .scalar_subquery(),
+                select(func.min(TicketCreationJob.updated_at))
+                .where(failed)
+                .scalar_subquery(),
+                select(func.count())
+                .select_from(TicketCreationJob)
+                .where(blocked)
+                .scalar_subquery(),
+                select(func.min(TicketCreationJob.updated_at))
+                .where(blocked)
+                .scalar_subquery(),
+            )
+        ).one()
+        return JobAlertSummary(
+            pending_overdue=_aggregate(values[0], values[1]),
+            retry_overdue=_aggregate(values[2], values[3]),
+            failed=_aggregate(values[4], values[5]),
+            blocked=_aggregate(values[6], values[7]),
         )
 
     def rearm_for_operator_retry(
@@ -498,6 +570,10 @@ def _clear_job_error(job: TicketCreationJob) -> None:
     job.last_error_code = None
 
 
+def _aggregate(count: int, condition_since: datetime | None) -> AlertAggregate:
+    return AlertAggregate(count=count, condition_since=condition_since)
+
+
 def _apply_terminal_job_state(
     job: TicketCreationJob,
     *,
@@ -583,6 +659,7 @@ def _to_snapshot(job: TicketCreationJob) -> JobSnapshot:
 __all__ = [
     "InvalidJobTransitionError",
     "JobAcquisition",
+    "JobAlertSummary",
     "JobCursor",
     "JobMutation",
     "JobNotFoundError",

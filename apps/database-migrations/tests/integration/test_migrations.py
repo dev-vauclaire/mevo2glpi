@@ -18,6 +18,7 @@ from glpi_ticketing_database import (
     Base,
     TicketCreationJob,
     TicketCreationJobEvent,
+    WorkerRuntimeStatus,
     create_database_engine,
 )
 from glpi_ticketing_database_migrations.application import (
@@ -251,6 +252,93 @@ def test_upgrade_from_0002_preserves_data_and_enables_retention_events(
             .order_by(TicketCreationJobEvent.event_id)
         ).all()
     assert event_types == ["operator_retry_requested", *retention_event_types]
+
+
+def test_upgrade_from_0003_preserves_runtime_state_and_adds_observability_index(
+    database_engine: Engine,
+) -> None:
+    _upgrade_to_revision(database_engine, "0003_add_retention_lifecycle")
+    instance_id = uuid4()
+    with database_engine.begin() as connection:
+        connection.execute(
+            WorkerRuntimeStatus.__table__.insert(),
+            {
+                "service_name": "worker_automation",
+                "instance_id": instance_id,
+                "state": "degraded",
+                "last_error_category": "database",
+                "last_error_code": "connection_lost",
+            },
+        )
+
+    upgrade_to_head(database_engine)
+
+    with database_engine.connect() as connection:
+        persisted = connection.execute(
+            select(
+                WorkerRuntimeStatus.instance_id,
+                WorkerRuntimeStatus.state,
+                WorkerRuntimeStatus.last_error_category,
+            )
+        ).one()
+    indexes = {
+        index["name"]: tuple(index["column_names"])
+        for index in inspect(database_engine).get_indexes("audio_retentions")
+    }
+    assert persisted == (instance_id, "degraded", "database")
+    assert indexes["ix_audio_retentions_status_dashboard"] == (
+        "status",
+        "updated_at",
+        "job_uuid",
+    )
+    assert _current_revision(database_engine) == _single_head()
+
+
+def test_observability_migration_has_a_non_destructive_downgrade(
+    database_engine: Engine,
+) -> None:
+    upgrade_to_head(database_engine)
+    instance_id = uuid4()
+    with database_engine.begin() as connection:
+        connection.execute(
+            WorkerRuntimeStatus.__table__.insert(),
+            {
+                "service_name": "worker_retention",
+                "instance_id": instance_id,
+                "state": "running",
+            },
+        )
+
+    _downgrade_to_revision(database_engine, "0003_add_retention_lifecycle")
+
+    inspector = inspect(database_engine)
+    index_names = {
+        index["name"] for index in inspector.get_indexes(AudioRetention.__tablename__)
+    }
+    runtime_check_names = {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints(
+            WorkerRuntimeStatus.__tablename__
+        )
+    }
+    with database_engine.connect() as connection:
+        persisted = connection.execute(
+            select(
+                WorkerRuntimeStatus.instance_id,
+                WorkerRuntimeStatus.state,
+            )
+        ).one()
+
+    assert "ix_audio_retentions_status_dashboard" not in index_names
+    assert "ck_worker_runtime_status_error_for_state" not in runtime_check_names
+    assert persisted == (instance_id, "running")
+    assert _current_revision(database_engine) == "0003_add_retention_lifecycle"
+
+    upgrade_to_head(database_engine)
+
+    with database_engine.connect() as connection:
+        assert connection.scalar(select(WorkerRuntimeStatus.instance_id)) == instance_id
+    assert _current_revision(database_engine) == _single_head()
 
 
 def test_retention_status_id_migration_has_a_symmetric_downgrade(

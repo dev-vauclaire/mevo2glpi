@@ -109,6 +109,42 @@ def test_worker_runtime_contracts_are_exported_by_package() -> None:
     assert database_api.StaleWorkerInstanceError is StaleWorkerInstanceError
 
 
+def test_runtime_repository_lists_typed_snapshots_without_commit() -> None:
+    session = _session()
+    automation = WorkerRuntimeStatus(
+        service_name=WorkerServiceName.AUTOMATION.value,
+        instance_id=uuid4(),
+        state=WorkerRuntimeState.RUNNING.value,
+        last_heartbeat_at=NOW,
+        current_job_uuid=None,
+        last_error_category=None,
+        last_error_code=None,
+        updated_at=NOW,
+    )
+    retention = WorkerRuntimeStatus(
+        service_name=WorkerServiceName.RETENTION.value,
+        instance_id=uuid4(),
+        state=WorkerRuntimeState.DEGRADED.value,
+        last_heartbeat_at=NOW - timedelta(seconds=1),
+        current_job_uuid=uuid4(),
+        last_error_category="unavailable",
+        last_error_code="http_503",
+        updated_at=NOW - timedelta(seconds=1),
+    )
+    session.scalars.return_value.all.return_value = [automation, retention]
+
+    snapshots = WorkerRuntimeStatusRepository(session).list_all()
+
+    assert tuple(snapshot.service_name for snapshot in snapshots) == (
+        WorkerServiceName.AUTOMATION,
+        WorkerServiceName.RETENTION,
+    )
+    assert snapshots[1].last_error_code == "http_503"
+    session.scalars.assert_called_once()
+    session.flush.assert_not_called()
+    session.commit.assert_not_called()
+
+
 def _session() -> Session:
     return create_autospec(Session, instance=True)
 

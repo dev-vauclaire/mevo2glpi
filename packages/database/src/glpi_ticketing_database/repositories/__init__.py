@@ -1,9 +1,11 @@
 """Model-specific repositories for the persistent MVP lifecycle."""
 
+from ._alerting import AlertAggregate
 from .audio_retention import (
     AudioRetentionRepository,
     AudioRetentionSnapshot,
     InvalidRetentionTransitionError,
+    RetentionAlertSummary,
     RetentionCandidate,
     RetentionCandidateKind,
     RetentionNotFoundError,
@@ -11,6 +13,7 @@ from .audio_retention import (
 from .ticket_creation_job import (
     InvalidJobTransitionError,
     JobAcquisition,
+    JobAlertSummary,
     JobCursor,
     JobMutation,
     JobNotFoundError,
@@ -32,11 +35,13 @@ from .worker_runtime_status import (
 )
 
 __all__ = [
+    "AlertAggregate",
     "AudioRetentionRepository",
     "AudioRetentionSnapshot",
     "InvalidJobTransitionError",
     "InvalidRetentionTransitionError",
     "JobAcquisition",
+    "JobAlertSummary",
     "JobCursor",
     "JobEventCursor",
     "JobEventPage",
@@ -48,6 +53,7 @@ __all__ = [
     "PendingJob",
     "RetentionCandidate",
     "RetentionCandidateKind",
+    "RetentionAlertSummary",
     "RetentionNotFoundError",
     "StaleWorkerInstanceError",
     "TicketCreationJobEventRepository",

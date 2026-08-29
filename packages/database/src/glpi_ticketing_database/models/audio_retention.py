@@ -207,6 +207,12 @@ class AudioRetention(Base):
             ),
         ),
         Index(
+            "ix_audio_retentions_status_dashboard",
+            status,
+            updated_at.desc(),
+            job_uuid.desc(),
+        ),
+        Index(
             "uq_audio_retentions_single_active_operation",
             literal_column("(1)"),
             unique=True,

@@ -64,6 +64,13 @@ class WorkerRuntimeStatus(Base):
             "(last_error_category IS NOT NULL AND last_error_code IS NOT NULL)",
             name="error_fields",
         ),
+        CheckConstraint(
+            "(state IN ('degraded', 'blocked') "
+            "AND last_error_category IS NOT NULL) OR "
+            "(state NOT IN ('degraded', 'blocked') "
+            "AND last_error_category IS NULL)",
+            name="error_for_state",
+        ),
         Index("ix_worker_runtime_status_heartbeat", last_heartbeat_at),
     )
 

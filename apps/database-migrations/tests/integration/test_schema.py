@@ -762,6 +762,37 @@ def test_sanitized_event_and_worker_errors_are_atomic(
         ),
         "ck_worker_runtime_status_error_fields",
     )
+    _assert_insert_rejected(
+        migrated_engine,
+        WORKER_STATUS,
+        _worker_values(
+            state="running",
+            last_error_category="database",
+            last_error_code="connection_lost",
+        ),
+        "ck_worker_runtime_status_error_for_state",
+    )
+    _assert_insert_rejected(
+        migrated_engine,
+        WORKER_STATUS,
+        _worker_values(state="degraded"),
+        "ck_worker_runtime_status_error_for_state",
+    )
+
+
+def test_observability_indexes_cover_retention_state_queries(
+    migrated_engine: Engine,
+) -> None:
+    indexes = {
+        index["name"]: tuple(index["column_names"])
+        for index in inspect(migrated_engine).get_indexes(RETENTIONS.name)
+    }
+
+    assert indexes["ix_audio_retentions_status_dashboard"] == (
+        "status",
+        "updated_at",
+        "job_uuid",
+    )
 
 
 def test_job_audit_foreign_keys_restrict_parent_deletion(

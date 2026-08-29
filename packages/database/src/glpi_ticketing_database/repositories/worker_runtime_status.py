@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -113,6 +114,13 @@ class WorkerRuntimeStatusRepository:
 
         self._session.flush()
         return _to_snapshot(runtime)
+
+    def list_all(self) -> tuple[WorkerRuntimeSnapshot, ...]:
+        """Return every singleton heartbeat in deterministic service order."""
+        runtimes = self._session.scalars(
+            select(WorkerRuntimeStatus).order_by(WorkerRuntimeStatus.service_name)
+        ).all()
+        return tuple(_to_snapshot(runtime) for runtime in runtimes)
 
 
 def _to_snapshot(runtime: WorkerRuntimeStatus) -> WorkerRuntimeSnapshot:

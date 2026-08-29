@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import Select, and_, case, exists, or_, select
+from sqlalchemy import Select, and_, case, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from ..models import (
@@ -16,11 +16,13 @@ from ..models import (
     RetentionPolicy,
     RetentionStatus,
 )
+from ._alerting import AlertAggregate
 from ._validation import (
     validate_aware_datetime,
     validate_future_datetime,
     validate_positive_integer,
     validate_safe_identifier,
+    validate_utc_datetime,
     validate_uuid,
 )
 
@@ -71,6 +73,17 @@ class RetentionCandidate:
 
     kind: RetentionCandidateKind
     retention: AudioRetentionSnapshot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RetentionAlertSummary:
+    """Mutually exclusive dashboard aggregates for retention lifecycle rows."""
+
+    deadline_overdue: AlertAggregate
+    glpi_check_blocked: AlertAggregate
+    deletion_blocked: AlertAggregate
+    glpi_retry_overdue: AlertAggregate
+    deletion_retry_overdue: AlertAggregate
 
 
 class AudioRetentionRepository:
@@ -155,6 +168,101 @@ class AudioRetentionRepository:
         validate_uuid(job_uuid, "job_uuid")
         retention = self._session.get(AudioRetention, job_uuid)
         return _to_snapshot(retention) if retention is not None else None
+
+    def get_alert_summary(
+        self,
+        *,
+        retry_before: datetime,
+        deadline_before: datetime,
+    ) -> RetentionAlertSummary:
+        """Aggregate prioritized conditions using strict UTC cutoffs."""
+        retry_before = validate_utc_datetime(retry_before, "retry_before")
+        deadline_before = validate_utc_datetime(
+            deadline_before,
+            "deadline_before",
+        )
+
+        deadline_overdue = and_(
+            AudioRetention.status.not_in(
+                (
+                    RetentionStatus.INACTIVE.value,
+                    RetentionStatus.DELETED.value,
+                )
+            ),
+            AudioRetention.hard_delete_at.is_not(None),
+            AudioRetention.hard_delete_at < deadline_before,
+        )
+        before_deadline = ~deadline_overdue
+        glpi_check_blocked = and_(
+            before_deadline,
+            AudioRetention.status == RetentionStatus.BLOCKED.value,
+            AudioRetention.deletion_started_at.is_(None),
+        )
+        deletion_blocked = and_(
+            before_deadline,
+            AudioRetention.status == RetentionStatus.BLOCKED.value,
+            AudioRetention.deletion_started_at.is_not(None),
+        )
+        retry_overdue = and_(
+            before_deadline,
+            AudioRetention.status == RetentionStatus.RETRY_SCHEDULED.value,
+            AudioRetention.next_check_at < retry_before,
+        )
+        glpi_retry_overdue = and_(
+            retry_overdue,
+            AudioRetention.deletion_started_at.is_(None),
+        )
+        deletion_retry_overdue = and_(
+            retry_overdue,
+            AudioRetention.deletion_started_at.is_not(None),
+        )
+
+        values = self._session.execute(
+            select(
+                select(func.count())
+                .select_from(AudioRetention)
+                .where(deadline_overdue)
+                .scalar_subquery(),
+                select(func.min(AudioRetention.hard_delete_at))
+                .where(deadline_overdue)
+                .scalar_subquery(),
+                select(func.count())
+                .select_from(AudioRetention)
+                .where(glpi_check_blocked)
+                .scalar_subquery(),
+                select(func.min(AudioRetention.updated_at))
+                .where(glpi_check_blocked)
+                .scalar_subquery(),
+                select(func.count())
+                .select_from(AudioRetention)
+                .where(deletion_blocked)
+                .scalar_subquery(),
+                select(func.min(AudioRetention.updated_at))
+                .where(deletion_blocked)
+                .scalar_subquery(),
+                select(func.count())
+                .select_from(AudioRetention)
+                .where(glpi_retry_overdue)
+                .scalar_subquery(),
+                select(func.min(AudioRetention.next_check_at))
+                .where(glpi_retry_overdue)
+                .scalar_subquery(),
+                select(func.count())
+                .select_from(AudioRetention)
+                .where(deletion_retry_overdue)
+                .scalar_subquery(),
+                select(func.min(AudioRetention.next_check_at))
+                .where(deletion_retry_overdue)
+                .scalar_subquery(),
+            )
+        ).one()
+        return RetentionAlertSummary(
+            deadline_overdue=_aggregate(values[0], values[1]),
+            glpi_check_blocked=_aggregate(values[2], values[3]),
+            deletion_blocked=_aggregate(values[4], values[5]),
+            glpi_retry_overdue=_aggregate(values[6], values[7]),
+            deletion_retry_overdue=_aggregate(values[8], values[9]),
+        )
 
     def get_glpi_probe_gate(self) -> AudioRetentionSnapshot | None:
         """Return the persisted GLPI retry probe, including a future one.
@@ -727,10 +835,15 @@ def _to_snapshot(retention: AudioRetention) -> AudioRetentionSnapshot:
     )
 
 
+def _aggregate(count: int, condition_since: datetime | None) -> AlertAggregate:
+    return AlertAggregate(count=count, condition_since=condition_since)
+
+
 __all__ = [
     "AudioRetentionRepository",
     "AudioRetentionSnapshot",
     "InvalidRetentionTransitionError",
+    "RetentionAlertSummary",
     "RetentionCandidate",
     "RetentionCandidateKind",
     "RetentionNotFoundError",

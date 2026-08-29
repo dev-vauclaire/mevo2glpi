@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 _SAFE_IDENTIFIER = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
@@ -40,6 +40,14 @@ def validate_aware_datetime(value: datetime, field_name: str) -> datetime:
         raise TypeError(f"{field_name} must be a datetime")
     if value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
+    return value
+
+
+def validate_utc_datetime(value: datetime, field_name: str) -> datetime:
+    """Return a timezone-aware UTC datetime without implicit conversion."""
+    value = validate_aware_datetime(value, field_name)
+    if value.utcoffset() != timedelta(0):
+        raise ValueError(f"{field_name} must be in UTC")
     return value
 
 
@@ -87,5 +95,6 @@ __all__ = [
     "validate_page_limit",
     "validate_positive_integer",
     "validate_safe_identifier",
+    "validate_utc_datetime",
     "validate_uuid",
 ]
