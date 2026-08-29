@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import os
 import platform
+import re
 import secrets
 import tarfile
 import time
@@ -25,6 +26,12 @@ SUPPORTED_DEVICES = frozenset({"cpu", "gpu"})
 SERVICE_READY_TIMEOUT_SECONDS = 10 * 60.0
 API_READY_TIMEOUT_SECONDS = 2 * 60.0
 POLL_INTERVAL_SECONDS = 1.0
+SERVICE_STATE_TIMEOUT_SECONDS = 30.0
+SERVICE_STOP_GRACE_SECONDS = 10
+API_SERVICE_NAME = "api"
+TRANSCRIBE_AI_NETWORK_LOGICAL_NAME = "transcribe_ai_test"
+TRANSCRIBE_AI_INTERNAL_BASE_URL = "http://api:5000"
+CONTROLLABLE_SERVICES = frozenset({API_SERVICE_NAME})
 SYNTHETIC_AUDIO_CONTAINER_PATH = "/tmp/transcribe-ai-fixture.wav"
 SYNTHETIC_AUDIO_FILTER = (
     "flite=text='Bonjour. Ceci est un court test automatique de "
@@ -32,7 +39,7 @@ SYNTHETIC_AUDIO_FILTER = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class TranscribeAiTestEnvironment:
     """Session-scoped handle to the disposable Transcribe AI stack."""
 
@@ -42,6 +49,33 @@ class TranscribeAiTestEnvironment:
     runtime_device: str
     audio_path: Path
     project_name: str
+    network_name: str
+    internal_base_url: str
+    _compose: DockerCompose = field(repr=False, compare=False)
+    _docker_client: DockerClient = field(repr=False, compare=False)
+    _compose_environment: Mapping[str, str] = field(repr=False, compare=False)
+
+    def stop_service(self, service_name: str) -> None:
+        """Stop the allowlisted API service for a bounded outage scenario."""
+        _require_controllable_service(service_name)
+        with patch.dict(os.environ, self._compose_environment, clear=False):
+            _stop_service(self._compose, self._docker_client, service_name)
+
+    def start_service(self, service_name: str) -> None:
+        """Start an allowlisted service and wait for its public API contract."""
+        _require_controllable_service(service_name)
+        with patch.dict(os.environ, self._compose_environment, clear=False):
+            _start_service(self._compose, self._docker_client, service_name)
+            self.base_url = _get_loopback_base_url(
+                self._compose,
+                self._docker_client,
+            )
+            _wait_for_healthy_service(
+                self._compose,
+                self._docker_client,
+                service_name,
+            )
+            _wait_for_api(self.base_url, self.api_key)
 
 
 def _requested_device() -> str:
@@ -70,10 +104,101 @@ def _get_service_container(
     docker_client: DockerClient,
     service_name: str,
 ):
-    compose_container = compose.get_container(service_name=service_name)
+    compose_container = compose.get_container(
+        service_name=service_name,
+        include_all=True,
+    )
     if compose_container.ID is None:
         raise RuntimeError(f"The {service_name} container has no Docker identifier")
     return docker_client.client.containers.get(compose_container.ID)
+
+
+def _require_controllable_service(service_name: str) -> None:
+    if service_name not in CONTROLLABLE_SERVICES:
+        raise ValueError(
+            "service_name is not controllable by the Transcribe AI fixture"
+        )
+
+
+def _stop_service(
+    compose: DockerCompose,
+    docker_client: DockerClient,
+    service_name: str,
+) -> None:
+    container = _get_service_container(compose, docker_client, service_name)
+    try:
+        container.reload()
+        status = container.attrs.get("State", {}).get("Status")
+        if status not in {"dead", "exited"}:
+            container.stop(timeout=SERVICE_STOP_GRACE_SECONDS)
+    except Exception:
+        raise RuntimeError("Unable to stop the Transcribe AI test service") from None
+    _wait_for_service_state(
+        container,
+        expected_states=frozenset({"dead", "exited"}),
+        transition="stop",
+    )
+
+
+def _start_service(
+    compose: DockerCompose,
+    docker_client: DockerClient,
+    service_name: str,
+) -> None:
+    container = _get_service_container(compose, docker_client, service_name)
+    try:
+        container.reload()
+        if container.attrs.get("State", {}).get("Status") != "running":
+            container.start()
+    except Exception:
+        raise RuntimeError("Unable to start the Transcribe AI test service") from None
+    _wait_for_service_state(
+        container,
+        expected_states=frozenset({"running"}),
+        transition="start",
+    )
+
+
+def _wait_for_service_state(
+    container,
+    *,
+    expected_states: frozenset[str],
+    transition: str,
+) -> None:
+    deadline = time.monotonic() + SERVICE_STATE_TIMEOUT_SECONDS
+    last_state = "unknown"
+    while time.monotonic() < deadline:
+        try:
+            container.reload()
+            last_state = str(container.attrs.get("State", {}).get("Status", "missing"))
+        except Exception:
+            raise RuntimeError(
+                f"Unable to observe the Transcribe AI service during {transition}"
+            ) from None
+        if last_state in expected_states:
+            return
+        time.sleep(POLL_INTERVAL_SECONDS)
+    raise RuntimeError(
+        f"The Transcribe AI service did not {transition} (last state: {last_state})"
+    )
+
+
+def _require_network_name(
+    compose: DockerCompose,
+    docker_client: DockerClient,
+    project_name: str,
+) -> str:
+    if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", project_name) is None:
+        raise RuntimeError("The Transcribe AI Compose project name is unsafe")
+    network_name = f"{project_name}_{TRANSCRIBE_AI_NETWORK_LOGICAL_NAME}"
+    container = _get_service_container(compose, docker_client, API_SERVICE_NAME)
+    container.reload()
+    networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+    if not isinstance(networks, Mapping) or network_name not in networks:
+        raise RuntimeError(
+            "Transcribe AI is not attached to the expected private network"
+        )
+    return network_name
 
 
 def _get_loopback_base_url(
@@ -313,6 +438,12 @@ def transcribe_ai_environment(
             _wait_for_api(base_url, api_key)
             runtime_device = _read_runtime_device(compose, docker_client)
             _assert_requested_device(requested_device, runtime_device)
+            project_name = environment["COMPOSE_PROJECT_NAME"]
+            network_name = _require_network_name(
+                compose,
+                docker_client,
+                project_name,
+            )
 
             audio_path = tmp_path_factory.mktemp("transcribe-ai-audio") / "fixture.wav"
             _generate_synthetic_audio(compose, docker_client, audio_path)
@@ -323,7 +454,12 @@ def transcribe_ai_environment(
             requested_device=requested_device,
             runtime_device=runtime_device,
             audio_path=audio_path,
-            project_name=environment["COMPOSE_PROJECT_NAME"],
+            project_name=project_name,
+            network_name=network_name,
+            internal_base_url=TRANSCRIBE_AI_INTERNAL_BASE_URL,
+            _compose=compose,
+            _docker_client=docker_client,
+            _compose_environment=dict(environment),
         )
     except BaseException as exception:
         primary_error = exception

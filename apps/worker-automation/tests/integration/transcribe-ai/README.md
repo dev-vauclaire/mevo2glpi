@@ -37,6 +37,13 @@ Le test soumet ce WAV avec le vrai client Python, interroge le job jusqu'à son
 état `COMPLETED` et vérifie qu'une transcription non vide est retournée. Le
 texte obtenu et les secrets ne sont jamais inclus dans les messages d'erreur.
 
+L'API de la fixture accepte les quatre formats pris en charge par le produit :
+WAV, MP3, OGG et M4A. L'image épinglée attend leur extension sans point dans
+`FORMAT_AUDIO_ALLOWED`, sous la forme d'une liste séparée par des virgules :
+`wav,mp3,ogg,m4a`. Le scénario contractuel réel conserve un WAV synthétique afin
+de ne pas multiplier quatre transcriptions coûteuses pour vérifier une règle de
+configuration.
+
 ## Modes CPU et GPU
 
 Le fichier `compose.yml` porte les services communs. `compose.cpu.yml` masque

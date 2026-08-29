@@ -29,6 +29,12 @@ GLPI_TEST_DIRECTORY = (
 GLPI_HTTP_READY_TIMEOUT_SECONDS = 300.0
 GLPI_API_READY_TIMEOUT_SECONDS = 60.0
 GLPI_HTTP_POLL_INTERVAL_SECONDS = 1.0
+GLPI_SERVICE_STATE_TIMEOUT_SECONDS = 30.0
+GLPI_SERVICE_STOP_GRACE_SECONDS = 10
+GLPI_SERVICE_NAME = "glpi"
+GLPI_NETWORK_LOGICAL_NAME = "glpi_test"
+GLPI_INTERNAL_BASE_URL = "http://glpi"
+GLPI_CONTROLLABLE_SERVICES = frozenset({GLPI_SERVICE_NAME})
 GLPI_BOOTSTRAP_COMMAND = ["php", "/opt/glpi-test/bootstrap_oauth.php"]
 GLPI_SET_TICKET_STATUS_COMMAND = [
     "php",
@@ -71,11 +77,14 @@ class TicketStatusTransitionResult:
     status: TicketStatus
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class GlpiTestEnvironment:
     """Session-scoped handle to the disposable GLPI integration stack."""
 
     base_url: str
+    internal_base_url: str
+    project_name: str
+    network_name: str
     version: str
     first_bootstrap: OAuthBootstrapResult = field(repr=False)
     second_bootstrap: OAuthBootstrapResult = field(repr=False)
@@ -91,6 +100,21 @@ class GlpiTestEnvironment:
     def exec_glpi(self, command: list[str]) -> tuple[str, str, int]:
         """Run a diagnostic command in the already-running GLPI container."""
         return _exec_glpi(self._compose, self._docker_client, command)
+
+    def stop_service(self, service_name: str) -> None:
+        """Stop the allowlisted GLPI API service for an outage scenario."""
+        _require_controllable_service(service_name, GLPI_CONTROLLABLE_SERVICES)
+        _stop_service(self._compose, self._docker_client, service_name)
+
+    def start_service(self, service_name: str) -> None:
+        """Start an allowlisted service and wait for the GLPI API contract."""
+        _require_controllable_service(service_name, GLPI_CONTROLLABLE_SERVICES)
+        _start_service(self._compose, self._docker_client, service_name)
+        self.base_url = _get_loopback_base_url(self._compose, self._docker_client)
+        _wait_for_http(
+            f"{self.base_url}/api.php/v2.3.0/doc.json",
+            timeout_seconds=GLPI_HTTP_READY_TIMEOUT_SECONDS,
+        )
 
     def set_ticket_status(
         self,
@@ -294,11 +318,101 @@ def _get_glpi_docker_container(
     compose: DockerCompose,
     docker_client: DockerClient,
 ):
-    compose_container = compose.get_container(service_name="glpi")
+    compose_container = compose.get_container(
+        service_name=GLPI_SERVICE_NAME,
+        include_all=True,
+    )
     if compose_container.ID is None:
         raise RuntimeError("The GLPI container has no Docker identifier")
 
     return docker_client.client.containers.get(compose_container.ID)
+
+
+def _require_controllable_service(
+    service_name: str,
+    allowed_services: frozenset[str],
+) -> None:
+    if service_name not in allowed_services:
+        raise ValueError("service_name is not controllable by the GLPI fixture")
+
+
+def _stop_service(
+    compose: DockerCompose,
+    docker_client: DockerClient,
+    service_name: str,
+) -> None:
+    container = _get_glpi_docker_container(compose, docker_client)
+    try:
+        container.reload()
+        status = container.attrs.get("State", {}).get("Status")
+        if status not in {"dead", "exited"}:
+            container.stop(timeout=GLPI_SERVICE_STOP_GRACE_SECONDS)
+    except Exception:
+        raise RuntimeError("Unable to stop the GLPI test service") from None
+    _wait_for_service_state(
+        container,
+        expected_states=frozenset({"dead", "exited"}),
+        transition="stop",
+    )
+
+
+def _start_service(
+    compose: DockerCompose,
+    docker_client: DockerClient,
+    service_name: str,
+) -> None:
+    container = _get_glpi_docker_container(compose, docker_client)
+    try:
+        container.reload()
+        if container.attrs.get("State", {}).get("Status") != "running":
+            container.start()
+    except Exception:
+        raise RuntimeError("Unable to start the GLPI test service") from None
+    _wait_for_service_state(
+        container,
+        expected_states=frozenset({"running"}),
+        transition="start",
+    )
+
+
+def _wait_for_service_state(
+    container,
+    *,
+    expected_states: frozenset[str],
+    transition: str,
+) -> None:
+    deadline = time.monotonic() + GLPI_SERVICE_STATE_TIMEOUT_SECONDS
+    last_state = "unknown"
+    while time.monotonic() < deadline:
+        try:
+            container.reload()
+            last_state = str(container.attrs.get("State", {}).get("Status", "missing"))
+        except Exception:
+            raise RuntimeError(
+                f"Unable to observe the GLPI service during {transition}"
+            ) from None
+        if last_state in expected_states:
+            return
+        time.sleep(GLPI_HTTP_POLL_INTERVAL_SECONDS)
+    raise RuntimeError(
+        f"The GLPI service did not {transition} (last state: {last_state})"
+    )
+
+
+def _require_network_name(
+    compose: DockerCompose,
+    docker_client: DockerClient,
+    project_name: str,
+) -> str:
+    if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", project_name) is None:
+        raise RuntimeError("The GLPI Compose project name is unsafe")
+    network_name = f"{project_name}_{GLPI_NETWORK_LOGICAL_NAME}"
+    container = _get_glpi_docker_container(compose, docker_client)
+    container.reload()
+    networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+    if not isinstance(networks, Mapping) or network_name not in networks:
+        raise RuntimeError("GLPI is not attached to the expected private network")
+    return network_name
 
 
 def _exec_glpi(
@@ -453,6 +567,12 @@ def glpi_environment(
 
             version = _read_glpi_version(compose, docker_client)
             image_metadata = _read_image_metadata(compose, docker_client)
+            project_name = environment["COMPOSE_PROJECT_NAME"]
+            network_name = _require_network_name(
+                compose,
+                docker_client,
+                project_name,
+            )
             ephemeral_secrets = (
                 environment["GLPI_DB_PASSWORD"],
                 environment["GLPI_DB_ROOT_PASSWORD"],
@@ -462,6 +582,9 @@ def glpi_environment(
 
             yield GlpiTestEnvironment(
                 base_url=base_url,
+                internal_base_url=GLPI_INTERNAL_BASE_URL,
+                project_name=project_name,
+                network_name=network_name,
                 version=version,
                 first_bootstrap=first_bootstrap,
                 second_bootstrap=second_bootstrap,

@@ -46,7 +46,7 @@ services:
     environment:
       <<: *application-environment
       API_PORT: "5000"
-      FORMAT_AUDIO_ALLOWED: wav
+      FORMAT_AUDIO_ALLOWED: "wav,mp3,ogg,m4a"
       MAX_AUDIO_SIZE_MB: "10"
     healthcheck:
       test:

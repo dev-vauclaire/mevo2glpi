@@ -7,6 +7,10 @@ from urllib.parse import urlparse
 import httpx
 import pytest
 
+from glpi_ticketing_common.audio_files import (
+    SUPPORTED_AUDIO_STORAGE_EXTENSIONS,
+)
+
 pytestmark = [pytest.mark.transcribe_ai, pytest.mark.timeout(900)]
 
 TRANSCRIBE_AI_TEST_DIRECTORY = Path(__file__).resolve().parent
@@ -20,6 +24,7 @@ EXPECTED_IMAGES = {
     "devauclaire/transcribe-ai-mono-voice-worker:1.0.0@sha256:3b7a3b3292d58aa544c9b5ffb65c14dfaaa95f5bc1bd9777e20bea975f500f59",
     "devauclaire/transcribe-ai-mono-voice-stt:1.0.0@sha256:ef2ebf883bf2b6fa597559396ebb31fd345ec5bcec499f8e828e866f8103f44b",
 }
+EXPECTED_AUDIO_FORMATS = frozenset({"wav", "mp3", "ogg", "m4a"})
 
 
 def test_transcribe_ai_images_are_pinned() -> None:
@@ -49,6 +54,24 @@ def test_cpu_and_gpu_overlays_are_explicit() -> None:
     assert "capabilities: [gpu]" in gpu_compose
 
 
+def test_transcribe_ai_api_formats_match_supported_worker_formats() -> None:
+    compose = COMPOSE_FILE.read_text(encoding="utf-8")
+    format_lines = [
+        line.partition(":")[2].strip().strip("\"'")
+        for raw_line in compose.splitlines()
+        if (line := raw_line.strip()).startswith("FORMAT_AUDIO_ALLOWED:")
+    ]
+
+    assert len(format_lines) == 1
+    configured_formats = tuple(
+        audio_format.strip() for audio_format in format_lines[0].split(",")
+    )
+    assert all(configured_formats)
+    assert len(configured_formats) == len(set(configured_formats))
+    assert frozenset(configured_formats) == EXPECTED_AUDIO_FORMATS
+    assert frozenset(configured_formats) == SUPPORTED_AUDIO_STORAGE_EXTENSIONS
+
+
 def test_transcribe_ai_api_is_reachable_on_loopback(
     transcribe_ai_environment,
 ) -> None:
@@ -59,6 +82,59 @@ def test_transcribe_ai_api_is_reachable_on_loopback(
     response = httpx.get(
         f"{transcribe_ai_environment.base_url}/api/batchTranscription/result",
         params={"job_uuid": "transcribe-ai-test-readiness"},
+        headers={
+            "X-API-KEY": transcribe_ai_environment.api_key.get_secret_value(),
+        },
+        timeout=10.0,
+        follow_redirects=False,
+    )
+    assert response.status_code == httpx.codes.NOT_FOUND
+
+
+def test_transcribe_ai_fixture_exposes_safe_internal_network_contract(
+    transcribe_ai_environment,
+) -> None:
+    internal_url = urlparse(transcribe_ai_environment.internal_base_url)
+
+    assert re.fullmatch(
+        r"[a-z0-9][a-z0-9_-]*",
+        transcribe_ai_environment.project_name,
+    )
+    assert transcribe_ai_environment.network_name == (
+        f"{transcribe_ai_environment.project_name}_transcribe_ai_test"
+    )
+    assert internal_url.scheme == "http"
+    assert internal_url.hostname == "api"
+    assert internal_url.port == 5000
+    assert internal_url.path in {"", "/"}
+    assert internal_url.username is None
+    assert internal_url.password is None
+    assert internal_url.query == ""
+    assert internal_url.fragment == ""
+
+    rendered = repr(transcribe_ai_environment)
+    if transcribe_ai_environment.api_key.get_secret_value() in rendered:
+        pytest.fail("The Transcribe AI fixture repr exposes its API key")
+    assert "_compose" not in rendered
+    assert "_docker_client" not in rendered
+    assert "_compose_environment" not in rendered
+
+
+def test_transcribe_ai_fixture_service_control_is_allowlisted_and_restores_readiness(
+    transcribe_ai_environment,
+) -> None:
+    for forbidden_service in ("", "postgres", "mono-voice-worker", "unknown"):
+        with pytest.raises(ValueError, match="not controllable"):
+            transcribe_ai_environment.start_service(forbidden_service)
+        with pytest.raises(ValueError, match="not controllable"):
+            transcribe_ai_environment.stop_service(forbidden_service)
+
+    transcribe_ai_environment.stop_service("api")
+    transcribe_ai_environment.start_service("api")
+
+    response = httpx.get(
+        f"{transcribe_ai_environment.base_url}/api/batchTranscription/result",
+        params={"job_uuid": "transcribe-ai-restart-readiness"},
         headers={
             "X-API-KEY": transcribe_ai_environment.api_key.get_secret_value(),
         },

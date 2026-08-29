@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlparse
@@ -64,6 +65,50 @@ def test_glpi_auto_install_is_complete(glpi_environment) -> None:
     parsed_url = urlparse(glpi_environment.base_url)
     assert parsed_url.hostname == "127.0.0.1"
     assert parsed_url.port not in {None, 80}
+
+
+def test_glpi_fixture_exposes_safe_internal_network_contract(
+    glpi_environment,
+) -> None:
+    internal_url = urlparse(glpi_environment.internal_base_url)
+
+    assert re.fullmatch(r"[a-z0-9][a-z0-9_-]*", glpi_environment.project_name)
+    assert glpi_environment.network_name == (
+        f"{glpi_environment.project_name}_glpi_test"
+    )
+    assert internal_url.scheme == "http"
+    assert internal_url.hostname == "glpi"
+    assert internal_url.port is None
+    assert internal_url.path in {"", "/"}
+    assert internal_url.username is None
+    assert internal_url.password is None
+    assert internal_url.query == ""
+    assert internal_url.fragment == ""
+
+    rendered = repr(glpi_environment)
+    assert "_compose" not in rendered
+    assert "_docker_client" not in rendered
+    assert all(secret not in rendered for secret in glpi_environment.ephemeral_secrets)
+
+
+def test_glpi_fixture_service_control_is_allowlisted_and_restores_readiness(
+    glpi_environment,
+) -> None:
+    for forbidden_service in ("", "db", "unknown"):
+        with pytest.raises(ValueError, match="not controllable"):
+            glpi_environment.start_service(forbidden_service)
+        with pytest.raises(ValueError, match="not controllable"):
+            glpi_environment.stop_service(forbidden_service)
+
+    glpi_environment.stop_service("glpi")
+    glpi_environment.start_service("glpi")
+
+    response = httpx.get(
+        f"{glpi_environment.base_url}{GLPI_OPENAPI_PATH}",
+        follow_redirects=False,
+        timeout=GLPI_HTTP_TIMEOUT_SECONDS,
+    )
+    assert response.status_code == httpx.codes.OK
 
 
 def test_glpi_api_contract_is_pinned_to_v2_3_0(glpi_environment) -> None:
