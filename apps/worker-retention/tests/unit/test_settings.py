@@ -54,6 +54,7 @@ def test_settings_expose_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     for variable_name in (
         "AUDIO_ROOT",
         "DATABASE_CONNECT_TIMEOUT_SECONDS",
+        "WORKER_HEARTBEAT_INTERVAL_SECONDS",
         "RETENTION_POLL_INTERVAL_SECONDS",
         "RETENTION_RETRY_INITIAL_SECONDS",
         "RETENTION_RETRY_MAX_SECONDS",
@@ -67,6 +68,7 @@ def test_settings_expose_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert settings.audio_root == Path("/data/audios")
     assert settings.database_connect_timeout_seconds == 5
+    assert settings.worker_heartbeat_interval_seconds == 10.0
     assert settings.retention_poll_interval_seconds == 60.0
     assert settings.retention_retry_initial_seconds == 5.0
     assert settings.retention_retry_max_seconds == 300.0
@@ -83,6 +85,7 @@ def test_settings_read_environment_overrides(
     overrides = {
         "AUDIO_ROOT": str(audio_root),
         "DATABASE_CONNECT_TIMEOUT_SECONDS": "9",
+        "WORKER_HEARTBEAT_INTERVAL_SECONDS": "8.5",
         "RETENTION_POLL_INTERVAL_SECONDS": "12.5",
         "RETENTION_RETRY_INITIAL_SECONDS": "4",
         "RETENTION_RETRY_MAX_SECONDS": "121",
@@ -97,6 +100,7 @@ def test_settings_read_environment_overrides(
 
     assert settings.audio_root == audio_root
     assert settings.database_connect_timeout_seconds == 9
+    assert settings.worker_heartbeat_interval_seconds == 8.5
     assert settings.retention_poll_interval_seconds == 12.5
     assert settings.retention_retry_initial_seconds == 4.0
     assert settings.retention_retry_max_seconds == 121.0
@@ -121,6 +125,7 @@ def test_removed_first_check_variable_cannot_override_interval(
     "field_name",
     [
         "retention_poll_interval_seconds",
+        "worker_heartbeat_interval_seconds",
         "retention_retry_initial_seconds",
         "retention_retry_max_seconds",
         "retention_system_probe_interval_seconds",

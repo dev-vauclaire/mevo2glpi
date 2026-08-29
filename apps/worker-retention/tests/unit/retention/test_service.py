@@ -1,7 +1,9 @@
 """Behavioral tests for one pure retention-worker iteration."""
 
 import logging
+from collections.abc import Callable
 from datetime import timedelta
+from uuid import UUID
 
 import pytest
 
@@ -71,6 +73,7 @@ def _worker(
     glpi_response: object | BaseException | None = None,
     purge_result: object | BaseException | None = None,
     clock: ScriptedClock,
+    on_job_started: Callable[[UUID], None] = lambda _job_uuid: None,
 ) -> tuple[RetentionWorker, FakeAudioPurger, FakeTicketReader]:
     reader = FakeTicketReader(
         glpi_response
@@ -91,6 +94,7 @@ def _worker(
             poll_interval_seconds=POLL_SECONDS,
             system_probe_interval_seconds=PROBE_SECONDS,
             now=clock,
+            on_job_started=on_job_started,
         ),
         purger,
         reader,
@@ -128,6 +132,31 @@ def test_run_once_recovers_an_interrupted_check_without_external_call() -> None:
     assert outcome == CheckRecoveredOutcome(job_uuid=JOB_UUID)
     assert purger.storage_keys == []
     assert reader.ticket_ids == []
+
+
+def test_selected_candidate_is_reported_before_it_is_prepared() -> None:
+    lifecycle = FakeLifecycle(
+        candidate=retention_candidate(RetentionCandidateKind.RECOVER_INTERRUPTED_CHECK),
+        prepared_work=CheckRecoveryWork(job_uuid=JOB_UUID),
+    )
+
+    def record_started_job(job_uuid: UUID) -> None:
+        lifecycle.calls.append(("job_started", job_uuid))
+
+    worker, _purger, _reader = _worker(
+        lifecycle,
+        clock=ScriptedClock(NOW),
+        on_job_started=record_started_job,
+    )
+
+    worker.run_once()
+
+    assert _call_names(lifecycle)[:3] == [
+        "find_next_candidate",
+        "job_started",
+        "prepare_candidate",
+    ]
+    assert lifecycle.calls[1][1] == JOB_UUID
 
 
 def test_closed_ticket_starts_and_completes_ticket_closed_purge() -> None:

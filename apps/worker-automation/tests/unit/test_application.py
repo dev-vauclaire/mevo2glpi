@@ -35,11 +35,18 @@ def test_run_application_stops_cooperatively_without_real_sleep(
 
     class StoppingWorker:
         calls = 0
+        wait_calls: list[float] = []
 
         def run_once(self) -> IdleOutcome:
             self.calls += 1
             stop_event.set()
             return IdleOutcome(wait_seconds=60.0)
+
+        def wait(self, seconds: float) -> None:
+            self.wait_calls.append(seconds)
+
+        def checkpoint(self) -> None:
+            return None
 
     worker = StoppingWorker()
     runtime_callbacks: dict[str, object] = {}
@@ -48,17 +55,18 @@ def test_run_application_stops_cooperatively_without_real_sleep(
     def runtime(
         _settings: WorkerSettings,
         *,
-        transcription_sleep: object,
-        transcription_should_stop: object,
+        wait_once: object,
+        should_stop: object,
     ) -> Iterator[StoppingWorker]:
-        runtime_callbacks["sleep"] = transcription_sleep
-        runtime_callbacks["should_stop"] = transcription_should_stop
+        runtime_callbacks["wait_once"] = wait_once
+        runtime_callbacks["should_stop"] = should_stop
         yield worker
 
     run_application(settings, stop_event, runtime_factory=runtime)
 
     assert worker.calls == 1
-    assert callable(runtime_callbacks["sleep"])
+    assert worker.wait_calls == [60]
+    assert callable(runtime_callbacks["wait_once"])
     should_stop = runtime_callbacks["should_stop"]
     assert callable(should_stop)
     assert should_stop()
@@ -89,7 +97,7 @@ def test_run_cli_rejects_invalid_configuration_without_logging_secret(
         ),
         (
             lambda: WorkerAlreadyRunningError(SYNTHETIC_SECRET),
-            WorkerExitCode.BLOCKED,
+            WorkerExitCode.SINGLETON_CONFLICT,
             "worker singleton lock is already held",
         ),
         (

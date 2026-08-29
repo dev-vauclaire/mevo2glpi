@@ -33,21 +33,30 @@ def test_run_application_uses_runtime_and_stops_without_real_sleep(
     settings = retention_settings_factory()
     stop_event = Event()
     received_settings: list[RetentionWorkerSettings] = []
+    wait_calls: list[float] = []
 
     class StoppingWorker:
         calls = 0
 
         def run_once(self) -> IdleOutcome:
             self.calls += 1
-            stop_event.set()
             return IdleOutcome(wait_seconds=60.0)
+
+        def wait(self, seconds: float) -> None:
+            wait_calls.append(seconds)
+            stop_event.set()
 
     worker = StoppingWorker()
 
     @contextmanager
     def runtime(
         runtime_settings: RetentionWorkerSettings,
+        *,
+        wait_once: Callable[[float], object],
+        should_stop: Callable[[], bool],
     ) -> Iterator[StoppingWorker]:
+        assert callable(wait_once)
+        assert callable(should_stop)
         received_settings.append(runtime_settings)
         yield worker
 
@@ -55,6 +64,7 @@ def test_run_application_uses_runtime_and_stops_without_real_sleep(
 
     assert received_settings == [settings]
     assert worker.calls == 1
+    assert wait_calls == [60.0]
     assert stop_event.is_set()
 
 
@@ -97,7 +107,7 @@ def test_run_cli_sanitizes_unexpected_configuration_loading_error(
         ),
         (
             lambda: RetentionWorkerAlreadyRunningError(SYNTHETIC_SECRET),
-            RetentionWorkerExitCode.BLOCKED,
+            RetentionWorkerExitCode.SINGLETON_CONFLICT,
             "retention worker singleton lock is already held",
         ),
         (

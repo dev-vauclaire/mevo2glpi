@@ -1,8 +1,9 @@
 # Package `glpi-ticketing-common`
 
-`glpi-ticketing-common` contient les primitives de stockage audio et de backoff
-partagées par le web et les deux workers. Il ne connaît ni PostgreSQL, ni
-FastAPI, ni GLPI, ni Transcribe AI et ne porte aucune politique métier.
+`glpi-ticketing-common` contient les primitives de stockage audio, de backoff
+et d'attente coopérative partagées par le web et les deux workers. Il ne
+connaît ni PostgreSQL, ni FastAPI, ni GLPI, ni Transcribe AI et ne porte aucune
+politique métier.
 
 ## Stockage canonique unique
 
@@ -67,6 +68,14 @@ des liens durs et de `fsync` sur les répertoires.
 exponentiel plafonné sans dormir ni connaître le mécanisme de persistance. Le
 worker appelant reste responsable du compteur consécutif et de la date de
 prochaine tentative.
+
+`glpi_ticketing_common.cooperative_wait.wait_with_periodic_checkpoint()`
+découpe une attente en tranches bornées. Entre deux tranches, elle vérifie
+l'arrêt demandé puis appelle un checkpoint injecté. Les workers l'utilisent
+pour rafraîchir leur heartbeat sur la connexion qui détient leur verrou
+advisory. La primitive ne crée aucun thread, ne connaît ni PostgreSQL ni le
+heartbeat et propage toute erreur du checkpoint afin que l'application puisse
+échouer en mode fermé.
 
 `parse_audio_filename()` accepte une extension en majuscules à la frontière du
 provider et retourne une représentation normalisée. En revanche,
@@ -136,11 +145,13 @@ packages/common/
 │   ├── __init__.py
 │   ├── audio_files.py
 │   ├── audio_purge.py
-│   └── backoff.py
+│   ├── backoff.py
+│   └── cooperative_wait.py
 └── tests/unit/
     ├── test_audio_storage.py
     ├── test_audio_purge.py
-    └── test_backoff.py
+    ├── test_backoff.py
+    └── test_cooperative_wait.py
 ```
 
 Depuis la racine :

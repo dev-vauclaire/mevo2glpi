@@ -26,6 +26,11 @@ class RetentionWorkerSettings(BaseSettings):
     database_url: SecretStr = Field(repr=False)
     audio_root: Path = Path("/data/audios")
     database_connect_timeout_seconds: int = Field(default=5, gt=0)
+    worker_heartbeat_interval_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
 
     retention_poll_interval_seconds: float = Field(
         default=60.0,
@@ -75,6 +80,7 @@ class RetentionWorkerSettings(BaseSettings):
     @field_validator(
         "database_connect_timeout_seconds",
         "retention_check_interval_hours",
+        "worker_heartbeat_interval_seconds",
         "retention_poll_interval_seconds",
         "retention_retry_initial_seconds",
         "retention_retry_max_seconds",

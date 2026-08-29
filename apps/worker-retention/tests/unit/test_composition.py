@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 import httpx
 import pytest
@@ -71,12 +72,15 @@ def test_build_retention_worker_wires_policies_adapters_and_fencing(
     def ownership_guard() -> None:
         ownership_checks.append("checked")
 
+    started_jobs: list[UUID] = []
+
     try:
         result = build_retention_worker(
             settings,
             http_client=http_client,
             session_factory=cast(Any, session_factory),
             ownership_guard=ownership_guard,
+            on_job_started=started_jobs.append,
         )
     finally:
         http_client.close()
@@ -115,6 +119,7 @@ def test_build_retention_worker_wires_policies_adapters_and_fencing(
     assert worker_arguments["check_policy"] is check_policy
     assert worker_arguments["poll_interval_seconds"] == 61.0
     assert worker_arguments["system_probe_interval_seconds"] == 47.0
+    assert worker_arguments["on_job_started"] == started_jobs.append
     retry_policy = worker_arguments["retry_policy"]
     assert retry_policy.initial_seconds == 3.5
     assert retry_policy.maximum_seconds == 30.0
@@ -127,6 +132,7 @@ def test_build_retention_worker_wires_policies_adapters_and_fencing(
         ("http_client", object(), "httpx.Client"),
         ("session_factory", object(), "callable"),
         ("ownership_guard", object(), "callable"),
+        ("on_job_started", object(), "callable"),
     ],
 )
 def test_build_retention_worker_rejects_invalid_composition_inputs(
@@ -141,6 +147,7 @@ def test_build_retention_worker_rejects_invalid_composition_inputs(
         "http_client": httpx.Client(),
         "session_factory": lambda: object(),
         "ownership_guard": lambda: None,
+        "on_job_started": lambda _job_uuid: None,
     }
     values[argument_name] = invalid_value
     try:

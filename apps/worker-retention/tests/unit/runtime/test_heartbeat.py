@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
@@ -78,6 +79,17 @@ class _FakeLock:
         return session
 
 
+class _MonotonicClock:
+    def __init__(self, value: float = 0.0) -> None:
+        self.value = value
+
+    def __call__(self) -> float:
+        return self.value
+
+    def advance(self, seconds: float) -> None:
+        self.value += seconds
+
+
 @pytest.fixture
 def heartbeat_records(
     monkeypatch: pytest.MonkeyPatch,
@@ -100,11 +112,18 @@ def heartbeat_records(
     return records
 
 
-def _reporter(lock: _FakeLock) -> RetentionRuntimeHeartbeatReporter:
+def _reporter(
+    lock: _FakeLock,
+    *,
+    monotonic: Callable[[], float] | None = None,
+    interval_seconds: float = 10.0,
+) -> RetentionRuntimeHeartbeatReporter:
     return RetentionRuntimeHeartbeatReporter(
         advisory_lock=cast(Any, lock),
+        heartbeat_interval_seconds=interval_seconds,
         instance_id=INSTANCE_ID,
         now=lambda: NOW,
+        monotonic=monotonic or _MonotonicClock(),
     )
 
 
@@ -131,7 +150,8 @@ def test_retry_state_remains_sticky_while_worker_is_idle(
     heartbeat_records: list[dict[str, object]],
 ) -> None:
     lock = _FakeLock()
-    reporter = _reporter(lock)
+    monotonic = _MonotonicClock()
+    reporter = _reporter(lock, monotonic=monotonic)
     retry = RetryScheduledOutcome(
         job_uuid=JOB_UUID,
         operation=RetentionOperation.GLPI_CHECK,
@@ -141,12 +161,16 @@ def test_retry_state_remains_sticky_while_worker_is_idle(
 
     reporter.report_outcome(retry)
     reporter.report_outcome(IdleOutcome(wait_seconds=60))
+    assert len(heartbeat_records) == 1
+
+    monotonic.advance(10)
+    reporter.report_outcome(IdleOutcome(wait_seconds=60))
 
     assert [record["state"] for record in heartbeat_records] == [
         WorkerRuntimeState.DEGRADED,
         WorkerRuntimeState.DEGRADED,
     ]
-    assert heartbeat_records[0]["current_job_uuid"] == JOB_UUID
+    assert heartbeat_records[0]["current_job_uuid"] is None
     assert heartbeat_records[1]["current_job_uuid"] is None
     assert all(
         record["error_category"] == "unavailable" for record in heartbeat_records
@@ -161,6 +185,54 @@ def test_retry_state_remains_sticky_while_worker_is_idle(
     assert all(record["instance_id"] == INSTANCE_ID for record in heartbeat_records)
     assert all(record["now"] == NOW for record in heartbeat_records)
     assert all(session.closed for session in lock.sessions)
+
+
+def test_pulse_is_throttled_just_before_and_due_at_interval(
+    heartbeat_records: list[dict[str, object]],
+) -> None:
+    monotonic = _MonotonicClock(100)
+    reporter = _reporter(_FakeLock(), monotonic=monotonic)
+    reporter.record_state(WorkerRuntimeState.RUNNING)
+
+    monotonic.advance(9.999)
+    assert reporter.pulse_if_due() is False
+    monotonic.advance(0.001)
+    assert reporter.pulse_if_due() is True
+
+    assert [record["state"] for record in heartbeat_records] == [
+        WorkerRuntimeState.RUNNING,
+        WorkerRuntimeState.RUNNING,
+    ]
+    assert heartbeat_records[-1]["current_job_uuid"] is None
+
+
+def test_selected_job_remains_current_during_pulse_then_outcome_clears_it(
+    heartbeat_records: list[dict[str, object]],
+) -> None:
+    monotonic = _MonotonicClock()
+    reporter = _reporter(_FakeLock(), monotonic=monotonic)
+    reporter.record_state(WorkerRuntimeState.RUNNING)
+    reporter.start_job(JOB_UUID)
+
+    monotonic.advance(10)
+    assert reporter.pulse_if_due() is True
+    reporter.report_outcome(StaleCandidateOutcome(job_uuid=JOB_UUID))
+
+    assert [record["current_job_uuid"] for record in heartbeat_records] == [
+        None,
+        JOB_UUID,
+        JOB_UUID,
+        None,
+    ]
+
+
+def test_selected_job_requires_uuid_and_unknown_outcome_is_rejected() -> None:
+    reporter = _reporter(_FakeLock())
+
+    with pytest.raises(TypeError, match="job_uuid"):
+        reporter.start_job(cast(Any, "not-a-uuid"))
+    with pytest.raises(AssertionError, match="unreachable"):
+        reporter.report_outcome(cast(Any, object()))
 
 
 def test_failures_are_sticky_and_cleared_independently_by_dependency(
@@ -305,3 +377,44 @@ def test_explicit_running_state_clears_sticky_failures(
     assert heartbeat_records[-1]["error_code"] is None
     with pytest.raises(TypeError, match="WorkerRuntimeState"):
         reporter.record_state(cast(Any, "running"))
+
+
+@pytest.mark.parametrize(
+    "invalid_interval",
+    [True, 0, -1, float("inf"), float("nan")],
+)
+def test_heartbeat_interval_must_be_positive_and_finite(
+    invalid_interval: object,
+) -> None:
+    with pytest.raises(TypeError if invalid_interval is True else ValueError):
+        _reporter(
+            _FakeLock(),
+            interval_seconds=cast(Any, invalid_interval),
+        )
+
+
+@pytest.mark.parametrize("invalid_value", [True, float("inf"), float("nan")])
+def test_monotonic_clock_must_return_a_finite_number(
+    invalid_value: object,
+) -> None:
+    reporter = _reporter(
+        _FakeLock(),
+        monotonic=lambda: cast(Any, invalid_value),
+    )
+
+    with pytest.raises(TypeError if invalid_value is True else ValueError):
+        reporter.record_state(WorkerRuntimeState.RUNNING)
+
+
+def test_monotonic_clock_must_not_move_backwards(
+    heartbeat_records: list[dict[str, object]],
+) -> None:
+    monotonic = _MonotonicClock(10)
+    reporter = _reporter(_FakeLock(), monotonic=monotonic)
+    reporter.record_state(WorkerRuntimeState.RUNNING)
+    monotonic.value = 9
+
+    with pytest.raises(ValueError, match="must not move backwards"):
+        reporter.pulse_if_due()
+
+    assert len(heartbeat_records) == 1

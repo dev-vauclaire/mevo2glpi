@@ -6,6 +6,7 @@ import logging
 import math
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from glpi_ticketing_common.audio_purge import AudioPurgeError
 from glpi_ticketing_database import DeletionReason, ErrorScope
@@ -50,6 +51,10 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _no_op_job_started(_job_uuid: UUID) -> None:
+    return None
+
+
 class RetentionWorker:
     """Advance at most one retention record to an observable boundary."""
 
@@ -64,6 +69,7 @@ class RetentionWorker:
         poll_interval_seconds: float,
         system_probe_interval_seconds: float,
         now: Callable[[], datetime] = _utc_now,
+        on_job_started: Callable[[UUID], None] = _no_op_job_started,
     ) -> None:
         if not callable(getattr(lifecycle, "find_next_candidate", None)):
             raise TypeError("lifecycle must expose find_next_candidate()")
@@ -77,6 +83,8 @@ class RetentionWorker:
             raise TypeError("check_policy must be a RetentionCheckPolicy")
         if not callable(now):
             raise TypeError("now must be callable")
+        if not callable(on_job_started):
+            raise TypeError("on_job_started must be callable")
 
         self._lifecycle = lifecycle
         self._glpi_check_stage = glpi_check_stage
@@ -92,6 +100,7 @@ class RetentionWorker:
             "system_probe_interval_seconds",
         )
         self._now = now
+        self._on_job_started = on_job_started
 
     def run_once(self) -> RetentionRunOutcome:
         """Select and execute at most one durable retention operation."""
@@ -101,6 +110,7 @@ class RetentionWorker:
             return self._idle_or_wait_for_probe(selection_time)
 
         job_uuid = candidate.retention.job_uuid
+        self._on_job_started(job_uuid)
         try:
             work = self._lifecycle.prepare_candidate(candidate, selection_time)
             if isinstance(work, CheckRecoveryWork):

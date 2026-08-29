@@ -274,25 +274,41 @@ n'initie alors pas l'étape externe suivante. Cette garantie clôt les écriture
 locales, mais ne constitue pas un jeton de fencing distribué auprès de
 Transcribe AI ou de GLPI.
 
-Ce heartbeat est volontairement minimal : il est mis à jour aux frontières de
-la boucle, pas périodiquement pendant un long appel externe. La détection des
-heartbeats périmés, les alertes du dashboard et une émission périodique plus
-complète restent prévues à l'itération 6.
+Le heartbeat est rafraîchi aux frontières du pipeline et pendant chaque
+attente coopérative. Une attente plus longue que
+`WORKER_HEARTBEAT_INTERVAL_SECONDS` est découpée en tranches ; entre deux
+tranches, le reporter vérifie le verrou puis republie son dernier état. Cette
+cadence est implémentée sans thread : heartbeat et transactions continuent
+d'utiliser exclusivement la connexion propriétaire du verrou advisory.
+
+Une requête HTTP synchrone déjà commencée n'est pas interrompue pour publier un
+heartbeat ; celui-ci est vérifié avant et après l'appel. Les timeouts HTTPX
+bornent l'inactivité des phases réseau, pas une deadline murale totale : un
+upload lent mais progressif peut donc dépasser le futur seuil d'alerte. En 6B,
+un heartbeat périmé signifiera « aucun checkpoint récent, processus
+potentiellement non réactif » et non une preuve d'arrêt. Cette détection et
+l'affichage des alertes appartiennent au sous-jalon 6B.
 
 `SIGINT` et `SIGTERM` demandent un arrêt coopératif et interrompent les attentes
 injectées. Si le signal survient pendant le polling Transcribe AI, le worker
 retourne `InterruptedOutcome` : il ne programme ni retry ni erreur et le job
 reste `processing` pour une reprise prioritaire au prochain démarrage. Une
-requête HTTP synchrone déjà en cours peut aller jusqu'à son timeout. Les codes
-de sortie sont :
+requête HTTP synchrone déjà en cours n'est observée qu'à son retour ou à
+l'expiration d'un timeout d'inactivité de phase. Les codes de sortie sont :
 
 | Code | Signification |
 | --- | --- |
-| `0` | arrêt normal ou signal géré |
-| `1` | erreur inattendue |
-| `2` | configuration invalide |
-| `3` | verrou singleton déjà détenu |
-| `130` | `KeyboardInterrupt` échappé des gestionnaires |
+| `0` (`SUCCESS`) | arrêt normal ou signal coopératif géré |
+| `1` (`UNEXPECTED_ERROR`) | erreur inattendue, perte du verrou ou impossibilité de rafraîchir le heartbeat ; le runtime de conteneur peut relancer le processus |
+| `2` (`CONFIGURATION_ERROR`) | configuration invalide ; un redémarrage identique ne peut pas corriger la cause |
+| `3` (`SINGLETON_CONFLICT`) | verrou singleton déjà détenu par une autre instance ; aucun travail n'a été commencé |
+| `130` (`INTERRUPTED`) | `KeyboardInterrupt` échappé des gestionnaires coopératifs |
+
+Un `BlockedOutcome` propre à un job ne produit aucun de ces codes : il est
+persisté et la boucle continue. Un `SystemBlockedOutcome` sondable conserve
+également le processus vivant avec un heartbeat `blocked`. Seule une défaillance
+technique qui empêche de garantir le verrou ou la persistance traverse la
+frontière du processus avec le code `1`.
 
 ## Architecture des fichiers
 
@@ -372,6 +388,7 @@ Principaux réglages optionnels :
 | --- | ---: | --- |
 | `AUDIO_ROOT` | `/data/audios` | Racine du stockage canonique. |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Timeout de connexion PostgreSQL. |
+| `WORKER_HEARTBEAT_INTERVAL_SECONDS` | `10` | Cadence maximale des checkpoints de heartbeat pendant les attentes coopératives. |
 | `WORKER_IDLE_INTERVAL_SECONDS` | `1` | Attente lorsqu'aucun job n'est éligible. |
 | `WORKER_RETRY_INITIAL_SECONDS` | `5` | Premier délai du backoff. |
 | `WORKER_RETRY_MAX_SECONDS` | `300` | Plafond du backoff. |
@@ -463,9 +480,10 @@ conteneurs jetables et ne doivent pas être parallélisées.
 - Le backoff n'a pas de jitter et les retries ne sont pas plafonnés en nombre ;
   ce compromis est adapté au singleton du MVP mais devra être réévalué avant
   une parallélisation.
-- L'action opérateur de retry, le dashboard d'alertes et le worker de rétention
-  ne sont pas encore implémentés ; ils appartiennent aux itérations 4 à 6.
-- Le heartbeat n'est pas émis pendant une opération externe longue.
+- La détection des heartbeats périmés et le dashboard d'alertes ne sont pas
+  encore implémentés ; ils appartiennent au sous-jalon 6B.
+- Le heartbeat n'est pas émis au milieu d'une requête HTTP synchrone. Les
+  timeouts configurés bornent cette fenêtre d'invisibilité.
 - Le Docker Compose présent dans le dépôt décrit encore le POC. Le packaging
   complet du MVP — PostgreSQL, migration one-shot, web, deux workers et Nginx —
   reste explicitement prévu à l'itération 7.

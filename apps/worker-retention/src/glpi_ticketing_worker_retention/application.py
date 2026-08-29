@@ -12,10 +12,10 @@ from typing import Protocol
 from pydantic import ValidationError
 
 from .composition import RetentionWorkerConfigurationError
-from .retention.ports import RetentionWorkerProtocol
 from .retention.runner import run_forever
 from .runtime import (
     RetentionWorkerAlreadyRunningError,
+    RuntimeRetentionWorkerProtocol,
     retention_worker_runtime,
     shutdown_signal_handlers,
 )
@@ -30,7 +30,7 @@ class RetentionWorkerExitCode(IntEnum):
     SUCCESS = 0
     UNEXPECTED_ERROR = 1
     CONFIGURATION_ERROR = 2
-    BLOCKED = 3
+    SINGLETON_CONFLICT = 3
     INTERRUPTED = 130
 
 
@@ -40,7 +40,10 @@ class RuntimeFactoryProtocol(Protocol):
     def __call__(
         self,
         settings: RetentionWorkerSettings,
-    ) -> AbstractContextManager[RetentionWorkerProtocol]: ...
+        *,
+        wait_once: Callable[[float], object],
+        should_stop: Callable[[], bool],
+    ) -> AbstractContextManager[RuntimeRetentionWorkerProtocol]: ...
 
 
 def run_application(
@@ -54,10 +57,14 @@ def run_application(
     def wait_for_work(seconds: float) -> None:
         stop_event.wait(seconds)
 
-    with runtime_factory(settings) as worker:
+    with runtime_factory(
+        settings,
+        wait_once=wait_for_work,
+        should_stop=stop_event.is_set,
+    ) as worker:
         run_forever(
             worker,
-            sleep=wait_for_work,
+            sleep=worker.wait,
             should_stop=stop_event.is_set,
         )
 
@@ -95,7 +102,7 @@ def run_cli(
         return RetentionWorkerExitCode.CONFIGURATION_ERROR
     except RetentionWorkerAlreadyRunningError:
         LOGGER.error("retention worker singleton lock is already held")
-        return RetentionWorkerExitCode.BLOCKED
+        return RetentionWorkerExitCode.SINGLETON_CONFLICT
     except KeyboardInterrupt:
         LOGGER.info("retention worker interrupted")
         return RetentionWorkerExitCode.INTERRUPTED

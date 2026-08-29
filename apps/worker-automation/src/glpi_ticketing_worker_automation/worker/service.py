@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Callable
 from uuid import UUID
 
 from glpi_ticketing_database import JobStage
@@ -39,6 +40,7 @@ class AutomationWorker:
         ticket_creation_stage: TicketCreationStage,
         transitions: JobTransitionService,
         idle_wait_seconds: float = 1.0,
+        on_job_started: Callable[[UUID], None] | None = None,
     ) -> None:
         if not callable(getattr(lifecycle, "resume_or_claim_next", None)):
             raise TypeError("lifecycle must expose resume_or_claim_next()")
@@ -50,6 +52,8 @@ class AutomationWorker:
             raise TypeError("ticket_creation_stage must be a TicketCreationStage")
         if not isinstance(transitions, JobTransitionService):
             raise TypeError("transitions must be a JobTransitionService")
+        if on_job_started is not None and not callable(on_job_started):
+            raise TypeError("on_job_started must be callable")
 
         self._lifecycle = lifecycle
         self._audio_inspector = audio_inspector
@@ -60,6 +64,7 @@ class AutomationWorker:
             idle_wait_seconds,
             "idle_wait_seconds",
         )
+        self._on_job_started = on_job_started or _no_op
 
     def run_once(self) -> RunOutcome:
         """Acquire at most one job and advance it to an observable boundary."""
@@ -72,6 +77,7 @@ class AutomationWorker:
 
         job = acquisition.job
         audio_uuid = _require_uuid(job.uuid)
+        self._on_job_started(audio_uuid)
         LOGGER.info("audio processing started audio_uuid=%s", audio_uuid)
 
         audio = self._audio_inspector.inspect(job)
@@ -118,6 +124,10 @@ def _positive_seconds(value: object, field_name: str) -> float:
     if not math.isfinite(normalized) or normalized <= 0:
         raise ValueError(f"{field_name} must be finite and greater than zero")
     return normalized
+
+
+def _no_op(_audio_uuid: UUID) -> None:
+    return None
 
 
 __all__ = ["AutomationWorker"]

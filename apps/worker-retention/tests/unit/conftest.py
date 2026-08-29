@@ -25,6 +25,7 @@ def retention_settings_factory(
             ),
             "audio_root": audio_root,
             "database_connect_timeout_seconds": 7,
+            "worker_heartbeat_interval_seconds": 10.0,
             "retention_poll_interval_seconds": 61.0,
             "retention_retry_initial_seconds": 3.5,
             "retention_retry_max_seconds": 30.0,

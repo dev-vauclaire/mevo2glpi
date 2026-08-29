@@ -307,6 +307,7 @@ def build_worker(
     *,
     audio_url_for: Callable[[UUID], str] | None = None,
     ownership_guard: Callable[[], None] | None = None,
+    on_job_started: Callable[[UUID], None] | None = None,
 ) -> AutomationWorker:
     lifecycle = AutomationJobLifecycleService(
         session_factory=lambda: FakeSession(state),  # type: ignore[arg-type]
@@ -350,6 +351,7 @@ def build_worker(
         ),
         transitions=transitions,
         idle_wait_seconds=1,
+        on_job_started=on_job_started,
     )
 
 

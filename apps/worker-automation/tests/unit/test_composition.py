@@ -131,6 +131,7 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
         return object()
 
     ownership_checks: list[str] = []
+    started_jobs: list[UUID] = []
     transcription_sleeps: list[float] = []
 
     try:
@@ -141,6 +142,7 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
             transcription_sleep=transcription_sleeps.append,
             transcription_should_stop=lambda: False,
             ownership_guard=lambda: ownership_checks.append("checked"),
+            on_job_started=started_jobs.append,
         )
     finally:
         http_client.close()
@@ -208,6 +210,7 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     assert worker_arguments["ticket_creation_stage"] is ticket_creation_stage
     assert worker_arguments["transitions"] is transitions
     assert worker_arguments["idle_wait_seconds"] == 1.25
+    assert worker_arguments["on_job_started"] == started_jobs.append
 
 
 def test_build_automation_worker_rejects_missing_audio_root(

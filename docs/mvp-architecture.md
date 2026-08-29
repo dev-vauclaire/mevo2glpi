@@ -234,7 +234,7 @@ flowchart LR
     Automation --> Transcribe[Transcribe AI]:::implemented
     Automation --> Glpi[GLPI V2.3.0]:::implemented
 
-    Retention[Worker rétention]:::future --> Audio
+    Retention[Worker rétention]:::implemented --> Audio
     Retention --> Database
     Retention --> Glpi
 
@@ -427,7 +427,31 @@ current_job_uuid, last_error_category, last_error_code, updated_at
 ```
 
 `state` vaut `starting`, `running`, `degraded`, `blocked` ou `stopped`. Le
-dashboard produit une alerte si un heartbeat dépasse le seuil configuré.
+dashboard produira au sous-jalon 6B une alerte si un heartbeat dépasse le seuil
+configuré.
+
+## Politique d'autonomie et codes de sortie
+
+Les états métier et l'état du processus sont volontairement distincts. Un job
+`failed` ou `blocked` n'arrête aucun worker. Une dépendance temporairement
+indisponible conserve le processus vivant en `degraded`, tandis qu'un blocage
+systémique sûr à sonder le conserve en `blocked`. Une opération distante au
+résultat ambigu reste verrouillée sans rejeu automatique.
+
+Les deux applications worker exposent les mêmes codes stables :
+
+| Code | Nom | Politique |
+| ---: | --- | --- |
+| `0` | `SUCCESS` | Arrêt normal ou signal coopératif entièrement géré. |
+| `1` | `UNEXPECTED_ERROR` | Défaillance technique inattendue, perte du verrou ou heartbeat impossible. Le processus sort en échec afin que l'orchestrateur puisse le relancer. |
+| `2` | `CONFIGURATION_ERROR` | Configuration invalide. Une correction opérateur est nécessaire avant tout redémarrage utile. |
+| `3` | `SINGLETON_CONFLICT` | Une autre instance possède déjà le verrou du même service. Aucun job n'est commencé par la seconde instance. |
+| `130` | `INTERRUPTED` | `KeyboardInterrupt` échappé du mécanisme d'arrêt coopératif. |
+
+Le nom `SINGLETON_CONFLICT` évite de confondre le code `3` avec les états
+métier `blocked`. Un `BlockedOutcome`, un `RetentionBlockedOutcome` ou un
+`SystemBlockedOutcome` n'est jamais traduit mécaniquement en code de sortie
+`3`.
 
 ## États `failed` et `blocked`
 
@@ -654,14 +678,21 @@ Un crash technique inattendu peut être relancé par Docker Compose. Un résulta
 `failed` ou `blocked` est un état métier persisté, pas une raison de redémarrer
 aveuglément le processus.
 
-Le worker écrit dès l'itération 3 un heartbeat minimal aux frontières de sa
-boucle : `starting`, `running`, `degraded`, `blocked` et `stopped`. Une erreur
+Le worker écrit depuis l'itération 3 les états `starting`, `running`,
+`degraded`, `blocked` et `stopped`. Le sous-jalon 6A ajoute un checkpoint
+périodique aux attentes coopératives : une attente est découpée selon
+`WORKER_HEARTBEAT_INTERVAL_SECONDS`, puis le dernier état est republié après
+revalidation du verrou. Une erreur
 système immédiate laisse le job `processing`. Elle est sondée uniquement si la
 répétition ne peut pas dupliquer un effet distant ; après un `POST` accepté non
 persisté, une rupture du polling ou un contrat GLPI incohérent, le blocage est
 verrouillé et le processus reste vivant sans rappeler le processeur. La
-périodicité indépendante des appels longs, la détection de heartbeat périmé et
-les alertes du dashboard restent le périmètre de l'itération 6.
+périodicité est volontairement coopérative et n'utilise aucun thread : une
+requête HTTP déjà en cours ne publie aucun checkpoint. Les timeouts HTTPX
+bornent l'inactivité de chaque phase (`connect`, `read`, `write`, `pool`), mais
+ne constituent pas une deadline murale totale : un transfert lent qui continue
+de progresser peut donc durer plus longtemps. La détection de heartbeat périmé
+et les alertes du dashboard restent le périmètre du sous-jalon 6B.
 
 Toutes les transactions du worker, y compris les heartbeats, utilisent la
 connexion qui détient le verrou advisory. La perte de cette connexion fait donc
@@ -925,8 +956,9 @@ Périmètre : sélection en base, verrou advisory singleton, reprise d'un job
 
 État : 🟦 implémenté sur la branche. PostgreSQL pilote la sélection et toutes
 les transitions ; le volume canonique ne représente plus l'état du job. Un
-heartbeat minimal a été avancé depuis l'itération 6 pour rendre les blocages
-système observables dès cette bascule.
+heartbeat de frontière a été avancé depuis l'itération 6 pour rendre les
+blocages système observables dès cette bascule ; le sous-jalon 6A lui ajoute la
+cadence coopérative pendant les attentes.
 
 - Tests unitaires : priorité de reprise, matrice des transitions, backoff,
   classification des erreurs, idempotence GLPI et transactions sans appel
@@ -1005,22 +1037,52 @@ transactions courtes, la barrière de sonde GLPI et la purge crash-safe via
 Périmètre : états runtime des workers, alertes dashboard, détection des jobs
 anciens et distinction entre retry métier et redémarrage de processus.
 
-Un socle minimal est déjà présent depuis l'itération 3 pour le worker
-d'automatisation : écriture des états runtime aux frontières de la boucle et
-distinction entre blocage de job et blocage système. Cette itération ajoute la
-périodicité pendant les traitements longs, les seuils d'absence et leur
-présentation dans le dashboard.
+État : sous-jalon 6A 🟦 implémenté ; sous-jalon 6B ⬜ à implémenter.
 
-- Tests unitaires : seuils de heartbeat, alertes dédupliquées, état
-  `degraded`/`blocked`, horloge injectée et politique de sortie du processus.
-- Tests d'intégration : heartbeat réel en base, arrêt d'un worker, reprise
-  après indisponibilité et affichage de l'alerte correspondante.
-- Tests POC à adapter : tests du runner qui attendent un arrêt global pour
-  tout `BlockedOutcome`. Un blocage propre au job doit désormais laisser la
-  boucle continuer.
-- Code POC à adapter : politique d'arrêt du runner et composition des boucles.
-- Sortie : le dashboard distingue un job en retry, un job bloqué et un worker
-  absent.
+Le socle présent depuis l'itération 3 écrivait les états runtime aux frontières
+de la boucle. Le sous-jalon 6A ajoute une cadence commune de 10 secondes
+configurable par `WORKER_HEARTBEAT_INTERVAL_SECONDS`. Les attentes d'idle, de
+backoff, de sonde et de polling sont découpées sans thread par la primitive
+partagée `wait_with_periodic_checkpoint()`. Le checkpoint revalide le verrou,
+puis republie l'état `running`, `degraded` ou `blocked` avec son contexte
+expurgé. Les appels HTTP synchrones sont encadrés par des checkpoints ; leurs
+timeouts bornent l'inactivité des phases réseau, pas nécessairement leur durée
+murale totale.
+
+Le sous-jalon 6A formalise également les sorties `SUCCESS=0`,
+`UNEXPECTED_ERROR=1`, `CONFIGURATION_ERROR=2`, `SINGLETON_CONFLICT=3` et
+`INTERRUPTED=130`. Un blocage propre à un job laisse la boucle continuer ; un
+blocage système sondable conserve le processus vivant. Une impossibilité de
+prouver la propriété du verrou ou de persister le heartbeat échoue en mode
+fermé avec le code `1`.
+
+- Tests unitaires 6A : validation de l'intervalle, découpage des attentes sans
+  sommeil réel, arrêt coopératif, cadence monotone injectée, conservation des
+  états `degraded`/`blocked`, checkpoints autour des appels distants et codes
+  de sortie.
+- Tests d'intégration 6A : progression réelle du heartbeat PostgreSQL pendant
+  une attente, conservation du contexte expurgé et arrêt fail-closed après
+  perte du verrou.
+- Tests existants : aucun test n'est supprimé. Les anciens tests du runner ont
+  déjà été remplacés à l'itération 3 ; un `BlockedOutcome` propre au job ne
+  constitue plus une politique d'arrêt sur la branche MVP.
+- Code POC : le tag `poc-v0.1.0` reste inchangé. Aucun fichier du Compose POC
+  n'est adapté avant l'itération 7.
+
+Le sous-jalon 6B ajoutera la lecture des statuts runtime, un seuil sans
+checkpoint de 45 secondes, les alertes dédupliquées du dashboard, l'alerte
+`pending` après 15 minutes et une grâce de 60 secondes pour un retry arrivé à
+échéance. Le terme `stale` signifiera donc « aucun checkpoint récent,
+processus potentiellement non réactif », et non une preuve certaine que le
+processus est arrêté. Le seuil devra rester strictement supérieur à la cadence
+de heartbeat avec une marge explicite.
+
+- Tests unitaires 6B : seuils exacts, priorisation, déduplication et données
+  expurgées.
+- Tests d'intégration 6B : heartbeat frais, périmé ou absent, agrégats jobs et
+  rétentions, puis affichage correspondant dans le dashboard.
+- Sortie de l'itération complète : le dashboard distingue un job en retry, un
+  job bloqué et un worker absent.
 
 ### Itération 7 — Déploiement Docker Compose du MVP
 

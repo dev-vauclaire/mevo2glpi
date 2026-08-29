@@ -85,6 +85,7 @@ def test_worker_settings_read_environment_overrides(
     monkeypatch.setenv("AUDIO_ROOT", str(audio_root))
     monkeypatch.setenv("DATABASE_CONNECT_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("WORKER_IDLE_INTERVAL_SECONDS", "1.25")
+    monkeypatch.setenv("WORKER_HEARTBEAT_INTERVAL_SECONDS", "8")
     monkeypatch.setenv("WORKER_RETRY_INITIAL_SECONDS", "4")
     monkeypatch.setenv("WORKER_RETRY_MAX_SECONDS", "120")
     monkeypatch.setenv("WORKER_SYSTEM_PROBE_INTERVAL_SECONDS", "45")
@@ -98,6 +99,7 @@ def test_worker_settings_read_environment_overrides(
     assert settings.audio_root == audio_root
     assert settings.database_connect_timeout_seconds == 7
     assert settings.worker_idle_interval_seconds == 1.25
+    assert settings.worker_heartbeat_interval_seconds == 8
     assert settings.worker_retry_initial_seconds == 4
     assert settings.worker_retry_max_seconds == 120
     assert settings.worker_system_probe_interval_seconds == 45
@@ -109,6 +111,7 @@ def test_runner_intervals_have_safe_defaults(
 ) -> None:
     for variable_name in (
         "WORKER_IDLE_INTERVAL_SECONDS",
+        "WORKER_HEARTBEAT_INTERVAL_SECONDS",
         "WORKER_RETRY_INITIAL_SECONDS",
         "WORKER_RETRY_MAX_SECONDS",
         "WORKER_SYSTEM_PROBE_INTERVAL_SECONDS",
@@ -122,6 +125,7 @@ def test_runner_intervals_have_safe_defaults(
     )
 
     assert settings.worker_idle_interval_seconds == 1.0
+    assert settings.worker_heartbeat_interval_seconds == 10.0
     assert settings.worker_retry_initial_seconds == 5.0
     assert settings.worker_retry_max_seconds == 300.0
     assert settings.worker_system_probe_interval_seconds == 60.0
@@ -131,6 +135,7 @@ def test_runner_intervals_read_environment_overrides(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("WORKER_IDLE_INTERVAL_SECONDS", "1.25")
+    monkeypatch.setenv("WORKER_HEARTBEAT_INTERVAL_SECONDS", "7.5")
     monkeypatch.setenv("WORKER_RETRY_INITIAL_SECONDS", "3.5")
     monkeypatch.setenv("WORKER_RETRY_MAX_SECONDS", "90")
     monkeypatch.setenv("WORKER_SYSTEM_PROBE_INTERVAL_SECONDS", "12")
@@ -141,6 +146,7 @@ def test_runner_intervals_read_environment_overrides(
     )
 
     assert settings.worker_idle_interval_seconds == 1.25
+    assert settings.worker_heartbeat_interval_seconds == 7.5
     assert settings.worker_retry_initial_seconds == 3.5
     assert settings.worker_retry_max_seconds == 90
     assert settings.worker_system_probe_interval_seconds == 12
@@ -150,6 +156,7 @@ def test_runner_intervals_read_environment_overrides(
     "field_name",
     [
         "worker_idle_interval_seconds",
+        "worker_heartbeat_interval_seconds",
         "worker_retry_initial_seconds",
         "worker_retry_max_seconds",
         "worker_system_probe_interval_seconds",
@@ -163,6 +170,18 @@ def test_runner_intervals_must_be_positive_and_finite(field_name: str) -> None:
                 **{field_name: invalid_value},
                 _env_file=None,
             )
+
+
+def test_heartbeat_interval_rejects_boolean() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="WORKER_HEARTBEAT_INTERVAL_SECONDS cannot be a boolean",
+    ):
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            worker_heartbeat_interval_seconds=True,
+            _env_file=None,
+        )
 
 
 def test_retry_initial_delay_cannot_exceed_cap() -> None:

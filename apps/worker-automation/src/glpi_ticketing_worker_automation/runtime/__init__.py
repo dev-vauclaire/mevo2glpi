@@ -1,6 +1,7 @@
 """Process runtime services for the automation worker."""
 
 from .context import (
+    RuntimeAutomationWorkerProtocol,
     RuntimeReportingWorker,
     WorkerAlreadyRunningError,
     WorkerRuntimeContext,
@@ -11,6 +12,7 @@ from .signals import shutdown_signal_handlers
 
 __all__ = [
     "RuntimeHeartbeatReporter",
+    "RuntimeAutomationWorkerProtocol",
     "RuntimeReportingWorker",
     "WorkerAlreadyRunningError",
     "WorkerRuntimeContext",

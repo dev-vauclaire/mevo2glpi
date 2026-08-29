@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 
+from glpi_ticketing_database import JobStatus
 from glpi_ticketing_glpi import (
     GlpiOperation,
     GlpiTicketCreateCommand,
@@ -15,6 +16,7 @@ from glpi_ticketing_glpi import (
 )
 from glpi_ticketing_worker_automation.worker import (
     CompletedOutcome,
+    IdleOutcome,
     RetryOutcome,
     SystemBlockedOutcome,
 )
@@ -65,6 +67,76 @@ def test_success_persists_ticket_before_completion_and_keeps_audio(
             defaults=TICKET_DEFAULTS,
         )
     ]
+
+
+def test_job_started_hook_runs_after_acquisition_transaction(
+    tmp_path: Path,
+) -> None:
+    state = FakeState()
+    audio_path = write_audio(tmp_path)
+    started_jobs: list[UUID] = []
+
+    def record_started_job(audio_uuid: UUID) -> None:
+        assert state.active_transactions == 0
+        assert repository_call_names(state) == ["resume_or_claim_next"]
+        started_jobs.append(audio_uuid)
+
+    worker = build_worker(
+        tmp_path,
+        state,
+        FakeTranscriber(state, [transcription_result(audio_path)]),
+        FakeGlpiClient(state, [42]),
+        on_job_started=record_started_job,
+    )
+
+    assert isinstance(worker.run_once(), CompletedOutcome)
+    assert started_jobs == [AUDIO_UUID]
+
+
+def test_job_started_hook_is_not_called_when_worker_is_idle(tmp_path: Path) -> None:
+    state = FakeState()
+    state.eligible = False
+    started_jobs: list[UUID] = []
+    worker = build_worker(
+        tmp_path,
+        state,
+        FakeTranscriber(state, []),
+        FakeGlpiClient(state, []),
+        on_job_started=started_jobs.append,
+    )
+
+    assert worker.run_once() == IdleOutcome(wait_seconds=1)
+    assert started_jobs == []
+
+
+def test_job_started_hook_failure_stops_before_external_calls(tmp_path: Path) -> None:
+    state = FakeState()
+    audio_path = write_audio(tmp_path)
+    transcriber = FakeTranscriber(state, [transcription_result(audio_path)])
+    glpi_client = FakeGlpiClient(state, [42])
+    expected_error = RuntimeError("synthetic heartbeat persistence failure")
+
+    def fail_job_started(_audio_uuid: UUID) -> None:
+        assert state.active_transactions == 0
+        assert repository_call_names(state) == ["resume_or_claim_next"]
+        raise expected_error
+
+    worker = build_worker(
+        tmp_path,
+        state,
+        transcriber,
+        glpi_client,
+        on_job_started=fail_job_started,
+    )
+
+    with pytest.raises(RuntimeError) as captured_error:
+        worker.run_once()
+
+    assert captured_error.value is expected_error
+    assert transcriber.calls == []
+    assert glpi_client.calls == []
+    assert state.job.status is JobStatus.PROCESSING
+    assert state.transaction_outcomes == ["commit"]
 
 
 def test_ownership_loss_after_transcription_prevents_glpi_and_transitions(

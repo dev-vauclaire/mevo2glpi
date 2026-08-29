@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any, cast
+from uuid import UUID
 
 import pytest
 
@@ -19,6 +20,8 @@ from glpi_ticketing_worker_automation.runtime.context import (
 )
 from glpi_ticketing_worker_automation.settings import WorkerSettings
 from glpi_ticketing_worker_automation.worker import IdleOutcome, RunOutcome
+
+AUDIO_UUID = UUID("123e4567-e89b-42d3-a456-426614174000")
 
 
 class _FakeEngine:
@@ -68,18 +71,24 @@ class _FakeWorker:
         self.events = events
         self.outcome = outcome
         self.calls = 0
+        self.after_run: Callable[[], None] | None = None
 
     def run_once(self) -> RunOutcome:
         self.events.append("worker.run_once")
         self.calls += 1
+        if self.after_run is not None:
+            self.after_run()
         return self.outcome
 
 
 class _FakeHeartbeat:
-    def __init__(self, lock: _FakeLock) -> None:
+    def __init__(self, lock: _FakeLock, heartbeat_interval_seconds: float) -> None:
         self.lock = lock
+        self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.states: list[WorkerRuntimeState] = []
         self.outcomes: list[RunOutcome] = []
+        self.started_jobs: list[UUID] = []
+        self.pulses = 0
         lock.events.append("heartbeat.create")
 
     def record_state(self, state: WorkerRuntimeState) -> None:
@@ -89,6 +98,15 @@ class _FakeHeartbeat:
     def report_outcome(self, outcome: RunOutcome) -> None:
         self.lock.events.append(f"heartbeat.outcome.{outcome.status.value}")
         self.outcomes.append(outcome)
+
+    def start_job(self, audio_uuid: UUID) -> None:
+        self.lock.events.append(f"heartbeat.job.{audio_uuid}")
+        self.started_jobs.append(audio_uuid)
+
+    def pulse_if_due(self) -> bool:
+        self.lock.events.append("heartbeat.pulse")
+        self.pulses += 1
+        return False
 
 
 class _RuntimeHarness:
@@ -129,8 +147,12 @@ class _RuntimeHarness:
             harness.build_arguments = kwargs
             return harness.worker
 
-        def build_heartbeat(lock: _FakeLock) -> _FakeHeartbeat:
-            heartbeat = _FakeHeartbeat(lock)
+        def build_heartbeat(
+            lock: _FakeLock,
+            *,
+            heartbeat_interval_seconds: float,
+        ) -> _FakeHeartbeat:
+            heartbeat = _FakeHeartbeat(lock, heartbeat_interval_seconds)
             harness.heartbeat = heartbeat
             return heartbeat
 
@@ -169,16 +191,26 @@ def test_worker_runtime_owns_resources_and_guards_each_iteration(
     with worker_runtime(
         settings,
         http_client_factory=cast(Any, harness.create_http_client),
-        transcription_sleep=injected_sleep.append,
-        transcription_should_stop=lambda: False,
+        wait_once=injected_sleep.append,
+        should_stop=lambda: False,
     ) as runtime_worker:
         assert runtime_worker.run_once() is outcome
+        runtime_worker.wait(25)
         assert harness.build_arguments is not None
+        assert (
+            harness.build_arguments["transcription_sleep"]
+            is runtime_worker.wait_callback
+        )
         guarded_should_stop = cast(
             Callable[[], bool],
             harness.build_arguments["transcription_should_stop"],
         )
         assert guarded_should_stop() is False
+        on_job_started = cast(
+            Callable[[UUID], None],
+            harness.build_arguments["on_job_started"],
+        )
+        on_job_started(AUDIO_UUID)
 
     assert harness.engine_arguments == (
         settings.database_url.get_secret_value(),
@@ -187,9 +219,13 @@ def test_worker_runtime_owns_resources_and_guards_each_iteration(
     assert harness.build_arguments is not None
     assert harness.build_arguments["http_client"] is harness.http_client
     assert callable(harness.build_arguments["session_factory"])
-    assert harness.build_arguments["transcription_sleep"] == injected_sleep.append
+    assert callable(harness.build_arguments["transcription_sleep"])
     assert callable(harness.build_arguments["ownership_guard"])
     assert harness.heartbeat is not None
+    assert harness.heartbeat.heartbeat_interval_seconds == 10
+    assert harness.heartbeat.started_jobs == [AUDIO_UUID]
+    assert harness.heartbeat.pulses == 5
+    assert injected_sleep == [10, 10, 5]
     assert harness.heartbeat.states == [
         WorkerRuntimeState.STARTING,
         WorkerRuntimeState.RUNNING,
@@ -201,6 +237,9 @@ def test_worker_runtime_owns_resources_and_guards_each_iteration(
         < harness.events.index("worker.run_once")
         < harness.events.index("heartbeat.outcome.idle")
     )
+    worker_index = harness.events.index("worker.run_once")
+    outcome_index = harness.events.index("heartbeat.outcome.idle")
+    assert harness.events[worker_index + 1 : outcome_index] == ["lock.ensure_held"]
     assert (
         harness.events.index("heartbeat.stopped")
         < harness.events.index("http.close")
@@ -239,6 +278,92 @@ def test_runtime_guard_never_calls_worker_after_lock_loss(
     assert harness.http_client.closed
     assert harness.engine.disposed
     assert "lock.release" not in harness.events
+
+
+def test_runtime_never_reports_outcome_after_lock_loss_during_iteration(
+    worker_settings_factory: Callable[..., WorkerSettings],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _RuntimeHarness(IdleOutcome(wait_seconds=1))
+    harness.install(monkeypatch)
+
+    def lose_lock_after_run() -> None:
+        harness.lock.ensure_error = AdvisoryLockConnectionLostError(
+            "synthetic lock loss after worker run"
+        )
+
+    harness.worker.after_run = lose_lock_after_run
+
+    with worker_runtime(
+        worker_settings_factory(),
+        http_client_factory=cast(Any, harness.create_http_client),
+    ) as runtime_worker:
+        with pytest.raises(
+            AdvisoryLockConnectionLostError,
+            match="synthetic lock loss after worker run",
+        ):
+            runtime_worker.run_once()
+
+    assert harness.worker.calls == 1
+    assert harness.heartbeat is not None
+    assert harness.heartbeat.outcomes == []
+    assert WorkerRuntimeState.STOPPED not in harness.heartbeat.states
+    assert harness.http_client.closed
+    assert harness.engine.disposed
+    assert "lock.release" not in harness.events
+
+
+def test_runtime_wait_fails_closed_when_lock_is_lost_at_checkpoint(
+    worker_settings_factory: Callable[..., WorkerSettings],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _RuntimeHarness(IdleOutcome(wait_seconds=1))
+    harness.install(monkeypatch)
+    waits: list[float] = []
+
+    with worker_runtime(
+        worker_settings_factory(),
+        http_client_factory=cast(Any, harness.create_http_client),
+        wait_once=waits.append,
+        should_stop=lambda: False,
+    ) as runtime_worker:
+        harness.lock.ensure_error = AdvisoryLockConnectionLostError(
+            "synthetic lock loss during wait"
+        )
+        with pytest.raises(
+            AdvisoryLockConnectionLostError,
+            match="synthetic lock loss during wait",
+        ):
+            runtime_worker.wait(10)
+
+    assert waits == [10]
+    assert harness.worker.calls == 0
+    assert harness.heartbeat is not None
+    assert WorkerRuntimeState.STOPPED not in harness.heartbeat.states
+    assert harness.http_client.closed
+    assert harness.engine.disposed
+    assert "lock.release" not in harness.events
+
+
+def test_transcription_stop_callback_must_return_boolean(
+    worker_settings_factory: Callable[..., WorkerSettings],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _RuntimeHarness(IdleOutcome(wait_seconds=1))
+    harness.install(monkeypatch)
+
+    with worker_runtime(
+        worker_settings_factory(),
+        http_client_factory=cast(Any, harness.create_http_client),
+        should_stop=cast(Callable[[], bool], lambda: 1),
+    ):
+        assert harness.build_arguments is not None
+        guarded_should_stop = cast(
+            Callable[[], bool],
+            harness.build_arguments["transcription_should_stop"],
+        )
+        with pytest.raises(TypeError, match="should_stop must return a boolean"):
+            guarded_should_stop()
 
 
 def test_worker_runtime_refuses_second_singleton_before_http_start(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from typing import Any, cast
+from uuid import UUID
 
 import pytest
 
@@ -81,10 +82,13 @@ class _FakeWorker:
 
 
 class _FakeHeartbeat:
-    def __init__(self, lock: _FakeLock) -> None:
+    def __init__(self, lock: _FakeLock, *, interval_seconds: float) -> None:
         self.lock = lock
+        self.interval_seconds = interval_seconds
         self.states: list[WorkerRuntimeState] = []
         self.outcomes: list[IdleOutcome] = []
+        self.pulse_calls = 0
+        self.started_jobs: list[UUID] = []
         self.stop_error: Exception | None = None
         lock.events.append("heartbeat.create")
 
@@ -98,6 +102,15 @@ class _FakeHeartbeat:
         self.lock.events.append(f"heartbeat.outcome.{outcome.status.value}")
         self.outcomes.append(outcome)
 
+    def pulse_if_due(self) -> bool:
+        self.lock.events.append("heartbeat.pulse_if_due")
+        self.pulse_calls += 1
+        return True
+
+    def start_job(self, job_uuid: UUID) -> None:
+        self.lock.events.append("heartbeat.start_job")
+        self.started_jobs.append(job_uuid)
+
 
 class _RuntimeHarness:
     def __init__(self, *, lock_available: bool = True) -> None:
@@ -110,6 +123,7 @@ class _RuntimeHarness:
         self.engine_arguments: tuple[str, int] | None = None
         self.build_arguments: dict[str, object] | None = None
         self.heartbeat: _FakeHeartbeat | None = None
+        self.heartbeat_interval_seconds: float | None = None
         self.build_error: BaseException | None = None
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -140,8 +154,16 @@ class _RuntimeHarness:
                 raise harness.build_error
             return harness.worker
 
-        def build_heartbeat(lock: _FakeLock) -> _FakeHeartbeat:
-            heartbeat = _FakeHeartbeat(lock)
+        def build_heartbeat(
+            lock: _FakeLock,
+            *,
+            heartbeat_interval_seconds: float,
+        ) -> _FakeHeartbeat:
+            harness.heartbeat_interval_seconds = heartbeat_interval_seconds
+            heartbeat = _FakeHeartbeat(
+                lock,
+                interval_seconds=heartbeat_interval_seconds,
+            )
             harness.heartbeat = heartbeat
             return heartbeat
 
@@ -185,6 +207,8 @@ def test_runtime_owns_resources_uses_retention_lock_and_fences_each_iteration(
     assert harness.build_arguments["http_client"] is harness.http_client
     assert callable(harness.build_arguments["session_factory"])
     assert callable(harness.build_arguments["ownership_guard"])
+    assert callable(harness.build_arguments["on_job_started"])
+    assert harness.heartbeat_interval_seconds == 10.0
     assert harness.heartbeat is not None
     assert harness.heartbeat.states == [
         WorkerRuntimeState.STARTING,
@@ -197,6 +221,9 @@ def test_runtime_owns_resources_uses_retention_lock_and_fences_each_iteration(
     second_guard = harness.events.index("lock.ensure_held", first_guard + 1)
     heartbeat_call = harness.events.index("heartbeat.outcome.idle")
     assert first_guard < worker_call < second_guard < heartbeat_call
+    assert (
+        "heartbeat.pulse_if_due" not in harness.events[worker_call + 1 : heartbeat_call]
+    )
     assert (
         harness.events.index("heartbeat.stopped")
         < harness.events.index("http.close")
@@ -227,6 +254,67 @@ def test_runtime_never_calls_worker_when_lock_is_lost_before_iteration(
     assert "lock.release" not in harness.events
     assert harness.http_client.closed
     assert harness.engine.disposed
+
+
+def test_runtime_checkpoint_and_wait_share_lock_then_heartbeat_order(
+    retention_settings_factory: Callable[..., RetentionWorkerSettings],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _RuntimeHarness()
+    harness.install(monkeypatch)
+    wait_calls: list[float] = []
+
+    def wait_once(seconds: float) -> None:
+        wait_calls.append(seconds)
+
+    with retention_worker_runtime(
+        retention_settings_factory(worker_heartbeat_interval_seconds=10),
+        http_client_factory=cast(Any, harness.create_http_client),
+        wait_once=wait_once,
+        should_stop=lambda: False,
+    ) as runtime_worker:
+        checkpoint_start = len(harness.events)
+        assert harness.build_arguments is not None
+        ownership_guard = cast(
+            Callable[[], None],
+            harness.build_arguments["ownership_guard"],
+        )
+        ownership_guard()
+        runtime_worker.checkpoint()
+        runtime_worker.wait(25)
+
+    checkpoint_events = harness.events[checkpoint_start:]
+    assert wait_calls == [10.0, 10.0, 5.0]
+    assert harness.heartbeat is not None
+    assert harness.heartbeat.pulse_calls == 5
+    for pulse_index, event in enumerate(checkpoint_events):
+        if event == "heartbeat.pulse_if_due":
+            assert pulse_index > 0
+            assert checkpoint_events[pulse_index - 1] == "lock.ensure_held"
+
+
+def test_runtime_wait_stops_without_checkpoint_after_interrupted_slice(
+    retention_settings_factory: Callable[..., RetentionWorkerSettings],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _RuntimeHarness()
+    harness.install(monkeypatch)
+    stop_requested = False
+
+    def wait_once(_seconds: float) -> None:
+        nonlocal stop_requested
+        stop_requested = True
+
+    with retention_worker_runtime(
+        retention_settings_factory(),
+        http_client_factory=cast(Any, harness.create_http_client),
+        wait_once=wait_once,
+        should_stop=lambda: stop_requested,
+    ) as runtime_worker:
+        runtime_worker.wait(60)
+
+    assert harness.heartbeat is not None
+    assert harness.heartbeat.pulse_calls == 0
 
 
 def test_runtime_never_publishes_outcome_after_lock_is_lost_during_iteration(

@@ -126,8 +126,32 @@ Le heartbeat distingue `starting`, `running`, `degraded`, `blocked` et
 la résolution de l'une ne masque pas l'autre. Un blocage propre à un job ne
 place pas le processus entier dans l'état `blocked`.
 
+Les attentes de polling, de backoff et de sonde sont découpées selon
+`WORKER_HEARTBEAT_INTERVAL_SECONDS`. Entre deux tranches, le worker revalide le
+verrou et rafraîchit le dernier état runtime, sans thread et sur la connexion
+PostgreSQL propriétaire du verrou. Une requête GLPI synchrone ne publie pas de
+heartbeat intermédiaire ; un checkpoint est effectué avant et après l'appel.
+Les timeouts HTTPX bornent l'inactivité de chaque phase réseau, pas une deadline
+murale totale. La détection des heartbeats périmés — donc des processus sans
+checkpoint récent, potentiellement non réactifs — et leur présentation dans le
+dashboard appartiennent au sous-jalon 6B.
+
 La fermeture suit l'ordre heartbeat `stopped`, client HTTP, verrou advisory,
 puis moteur SQLAlchemy.
+
+Les codes de sortie sont communs aux deux workers :
+
+| Code | Signification |
+| --- | --- |
+| `0` (`SUCCESS`) | arrêt normal ou signal coopératif géré |
+| `1` (`UNEXPECTED_ERROR`) | erreur inattendue, perte du verrou ou heartbeat impossible ; le runtime de conteneur peut relancer le processus |
+| `2` (`CONFIGURATION_ERROR`) | configuration invalide nécessitant une correction opérateur |
+| `3` (`SINGLETON_CONFLICT`) | une autre instance détient déjà le verrou singleton |
+| `130` (`INTERRUPTED`) | `KeyboardInterrupt` échappé des gestionnaires coopératifs |
+
+Un `RetentionBlockedOutcome` reste propre à une ligne de rétention et ne stoppe
+pas le processus. Un `SystemBlockedOutcome` sondable conserve le worker vivant
+et observable ; il ne devient pas un code de sortie `3`.
 
 ## Organisation du code
 
@@ -163,6 +187,7 @@ repository. `application.py` reste une frontière de processus testable.
 | `DATABASE_URL` | obligatoire | URL SQLAlchemy `postgresql+psycopg`, conservée comme secret. |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Timeout d'établissement PostgreSQL. |
 | `AUDIO_ROOT` | `/data/audios` | Répertoire canonique existant et non symbolique. |
+| `WORKER_HEARTBEAT_INTERVAL_SECONDS` | `10` | Cadence maximale des checkpoints de heartbeat pendant les attentes coopératives. |
 | `RETENTION_POLL_INTERVAL_SECONDS` | `60` | Attente maximale lorsqu'aucune opération n'est due. |
 | `RETENTION_RETRY_INITIAL_SECONDS` | `5` | Premier délai du backoff exponentiel. |
 | `RETENTION_RETRY_MAX_SECONDS` | `300` | Plafond du backoff exponentiel. |

@@ -32,6 +32,17 @@ INSTANCE_ID = UUID("123e4567-e89b-42d3-a456-426614174001")
 NOW = datetime(2026, 8, 28, 14, tzinfo=UTC)
 
 
+class _MutableMonotonic:
+    def __init__(self, current: float = 100.0) -> None:
+        self.current = current
+
+    def __call__(self) -> float:
+        return self.current
+
+    def advance(self, seconds: float) -> None:
+        self.current += seconds
+
+
 class _FakeTransaction:
     def __init__(self, session: _FakeSession) -> None:
         self._session = session
@@ -94,11 +105,16 @@ def heartbeat_records(
     return records
 
 
-def _reporter(lock: _FakeLock) -> RuntimeHeartbeatReporter:
+def _reporter(
+    lock: _FakeLock,
+    monotonic: _MutableMonotonic | None = None,
+) -> RuntimeHeartbeatReporter:
     return RuntimeHeartbeatReporter(
         advisory_lock=cast(Any, lock),
+        heartbeat_interval_seconds=10,
         instance_id=INSTANCE_ID,
         now=lambda: NOW,
+        monotonic=monotonic or _MutableMonotonic(),
     )
 
 
@@ -106,7 +122,8 @@ def test_retry_degraded_state_remains_sticky_while_worker_is_idle(
     heartbeat_records: list[dict[str, object]],
 ) -> None:
     lock = _FakeLock()
-    reporter = _reporter(lock)
+    monotonic = _MutableMonotonic()
+    reporter = _reporter(lock, monotonic)
     retry = RetryOutcome(
         audio_uuid=AUDIO_UUID,
         stage=JobStage.TRANSCRIPTION,
@@ -119,6 +136,11 @@ def test_retry_degraded_state_remains_sticky_while_worker_is_idle(
     )
 
     reporter.report_outcome(retry)
+    reporter.report_outcome(IdleOutcome(wait_seconds=1))
+
+    assert len(heartbeat_records) == 1
+
+    monotonic.advance(10)
     reporter.report_outcome(IdleOutcome(wait_seconds=1))
 
     assert reporter.state is WorkerRuntimeState.DEGRADED
@@ -144,7 +166,8 @@ def test_retry_degraded_state_remains_sticky_while_worker_is_idle(
 def test_system_block_remains_sticky_until_real_job_boundary(
     heartbeat_records: list[dict[str, object]],
 ) -> None:
-    reporter = _reporter(_FakeLock())
+    monotonic = _MutableMonotonic()
+    reporter = _reporter(_FakeLock(), monotonic)
     blocked = SystemBlockedOutcome(
         audio_uuid=AUDIO_UUID,
         stage=JobStage.GLPI_CREATION,
@@ -158,6 +181,7 @@ def test_system_block_remains_sticky_until_real_job_boundary(
     )
 
     reporter.report_outcome(blocked)
+    monotonic.advance(10)
     reporter.report_outcome(IdleOutcome(wait_seconds=1))
     reporter.report_outcome(CompletedOutcome(audio_uuid=AUDIO_UUID, ticket_id=42))
 
@@ -171,6 +195,72 @@ def test_system_block_remains_sticky_until_real_job_boundary(
     assert heartbeat_records[1]["error_category"] == "unknown_outcome"
     assert heartbeat_records[2]["error_category"] is None
     assert heartbeat_records[2]["error_code"] is None
+
+
+def test_pulse_is_throttled_until_the_exact_monotonic_interval(
+    heartbeat_records: list[dict[str, object]],
+) -> None:
+    monotonic = _MutableMonotonic()
+    reporter = _reporter(_FakeLock(), monotonic)
+
+    reporter.record_state(WorkerRuntimeState.RUNNING)
+    monotonic.advance(9.999)
+
+    assert reporter.pulse_if_due() is False
+    assert len(heartbeat_records) == 1
+
+    monotonic.advance(0.001)
+
+    assert reporter.pulse_if_due() is True
+    assert len(heartbeat_records) == 2
+    assert heartbeat_records[-1]["state"] is WorkerRuntimeState.RUNNING
+
+
+def test_job_uuid_is_published_after_acquisition_and_kept_while_blocked(
+    heartbeat_records: list[dict[str, object]],
+) -> None:
+    monotonic = _MutableMonotonic()
+    reporter = _reporter(_FakeLock(), monotonic)
+    reporter.record_state(WorkerRuntimeState.RUNNING)
+
+    reporter.start_job(AUDIO_UUID)
+    reporter.report_outcome(
+        SystemBlockedOutcome(
+            audio_uuid=AUDIO_UUID,
+            stage=JobStage.TRANSCRIPTION,
+            failure=FailureDetails(
+                scope=ErrorScope.SYSTEM,
+                category="authentication",
+                technical_code="http_401",
+            ),
+            probe_after_seconds=30,
+        )
+    )
+    monotonic.advance(10)
+
+    assert reporter.pulse_if_due() is True
+    assert [record["current_job_uuid"] for record in heartbeat_records] == [
+        None,
+        AUDIO_UUID,
+        AUDIO_UUID,
+        AUDIO_UUID,
+    ]
+
+    reporter.report_outcome(CompletedOutcome(audio_uuid=AUDIO_UUID, ticket_id=42))
+
+    assert heartbeat_records[-1]["current_job_uuid"] is None
+    assert heartbeat_records[-1]["state"] is WorkerRuntimeState.RUNNING
+
+
+@pytest.mark.parametrize("invalid_interval", [True, 0, -1, float("inf")])
+def test_heartbeat_interval_must_be_positive_and_finite(
+    invalid_interval: object,
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        RuntimeHeartbeatReporter(
+            advisory_lock=cast(Any, _FakeLock()),
+            heartbeat_interval_seconds=cast(Any, invalid_interval),
+        )
 
 
 def test_interruption_keeps_current_job_on_running_heartbeat(

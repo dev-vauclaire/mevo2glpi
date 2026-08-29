@@ -34,6 +34,11 @@ class WorkerSettings(BaseSettings):
         gt=0,
         allow_inf_nan=False,
     )
+    worker_heartbeat_interval_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
     worker_retry_initial_seconds: float = Field(
         default=5.0,
         gt=0,
@@ -113,6 +118,14 @@ class WorkerSettings(BaseSettings):
         """Reject booleans instead of silently treating them as durations."""
         if isinstance(value, bool):
             raise ValueError("Integer settings cannot be booleans")
+        return value
+
+    @field_validator("worker_heartbeat_interval_seconds", mode="before")
+    @classmethod
+    def reject_boolean_heartbeat_interval(cls, value: object) -> object:
+        """Reject booleans instead of coercing them to a heartbeat duration."""
+        if isinstance(value, bool):
+            raise ValueError("WORKER_HEARTBEAT_INTERVAL_SECONDS cannot be a boolean")
         return value
 
     @field_validator("public_base_url")

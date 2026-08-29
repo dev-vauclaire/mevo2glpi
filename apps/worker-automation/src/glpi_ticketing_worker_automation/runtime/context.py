@@ -7,10 +7,12 @@ import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import httpx
 from sqlalchemy.engine import Engine
 
+from glpi_ticketing_common.cooperative_wait import wait_with_periodic_checkpoint
 from glpi_ticketing_database import (
     AdvisoryLock,
     WorkerRuntimeState,
@@ -35,30 +37,51 @@ class WorkerAlreadyRunningError(RuntimeError):
     """Report that another PostgreSQL session owns the singleton lock."""
 
 
+class RuntimeAutomationWorkerProtocol(AutomationWorkerProtocol, Protocol):
+    """Worker process handle exposing its fenced cooperative runtime hooks."""
+
+    def checkpoint(self) -> None: ...
+
+    def wait(self, seconds: float) -> None: ...
+
+
 @dataclass(slots=True)
 class RuntimeReportingWorker:
     """Guard every iteration with the lock and publish its outcome."""
 
     worker: AutomationWorkerProtocol
-    advisory_lock: AdvisoryLock
     heartbeat: RuntimeHeartbeatReporter
+    ownership_guard: Callable[[], None]
+    checkpoint_callback: Callable[[], None]
+    wait_callback: Callable[[float], None]
+
+    def checkpoint(self) -> None:
+        """Prove singleton ownership before refreshing a due heartbeat."""
+        self.checkpoint_callback()
+
+    def wait(self, seconds: float) -> None:
+        """Wait cooperatively while keeping ownership and liveness observable."""
+        self.wait_callback(seconds)
 
     def run_once(self) -> RunOutcome:
-        self.advisory_lock.ensure_held()
+        self.checkpoint()
         outcome = self.worker.run_once()
-        self.advisory_lock.ensure_held()
+        # Do not emit the previous snapshot immediately before the outcome.
+        # The outcome write owns the next heartbeat transaction; this guard
+        # solely proves that the singleton lock still belongs to this process.
+        self.ownership_guard()
         self.heartbeat.report_outcome(outcome)
         return outcome
 
 
 @dataclass(slots=True)
-class WorkerRuntimeContext(AbstractContextManager[AutomationWorkerProtocol]):
+class WorkerRuntimeContext(AbstractContextManager[RuntimeAutomationWorkerProtocol]):
     """Own the engine, singleton lock, HTTP client and heartbeat lifecycle."""
 
     settings: WorkerSettings
     http_client_factory: Callable[[], httpx.Client] = httpx.Client
-    transcription_sleep: Callable[[float], None] = time.sleep
-    transcription_should_stop: Callable[[], bool] = _never_stop
+    wait_once: Callable[[float], object] = time.sleep
+    should_stop: Callable[[], bool] = _never_stop
     _engine: Engine | None = field(init=False, default=None)
     _advisory_lock: AdvisoryLock | None = field(init=False, default=None)
     _http_client: httpx.Client | None = field(init=False, default=None)
@@ -80,7 +103,7 @@ class WorkerRuntimeContext(AbstractContextManager[AutomationWorkerProtocol]):
         """Expose the owned HTTP client for diagnostics."""
         return self._http_client
 
-    def __enter__(self) -> AutomationWorkerProtocol:
+    def __enter__(self) -> RuntimeAutomationWorkerProtocol:
         if self._engine is not None:
             raise RuntimeError("worker runtime context cannot be entered twice")
 
@@ -99,30 +122,56 @@ class WorkerRuntimeContext(AbstractContextManager[AutomationWorkerProtocol]):
                     "another automation worker already owns the singleton lock"
                 )
 
-            self._heartbeat = RuntimeHeartbeatReporter(self._advisory_lock)
+            self._heartbeat = RuntimeHeartbeatReporter(
+                self._advisory_lock,
+                heartbeat_interval_seconds=(
+                    self.settings.worker_heartbeat_interval_seconds
+                ),
+            )
             self._heartbeat.record_state(WorkerRuntimeState.STARTING)
             self._http_client = self.http_client_factory()
+
+            def runtime_checkpoint() -> None:
+                assert self._advisory_lock is not None
+                assert self._heartbeat is not None
+                self._advisory_lock.ensure_held()
+                self._heartbeat.pulse_if_due()
+
+            def cooperative_wait(seconds: float) -> None:
+                wait_with_periodic_checkpoint(
+                    seconds,
+                    checkpoint_interval_seconds=(
+                        self.settings.worker_heartbeat_interval_seconds
+                    ),
+                    wait_once=self.wait_once,
+                    should_stop=self.should_stop,
+                    checkpoint=runtime_checkpoint,
+                )
 
             def guarded_transcription_should_stop() -> bool:
                 # The poller calls this before submission and around every
                 # poll, bounding work after loss of the PostgreSQL session lock.
-                assert self._advisory_lock is not None
-                self._advisory_lock.ensure_held()
-                return self.transcription_should_stop()
+                if _stop_requested(self.should_stop):
+                    return True
+                runtime_checkpoint()
+                return False
 
             worker = build_automation_worker(
                 self.settings,
                 http_client=self._http_client,
                 session_factory=self._advisory_lock.open_session,
-                transcription_sleep=self.transcription_sleep,
+                transcription_sleep=cooperative_wait,
                 transcription_should_stop=guarded_transcription_should_stop,
-                ownership_guard=self._advisory_lock.ensure_held,
+                ownership_guard=runtime_checkpoint,
+                on_job_started=self._heartbeat.start_job,
             )
             self._heartbeat.record_state(WorkerRuntimeState.RUNNING)
             return RuntimeReportingWorker(
                 worker=worker,
-                advisory_lock=self._advisory_lock,
                 heartbeat=self._heartbeat,
+                ownership_guard=self._advisory_lock.ensure_held,
+                checkpoint_callback=runtime_checkpoint,
+                wait_callback=cooperative_wait,
             )
         except BaseException:
             self.close()
@@ -173,20 +222,28 @@ def worker_runtime(
     settings: WorkerSettings,
     *,
     http_client_factory: Callable[[], httpx.Client] = httpx.Client,
-    transcription_sleep: Callable[[float], None] = time.sleep,
-    transcription_should_stop: Callable[[], bool] = _never_stop,
+    wait_once: Callable[[float], object] = time.sleep,
+    should_stop: Callable[[], bool] = _never_stop,
 ) -> WorkerRuntimeContext:
     """Create the context owning one fully composed automation worker."""
     return WorkerRuntimeContext(
         settings=settings,
         http_client_factory=http_client_factory,
-        transcription_sleep=transcription_sleep,
-        transcription_should_stop=transcription_should_stop,
+        wait_once=wait_once,
+        should_stop=should_stop,
     )
+
+
+def _stop_requested(should_stop: Callable[[], bool]) -> bool:
+    requested = should_stop()
+    if not isinstance(requested, bool):
+        raise TypeError("should_stop must return a boolean")
+    return requested
 
 
 __all__ = [
     "RuntimeReportingWorker",
+    "RuntimeAutomationWorkerProtocol",
     "WorkerAlreadyRunningError",
     "WorkerRuntimeContext",
     "worker_runtime",

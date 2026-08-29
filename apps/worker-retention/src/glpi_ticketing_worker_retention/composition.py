@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 from sqlalchemy.orm import Session
@@ -23,6 +24,10 @@ def _no_op() -> None:
     return None
 
 
+def _no_op_job_started(_job_uuid: UUID) -> None:
+    return None
+
+
 class RetentionWorkerConfigurationError(ValueError):
     """Report invalid runtime configuration without echoing its values."""
 
@@ -33,6 +38,7 @@ def build_retention_worker(
     http_client: httpx.Client,
     session_factory: Callable[[], Session],
     ownership_guard: Callable[[], None] = _no_op,
+    on_job_started: Callable[[UUID], None] = _no_op_job_started,
 ) -> RetentionWorker:
     """Compose one worker without taking ownership of runtime resources."""
     if not isinstance(settings, RetentionWorkerSettings):
@@ -43,6 +49,8 @@ def build_retention_worker(
         raise TypeError("session_factory must be callable")
     if not callable(ownership_guard):
         raise TypeError("ownership_guard must be callable")
+    if not callable(on_job_started):
+        raise TypeError("on_job_started must be callable")
 
     audio_root = _resolve_existing_directory(settings.audio_root)
     check_policy = RetentionCheckPolicy(
@@ -82,6 +90,7 @@ def build_retention_worker(
         system_probe_interval_seconds=(
             settings.retention_system_probe_interval_seconds
         ),
+        on_job_started=on_job_started,
     )
 
 

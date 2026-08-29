@@ -37,6 +37,10 @@ def _no_op() -> None:
     return None
 
 
+def _no_op_job_started(_audio_uuid: UUID) -> None:
+    return None
+
+
 class WorkerConfigurationError(ValueError):
     """Report an invalid runtime configuration without echoing its values."""
 
@@ -56,6 +60,7 @@ def build_automation_worker(
     transcription_sleep: Callable[[float], None] = time.sleep,
     transcription_should_stop: Callable[[], bool] = _never_stop,
     ownership_guard: Callable[[], None] = _no_op,
+    on_job_started: Callable[[UUID], None] = _no_op_job_started,
 ) -> AutomationWorker:
     """Compose the worker use case without owning runtime resources.
 
@@ -75,6 +80,8 @@ def build_automation_worker(
         raise TypeError("transcription_should_stop must be callable")
     if not callable(ownership_guard):
         raise TypeError("ownership_guard must be callable")
+    if not callable(on_job_started):
+        raise TypeError("on_job_started must be callable")
 
     audio_root = _resolve_existing_directory(settings.audio_root)
     lifecycle = AutomationJobLifecycleService(
@@ -159,6 +166,7 @@ def build_automation_worker(
         ),
         transitions=transitions,
         idle_wait_seconds=settings.worker_idle_interval_seconds,
+        on_job_started=on_job_started,
     )
 
 

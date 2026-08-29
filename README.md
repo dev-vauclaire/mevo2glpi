@@ -8,9 +8,10 @@ PostgreSQL et un volume audio canonique unique.
 L'état démonstratif du POC est figé par le tag `poc-v0.1.0`. La branche
 `mvp/job-lifecycle` a basculé l'ingestion web et les deux workers sur
 PostgreSQL et fournit désormais l'API de consultation, le dashboard par lot et
-la rétention crash-safe des audios. Les alertes dashboard et la surveillance
-périodique des heartbeats restent à réaliser. La structure et les pipelines
-sont suivis dans le document vivant
+la rétention crash-safe des audios. Les deux workers publient désormais leur
+heartbeat pendant leurs attentes coopératives ; la détection des heartbeats
+périmés et leur présentation dans le dashboard restent à réaliser. La
+structure et les pipelines sont suivis dans le document vivant
 [`docs/mvp-architecture.md`](docs/mvp-architecture.md).
 Le MVP part d'une base PostgreSQL et d'un volume audio neufs ; il ne migre pas
 automatiquement les répertoires de travail du POC.
@@ -72,7 +73,7 @@ active de la branche MVP :
   distantes ambiguës sans resoumission automatique en boucle ;
 - verrou advisory mono-worker dont la connexion porte aussi les transactions
   métier, revalidé aux frontières externes avec arrêt fail-closed en cas de
-  perte, et heartbeat runtime minimal ;
+  perte, et heartbeat runtime périodique pendant les attentes coopératives ;
 - tests d'intégration du cycle de vie sur PostgreSQL migré et pipeline E2E
   persistant avec Transcribe AI et GLPI ;
 - API paginée des jobs et de leurs événements, recherche exacte par UUID,
@@ -279,7 +280,8 @@ expurgé :
 | `RetryOutcome` | Attend l'intervalle propre à l'étape, puis reprend le même état privé. |
 | `CompletedOutcome` | Continue immédiatement avec l'audio suivant. |
 | `FailedOutcome` | Continue immédiatement ; le fichier est terminal dans `failed`. |
-| `BlockedOutcome` | Lève `WorkerBlockedError` et arrête la boucle pour intervention. |
+| `BlockedOutcome` | Persiste un blocage propre au job, puis laisse la boucle poursuivre avec la file. |
+| `SystemBlockedOutcome` | Conserve le processus observable en `blocked`, sans relancer une opération distante ambiguë. |
 
 Aucun de ces résultats ne transporte la transcription, un secret ou une
 réponse distante brute.
@@ -377,6 +379,7 @@ FastAPI puis en serveur Uvicorn.
 | `WEB_HOST`, `WEB_PORT` | web | Adresse IP et port d'écoute Uvicorn ; `127.0.0.1:8000` par défaut |
 | `WEB_TRUST_PROXY_HEADERS` | web | Confiance explicite dans les en-têtes du proxy ; désactivée par défaut |
 | `MAX_UPLOAD_BYTES` | web | Taille maximale d'un upload |
+| `WORKER_HEARTBEAT_INTERVAL_SECONDS` | workers | Intervalle maximal entre deux checkpoints coopératifs de heartbeat, `10` secondes par défaut |
 | `WORKER_IDLE_INTERVAL_SECONDS` | worker | Attente lorsqu'aucun job n'est éligible, `1` seconde par défaut |
 | `WORKER_RETRY_INITIAL_SECONDS` | worker | Premier délai du backoff exponentiel, `5` secondes par défaut |
 | `WORKER_RETRY_MAX_SECONDS` | worker | Plafond du backoff, `300` secondes par défaut |
