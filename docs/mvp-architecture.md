@@ -211,7 +211,7 @@ pour le MVP.
 │
 └── tests/
     ├── deployment/                                   🟦 smoke tests Compose MVP
-    └── e2e/                                          🟦 socle de release racine 8A
+    └── e2e/                                          🟦 recette de release 8A + 8B
 ```
 
 Les modèles sont séparés par table afin que chaque module porte ses colonnes,
@@ -743,15 +743,20 @@ périodique aux attentes coopératives : une attente est découpée selon
 `WORKER_HEARTBEAT_INTERVAL_SECONDS`, puis le dernier état est republié après
 revalidation du verrou. Une erreur
 système immédiate laisse le job `processing`. Elle est sondée uniquement si la
-répétition ne peut pas dupliquer un effet distant ; après un `POST` accepté non
-persisté, une rupture du polling ou un contrat GLPI incohérent, le blocage est
-verrouillé et le processus reste vivant sans rappeler le processeur. La
-périodicité est volontairement coopérative et n'utilise aucun thread : une
-requête HTTP déjà en cours ne publie aucun checkpoint. Les timeouts HTTPX
-bornent l'inactivité de chaque phase (`connect`, `read`, `write`, `pool`), mais
-ne constituent pas une deadline murale totale : un transfert lent qui continue
-de progresser peut donc durer plus longtemps. La détection de heartbeat périmé
-et les alertes du dashboard restent le périmètre du sous-jalon 6B.
+répétition ne peut pas dupliquer un effet distant. Après un `POST` accepté dont
+l'identifiant ne peut pas être persisté, une réponse contractuellement
+incohérente, un `4xx` non réessayable pendant le polling ou un contrat GLPI
+incohérent, le blocage est verrouillé et le processus reste vivant sans
+rappeler le processeur. En revanche, un timeout, une panne transport ou un
+`5xx` pendant le polling produit `retry_scheduled` puis une nouvelle soumission
+Transcribe AI : le MVP ne persiste pas la transcription et l'API distante ne
+garantit pas sa conservation. La périodicité est volontairement coopérative et
+n'utilise aucun thread : une requête HTTP déjà en cours ne publie aucun
+checkpoint. Les timeouts HTTPX bornent l'inactivité de chaque phase (`connect`,
+`read`, `write`, `pool`), mais ne constituent pas une deadline murale totale :
+un transfert lent qui continue de progresser peut donc durer plus longtemps.
+La détection de heartbeat périmé et les alertes du dashboard restent le
+périmètre du sous-jalon 6B.
 
 Toutes les transactions du worker, y compris les heartbeats, utilisent la
 connexion qui détient le verrou advisory. La perte de cette connexion fait donc
@@ -1249,10 +1254,11 @@ de bootstrap Docker avec une régression métier ou un défaut de publication.
 `tests/e2e` assemble la stack Compose MVP complète — PostgreSQL, migration
 one-shot, web, worker d'automatisation, worker de rétention et Nginx — avec les
 stacks GLPI et Transcribe AI jetables. Les ports, réseaux, volumes, bases et
-identifiants sont propres à la session ; aucune configuration staging ou
-production n'est consommée. Le sous-jalon attend chaque service par une sonde
-bornée puis détruit les ressources qu'il a créées, mais ne porte encore aucun
-scénario métier.
+identifiants sont propres à la session. Les ports Nginx sont explicitement
+configurés et réservés par le harness avant le démarrage ; aucune configuration
+staging ou production n'est consommée. Le sous-jalon attend chaque service par
+une sonde bornée puis détruit les ressources qu'il a créées, mais ne porte
+encore aucun scénario métier.
 
 La validation CPU est obligatoire et doit être exécutée seule, sans
 `pytest-xdist` :
@@ -1269,13 +1275,28 @@ production.
 
 #### Sous-jalon 8B — Scénarios métier
 
-- Tests unitaires : uniquement les cas limites découverts pendant l'E2E.
-- Tests d'intégration/E2E : plusieurs audios, panne externe, redémarrage
-  pendant `processing`, absence de doublon GLPI, alerte `failed`/`blocked`,
-  purge anticipée et purge par deadline avec horloge contrôlée.
-- Tests ou code POC à retirer : aucun par principe ; tout reliquat est d'abord
-  qualifié par une recherche d'usage et par sa valeur de régression.
-- Sortie : runbook de démonstration et limites résiduelles documentées.
+Le sous-jalon est implémenté par neuf scénarios sous `tests/e2e`. Ils valident
+plusieurs audios, les pannes Transcribe AI et GLPI, la barrière anti-fan-out,
+le redémarrage pendant `processing`, l'absence de doublon GLPI, les alertes
+`failed`/`blocked`, le retry opérateur et les purges `ticket_closed` et
+`deadline_expired`.
+
+Le contrôle temporel ne modifie que `next_check_at` et `hard_delete_at` sur une
+rétention déjà `scheduled` ; toutes les transitions restent exécutées par les
+services applicatifs. Le seul cas limite métier découvert impose la priorité de
+la deadline au moment de la décision : si une réponse GLPI `CLOSED` arrive
+après `hard_delete_at`, l'audit conserve le statut observé mais le motif de
+suppression reste `deadline_expired`.
+
+L'auto-restart borné de Docker est prouvé dans la suite `deployment` par un
+processus qui échoue naturellement. Le scénario E2E injecte un vrai `SIGKILL`,
+redémarre ensuite explicitement le conteneur et vérifie séparément la reprise
+persistée et l'idempotence GLPI.
+
+Aucun test ou code POC n'a été retiré : la recherche d'usage n'a identifié
+aucun reliquat dont l'intention serait remplacée par ces scénarios. Le runbook
+et les limites résiduelles sont consignés dans
+[`docs/mvp-demo-runbook.md`](mvp-demo-runbook.md).
 
 #### Sous-jalon 8C — Publication (à définir après 8A et 8B)
 

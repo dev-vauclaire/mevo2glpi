@@ -37,6 +37,12 @@ Le test soumet ce WAV avec le vrai client Python, interroge le job jusqu'à son
 état `COMPLETED` et vérifie qu'une transcription non vide est retournée. Le
 texte obtenu et les secrets ne sont jamais inclus dans les messages d'erreur.
 
+Les scénarios de résilience peuvent arrêter puis redémarrer uniquement `api` et
+`mono-voice-worker`. L'API est attendue par son healthcheck puis par une requête
+HTTP authentifiée ; le worker batch, qui n'expose aucun endpoint de santé, est
+attendu jusqu'au marqueur de démarrage de l'image épinglée. PostgreSQL, Redis et
+le service STT ne sont pas pilotables par cette interface de test.
+
 L'API de la fixture accepte les quatre formats pris en charge par le produit :
 WAV, MP3, OGG et M4A. L'image épinglée attend leur extension sans point dans
 `FORMAT_AUDIO_ALLOWED`, sous la forme d'une liste séparée par des virgules :

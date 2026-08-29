@@ -1,4 +1,4 @@
-# Socle E2E racine du MVP
+# Recette E2E racine du MVP
 
 Cette suite constitue la frontière de validation du déploiement complet. Elle
 ne remplace ni les tests unitaires, ni les contrats GLPI et Transcribe AI, ni le
@@ -35,8 +35,9 @@ publiés le sont uniquement sur loopback et les réseaux, volumes, bases et
 identifiants appartiennent à la session de test.
 
 L'overlay E2E ajoute un réseau de contrôle jetable auquel seul PostgreSQL est
-attaché. Il permet le futur pilotage d'horloge du 8B via un port loopback sans
-modifier le réseau `database-private` ni le manifeste utilisé au déploiement.
+attaché. Le support de test peut ainsi avancer uniquement les timestamps
+autorisés d'une rétention déjà dans l'état attendu, sans modifier le réseau
+`database-private` ni fabriquer de transition métier en SQL.
 
 ## Frontière des sous-jalons
 
@@ -47,10 +48,19 @@ Le sous-jalon 8A valide uniquement le socle :
 - migration réussie et disponibilité bornée de la stack ;
 - nettoyage des conteneurs, réseaux et volumes créés par la session.
 
-Il ne prouve pas encore le workflow métier. Le sous-jalon 8B ajoute les
-scénarios upload, traitement de plusieurs audios, panne distante, retry,
-reprise après redémarrage, unicité du ticket GLPI, alertes du dashboard, purge
-après fermeture et purge par deadline.
+Le sous-jalon 8B complète ce socle avec neuf scénarios :
+
+- `test_job_lifecycle.py` : trois uploads concurrents, pipeline nominal,
+  `blocked`, `failed`, alertes et retries opérateur ;
+- `test_resilience.py` : pannes Transcribe AI et GLPI, barrière anti-fan-out,
+  retranscription, reprise après `SIGKILL` et unicité du ticket ;
+- `test_retention.py` : conservation `SOLVED`, purge `CLOSED` et purge par
+  deadline sans GLPI ;
+- `test_stack.py` : disponibilité et topologie du socle complet.
+
+Le runbook de recette, les preuves attendues et les limites résiduelles sont
+documentés dans
+[`docs/mvp-demo-runbook.md`](../../docs/mvp-demo-runbook.md).
 
 ## Exécution obligatoire sur CPU
 

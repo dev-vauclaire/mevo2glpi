@@ -639,10 +639,12 @@ la façade web ni les images du déploiement.
 La suite de release racine sous [`tests/e2e`](tests/e2e/README.md) assemble au
 contraire la stack Compose MVP complète — PostgreSQL, migration one-shot, web,
 deux workers et Nginx — avec les instances GLPI et Transcribe AI jetables. Le
-sous-jalon 8A porte uniquement ce socle, ses sondes de disponibilité, ses
-identifiants éphémères et son nettoyage borné. Les scénarios métier upload,
-retry, reprise, alertes et purge appartiennent au sous-jalon 8B. Toute la suite
-E2E s'exécute seule, sans `pytest-xdist` ni autre stack Docker concurrente.
+sous-jalon 8A porte le socle, ses sondes de disponibilité, ses identifiants
+éphémères et son nettoyage borné. Le sous-jalon 8B ajoute neuf scénarios métier
+sur l'upload, les retries, la reprise, les alertes et la purge. Toute la suite
+E2E s'exécute seule, sans `pytest-xdist` ni autre stack Docker concurrente. Son
+runbook de démonstration est disponible dans
+[`docs/mvp-demo-runbook.md`](docs/mvp-demo-runbook.md).
 
 ## Commandes de validation depuis la racine
 
@@ -726,7 +728,7 @@ TRANSCRIBE_AI_TEST_DEVICE=gpu \
 uv run --all-packages pytest -m transcribe_ai -vv --maxfail=1
 ```
 
-Socle E2E racine sur CPU, validation obligatoire de l'itération 8A :
+Recette E2E racine sur CPU, validation obligatoire des sous-jalons 8A et 8B :
 
 ```bash
 TRANSCRIBE_AI_TEST_DEVICE=cpu \
@@ -744,9 +746,11 @@ uv run pytest -m e2e tests/e2e -vv --maxfail=1
 N'ajoutez pas `-n` et ne lancez pas cette commande en même temps que les suites
 `deployment`, `glpi` ou `transcribe_ai`. Chaque session télécharge le modèle
 Whisper `tiny` ; le premier lancement télécharge aussi les images, dont l'image
-STT volumineuse. La topologie, la frontière 8A/8B et le teardown de la suite de
-release sont documentés dans [`tests/e2e/README.md`](tests/e2e/README.md). Les
-détails de Transcribe AI et du test ciblé du worker restent disponibles dans
-leurs documentations
+STT volumineuse. La topologie, les scénarios 8A/8B et le teardown de la suite de
+release sont documentés dans [`tests/e2e/README.md`](tests/e2e/README.md). Le
+runbook de démonstration se trouve dans
+[`docs/mvp-demo-runbook.md`](docs/mvp-demo-runbook.md). Les détails de
+Transcribe AI et du test ciblé du worker restent disponibles dans leurs
+documentations
 [`transcribe-ai`](apps/worker-automation/tests/integration/transcribe-ai/README.md)
 et [`e2e`](apps/worker-automation/tests/integration/e2e/README.md).
