@@ -49,6 +49,13 @@ http {
     }
 
     server {
+        listen 8080;
+        server_name _;
+
+        return 308 https://${NGINX_PUBLIC_HOST}${NGINX_EXTERNAL_HTTPS_SUFFIX}$request_uri;
+    }
+
+    server {
         listen 8443 ssl;
         server_name _;
 

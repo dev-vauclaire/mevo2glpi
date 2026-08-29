@@ -16,7 +16,7 @@ les migrations Alembic, puis lance le web, les deux workers et Nginx.
 
 ```mermaid
 flowchart LR
-    User[Utilisateur interne] -->|HTTPS + Basic Auth| Nginx
+    User[Utilisateur interne] -->|HTTP 308 ou HTTPS + Basic Auth| Nginx
     Nginx -->|web-private| Web
     Web -->|database-private| PostgreSQL[(PostgreSQL)]
     Web -->|RW| Audio[(audio-data)]
@@ -39,15 +39,28 @@ Les responsabilités persistantes sont volontairement distinctes :
 | `database-private` | PostgreSQL, migration, web et workers | trafic SQL non exposé à Nginx |
 | `web-private` | web et Nginx | trafic HTTP interne sans accès direct à PostgreSQL |
 | `worker-egress` | workers | accès sortant à GLPI et Transcribe AI |
-| `proxy-edge` | Nginx | unique réseau portant le port publié |
+| `proxy-edge` | Nginx | unique réseau portant les ports publiés |
 
-Seul Nginx publie un port hôte. L'endpoint FastAPI `/health` et PostgreSQL ne
-sont pas directement exposés.
+Seul Nginx publie des ports hôte. Le port HTTP ne transmet jamais la requête au
+web et retourne toujours une redirection permanente `308` vers HTTPS ; le port
+HTTPS applique ensuite TLS et l'authentification Basic. L'endpoint FastAPI
+`/health` et PostgreSQL ne sont pas directement exposés.
 
 Les exemples lient Nginx à `127.0.0.1`. Pour un accès depuis le réseau interne,
-remplacez `GTA_NGINX_BIND_IP` par l'adresse dédiée du serveur et limitez ce port
-au sous-réseau autorisé avec le pare-feu ; n'utilisez pas `0.0.0.0` sans cette
-barrière.
+remplacez `GTA_NGINX_BIND_IP` par l'adresse dédiée du serveur et limitez ces
+ports au sous-réseau autorisé avec le pare-feu ; n'utilisez pas `0.0.0.0` sans
+cette barrière.
+
+`GTA_NGINX_HTTP_PORT` et `GTA_NGINX_HTTPS_PORT` sélectionnent les ports publiés
+sur l'hôte ; leurs valeurs par défaut sont respectivement `80` et `443`. Les
+contrats dev et staging utilisent `8080` et `8443` pour éviter les conflits
+locaux. `GTA_NGINX_PUBLIC_HOST` fixe le nom DNS ou l'adresse IPv4 utilisé dans
+la redirection et évite de faire confiance à un en-tête HTTP `Host` arbitraire.
+Le port HTTPS configuré est injecté dans Nginx afin qu'une requête vers
+`http://hote:8080/chemin` soit redirigée vers
+`https://hote:8443/chemin`, et non implicitement vers `443`. Ces variables
+doivent donc décrire l'origine réellement présentée à l'utilisateur. Le
+`PUBLIC_BASE_URL` du worker doit désigner exactement la même origine HTTPS.
 
 Les images Python sont multi-stage, installées depuis `uv.lock` sans dépendance
 de développement et exécutées en `10001:10001`. Les runtimes ont un rootfs en
@@ -71,7 +84,8 @@ infra/docker/
 ├── worker-retention/Dockerfile
 ├── nginx/
 │   ├── Dockerfile
-│   └── nginx.conf
+│   ├── docker-entrypoint.sh
+│   └── nginx.conf.template
 └── environments/
     ├── dev/
     │   ├── compose.override.yaml
@@ -515,7 +529,7 @@ exemple `gta-restore-test`, jamais directement par-dessus les volumes actifs :
    vide ;
 5. restaurer intégralement `audio-data` ;
 6. exécuter la migration one-shot pour atteindre la révision attendue ;
-7. démarrer d'abord le web avec un port Nginx non conflictuel ;
+7. démarrer d'abord le web avec des ports Nginx non conflictuels ;
 8. vérifier plusieurs UUID, la quarantaine `.purge`, les téléchargements et un
    cycle fonctionnel synthétique.
 

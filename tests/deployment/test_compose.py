@@ -46,6 +46,19 @@ def _volume_for(service: dict[str, Any], target: str) -> dict[str, Any] | None:
     return None
 
 
+def _published_port_for(
+    environment: DeploymentEnvironment,
+    container_port: str,
+) -> int:
+    payload = environment.inspect_service("nginx")
+    network = payload["NetworkSettings"]
+    assert isinstance(network, dict)
+    bindings = (network.get("Ports") or {}).get(container_port)
+    assert isinstance(bindings, list) and len(bindings) == 1
+    assert bindings[0]["HostIp"] == "127.0.0.1"
+    return int(bindings[0]["HostPort"])
+
+
 def test_runtime_layout_has_one_base_and_three_environment_overlays() -> None:
     assert BASE_COMPOSE_FILE.is_file()
     assert (DOCKER_ROOT / "compose.internal-ca.yaml").is_file()
@@ -77,6 +90,12 @@ def test_runtime_layout_has_one_base_and_three_environment_overlays() -> None:
             assert (root / "services" / f"{service_env}.env.example").is_file()
     assert (ENVIRONMENTS_ROOT / "staging" / "versions.env").is_file()
     assert (ENVIRONMENTS_ROOT / "prod" / "versions.env").is_file()
+
+
+def test_nginx_published_ports_default_to_http_80_and_https_443() -> None:
+    compose_source = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
+    assert 'published: "${GTA_NGINX_HTTP_PORT:-80}"' in compose_source
+    assert 'published: "${GTA_NGINX_HTTPS_PORT:-443}"' in compose_source
 
 
 def test_compose_cli_supports_gateway_priority() -> None:
@@ -111,11 +130,32 @@ def test_every_environment_renders_an_isolated_complete_stack(
         f"gta-{environment_name}_postgres-data"
     )
 
+    expected_nginx_ports = {
+        "dev": {8080: "8080", 8443: "8443"},
+        "staging": {8080: "8080", 8443: "8443"},
+        "prod": {8080: "80", 8443: "443"},
+    }
+    expected_public_hosts = {
+        "dev": "localhost",
+        "staging": "gta.staging.example",
+        "prod": "gta.example",
+    }
     for service_name, service in services.items():
         port_bindings = service.get("ports", [])
         if service_name == "nginx":
-            assert len(port_bindings) == 1
-            assert port_bindings[0]["target"] == 8443
+            by_target = {binding["target"]: binding for binding in port_bindings}
+            assert set(by_target) == {8080, 8443}
+            for target, published in expected_nginx_ports[environment_name].items():
+                assert str(by_target[target]["published"]) == published
+                assert by_target[target]["host_ip"] == "127.0.0.1"
+            assert (
+                services["nginx"]["environment"]["NGINX_EXTERNAL_HTTPS_PORT"]
+                == expected_nginx_ports[environment_name][8443]
+            )
+            assert (
+                services["nginx"]["environment"]["NGINX_PUBLIC_HOST"]
+                == (expected_public_hosts[environment_name])
+            )
         else:
             assert not port_bindings
 
@@ -336,6 +376,60 @@ def test_runtime_stack_reports_fresh_workers_through_nginx(
     assert migration_state["ExitCode"] == 0
 
 
+def test_nginx_http_listener_redirects_to_the_external_https_port(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    http_port = _published_port_for(deployment_environment, "8080/tcp")
+    https_port = _published_port_for(deployment_environment, "8443/tcp")
+
+    response = httpx.get(
+        f"http://127.0.0.1:{http_port}/api/jobs?state=pending",
+        headers={"Host": "untrusted.invalid"},
+        follow_redirects=False,
+        timeout=5,
+    )
+
+    assert response.status_code == httpx.codes.PERMANENT_REDIRECT
+    assert response.headers["location"] == (
+        f"https://127.0.0.1:{https_port}/api/jobs?state=pending"
+    )
+    assert "www-authenticate" not in response.headers
+
+
+def test_nginx_rejects_an_invalid_external_https_port(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    result = deployment_environment.compose(
+        "run",
+        "--rm",
+        "--no-deps",
+        "--env",
+        "NGINX_EXTERNAL_HTTPS_PORT=0",
+        "nginx",
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "must be an integer between 1 and 65535" in result.stderr
+
+
+def test_nginx_rejects_an_unsafe_public_host(
+    deployment_environment: DeploymentEnvironment,
+) -> None:
+    result = deployment_environment.compose(
+        "run",
+        "--rm",
+        "--no-deps",
+        "--env",
+        "NGINX_PUBLIC_HOST=unsafe.invalid/path",
+        "nginx",
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "must be a DNS name or IPv4 address" in result.stderr
+
+
 def test_only_nginx_is_published_and_runtime_restart_is_bounded(
     deployment_environment: DeploymentEnvironment,
 ) -> None:
@@ -350,7 +444,8 @@ def test_only_nginx_is_published_and_runtime_restart_is_bounded(
             if bindings is not None
         }
         if service_name == "nginx":
-            assert set(published) == {"8443/tcp"}
+            assert set(published) == {"8080/tcp", "8443/tcp"}
+            assert published["8080/tcp"][0]["HostIp"] == "127.0.0.1"
             assert published["8443/tcp"][0]["HostIp"] == "127.0.0.1"
         else:
             assert published == {}
@@ -549,7 +644,19 @@ def test_failed_migration_gates_every_application_and_cleanup_removes_resources(
         "services:\n"
         "  database-migrations:\n"
         '    entrypoint: ["python", "-c"]\n'
-        '    command: ["raise SystemExit(4)"]\n',
+        '    command: ["raise SystemExit(4)"]\n'
+        "  nginx:\n"
+        "    environment:\n"
+        '      NGINX_EXTERNAL_HTTPS_PORT: "443"\n'
+        "    ports: !override\n"
+        "      - target: 8080\n"
+        '        published: "0"\n'
+        '        host_ip: "127.0.0.1"\n'
+        "        protocol: tcp\n"
+        "      - target: 8443\n"
+        '        published: "0"\n'
+        '        host_ip: "127.0.0.1"\n'
+        "        protocol: tcp\n",
         encoding="utf-8",
     )
     try:

@@ -1,3 +1,4 @@
 **
 !Dockerfile
-!nginx.conf
+!docker-entrypoint.sh
+!nginx.conf.template

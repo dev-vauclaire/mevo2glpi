@@ -10,9 +10,10 @@ LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-tic
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY nginx.conf.template /etc/nginx/nginx.conf.template
+COPY --chmod=0555 docker-entrypoint.sh /usr/local/bin/gta-nginx-entrypoint
 
-EXPOSE 8443/tcp
+EXPOSE 8080/tcp 8443/tcp
 STOPSIGNAL SIGQUIT
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     --start-interval=1s \
@@ -20,5 +21,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 USER 101:101
 
-ENTRYPOINT ["/usr/sbin/nginx"]
+ENTRYPOINT ["/usr/local/bin/gta-nginx-entrypoint"]
 CMD ["-g", "daemon off;"]
