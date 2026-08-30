@@ -236,9 +236,9 @@ Le [Dockerfile du worker](../../infra/docker/worker-retention/Dockerfile)
 installe l'application sans dépendances de développement et l'exécute en
 non-root. Dans Compose, `/data/audios` est monté en lecture-écriture car ce
 worker est l'unique application chargée de la quarantaine et de la suppression
-des octets après ingestion. Le [runbook Docker Compose](../../infra/docker/README.md)
-décrit les commandes et configurations dev, staging et production ainsi que
-l'autorité de certification interne optionnelle.
+des octets après ingestion. Le
+[déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp) centralise sa
+configuration et monte le bundle de confiance interne en lecture seule.
 
 ## Tests
 

@@ -91,10 +91,9 @@ terminés, sans déduire leur état depuis ce volume.
 
 Le healthcheck de l'image appelle `/health`, qui reste une liveness locale et
 ne transforme pas PostgreSQL en dépendance de disponibilité HTTP. Le service
-web n'est pas publié directement sur l'hôte ; Nginx est son unique point
-d'entrée. Le démarrage et la configuration des environnements dev, staging et
-production sont détaillés dans le
-[runbook Docker Compose](../../infra/docker/README.md).
+web ne publie aucun port hôte ; le Traefik fourni par Dokploy route son port
+interne `8000`. Le contrat de démarrage est décrit dans la section
+[déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp).
 
 ## Flux d'ingestion
 
@@ -274,7 +273,7 @@ uv run ruff check apps/web
 - pas de détection du format réel de l'audio ;
 - la limite applicative est vérifiée pendant la lecture de `UploadFile`, donc
   après le parsing multipart de Starlette ; une exposition réseau doit imposer
-  aussi une limite de corps en amont, par exemple avec Nginx ;
+  aussi une limite de corps dans Traefik ;
 - pas d'idempotence HTTP : un retry après perte de la réponse peut créer un
   second UUID ;
 - pas encore de suppression des orphelins ;

@@ -58,13 +58,13 @@ NOMINAL_EVENTS = (
 )
 
 
-def test_three_concurrent_https_uploads_complete_with_exact_artifacts(
+def test_three_concurrent_uploads_complete_with_exact_artifacts(
     e2e_environment: MvpComposeEnvironment,
     glpi_environment,
     transcribe_ai_environment,
 ) -> None:
     """Process the browser concurrency limit through every real application."""
-    assert httpx.URL(e2e_environment.base_url).scheme == "https"
+    assert httpx.URL(e2e_environment.base_url).scheme == "http"
     expected_audio = transcribe_ai_environment.audio_path.read_bytes()
     uploads = tuple(
         AudioUpload(

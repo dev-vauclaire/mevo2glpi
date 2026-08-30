@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import httpx
 import psycopg
 import pytest
 from tests.support.mvp_compose import (
@@ -22,15 +21,8 @@ def test_mvp_stack_is_healthy_and_connected_to_real_provider_networks(
     glpi_environment,
     transcribe_ai_environment,
 ) -> None:
-    """Validate HTTP readiness, worker heartbeats and provider-only topology."""
+    """Validate direct HTTP readiness, worker heartbeats and provider topology."""
     environment = e2e_environment
-
-    with httpx.Client(
-        base_url=environment.base_url,
-        verify=environment.tls_context(),
-        timeout=5,
-    ) as anonymous:
-        assert anonymous.get("/api/observability").status_code == 401
 
     observed: dict[str, Any] | None = None
     with environment.client() as client:
@@ -73,7 +65,7 @@ def test_mvp_stack_is_healthy_and_connected_to_real_provider_networks(
     assert {glpi_network, transcribe_network} <= service_networks["worker-automation"]
     assert glpi_network in service_networks["worker-retention"]
     assert transcribe_network not in service_networks["worker-retention"]
-    for service_name in ("postgres", "database-migrations", "web", "nginx"):
+    for service_name in ("postgres", "database-migrations", "web"):
         assert glpi_network not in service_networks[service_name]
         assert transcribe_network not in service_networks[service_name]
 
@@ -133,8 +125,8 @@ def _assert_test_only_ports_are_bound_to_loopback(
             for container_port, bindings in ports.items()
             if bindings is not None
         }
-        if service_name == "nginx":
-            assert set(published) == {"8080/tcp", "8443/tcp"}
+        if service_name == "web":
+            assert set(published) == {"8000/tcp"}
         elif service_name == "postgres":
             assert set(published) == {"5432/tcp"}
         else:

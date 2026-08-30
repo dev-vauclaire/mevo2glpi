@@ -38,7 +38,7 @@ def e2e_environment(
     glpi_environment,
     transcribe_ai_environment,
 ) -> Iterator[MvpComposeEnvironment]:
-    """Start a fresh MVP project on the two provider-owned Docker networks."""
+    """Start the applications with test-only PostgreSQL and provider networks."""
     credentials = glpi_environment.credentials
     providers = ProviderConfiguration(
         transcription_base_url=transcribe_ai_environment.internal_base_url,
@@ -61,7 +61,6 @@ def e2e_environment(
         },
         # Avoid the `postgres` DNS alias owned by the Transcribe AI network.
         database_host="mvp-postgres",
-        publish_postgres_on_loopback=True,
     )
     primary_error: BaseException | None = None
     try:

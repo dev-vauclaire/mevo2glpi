@@ -1,12 +1,10 @@
-"""Fixtures for the disposable multi-environment Compose deployment."""
+"""Fixtures for the simplified disposable production Compose contract."""
 
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 from collections.abc import Callable, Iterator
-from pathlib import Path
 
 import pytest
 from tests.support.mvp_compose import (
@@ -14,9 +12,8 @@ from tests.support.mvp_compose import (
     BASE_COMPOSE_FILE,
     CUSTOM_SERVICES,
     DOCKER_ROOT,
-    ENVIRONMENTS_ROOT,
-    INTERNAL_CA_COMPOSE_FILE,
     MvpComposeEnvironment,
+    ProviderConfiguration,
     clean_environment,
     create_mvp_compose_environment,
     run_command,
@@ -25,94 +22,44 @@ from tests.support.mvp_compose import (
 DeploymentEnvironment = MvpComposeEnvironment
 
 
-def _parse_environment_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        name, separator, value = line.partition("=")
-        if not separator:
-            raise RuntimeError(f"Invalid environment example: {path.name}")
-        values[name] = value
-    return values
-
-
 @pytest.fixture
-def render_compose(tmp_path: Path) -> Callable[..., dict[str, object]]:
-    """Render one environment without contacting the Docker daemon."""
+def render_compose() -> Callable[[], dict[str, object]]:
+    """Render the production manifest without contacting external services."""
 
-    def render(
-        environment_name: str,
-        *,
-        release_confirmed: bool = True,
-        include_internal_ca: bool = False,
-        check: bool = True,
-    ) -> dict[str, object] | subprocess.CompletedProcess[str]:
-        environment_root = ENVIRONMENTS_ROOT / environment_name
-        compose_environment = _parse_environment_file(
-            environment_root / "compose.env.example"
-        )
-        versions_file = environment_root / "versions.env"
-        if versions_file.exists():
-            compose_environment.update(_parse_environment_file(versions_file))
-
-        service_env_names = (
-            "database",
-            "migrations",
-            "web",
-            "worker-automation",
-            "worker-retention",
-        )
-        variable_names = (
-            "GTA_DATABASE_ENV_FILE",
-            "GTA_MIGRATIONS_ENV_FILE",
-            "GTA_WEB_ENV_FILE",
-            "GTA_AUTOMATION_ENV_FILE",
-            "GTA_RETENTION_ENV_FILE",
-        )
-        for service_env_name, variable_name in zip(
-            service_env_names,
-            variable_names,
-            strict=True,
-        ):
-            compose_environment[variable_name] = str(
-                environment_root / "services" / f"{service_env_name}.env.example"
-            )
-
-        harmless_file = tmp_path / "compose-secret-placeholder"
-        harmless_file.write_text("not-a-secret\n", encoding="utf-8")
-        for variable_name in (
-            "GTA_POSTGRES_PASSWORD_FILE",
-            "GTA_NGINX_TLS_CERTIFICATE_FILE",
-            "GTA_NGINX_TLS_KEY_FILE",
-            "GTA_NGINX_HTPASSWD_FILE",
-        ):
-            compose_environment[variable_name] = str(harmless_file)
-        compose_environment["GTA_NGINX_SECRET_GID"] = str(os.getgid())
-        compose_environment["GTA_POSTGRES_SECRET_GID"] = str(os.getgid())
-        if release_confirmed:
-            compose_environment["GTA_RELEASE_DIGESTS_CONFIRMED"] = "1"
-
-        compose_files = [
-            BASE_COMPOSE_FILE,
-            environment_root / "compose.override.yaml",
-        ]
-        if include_internal_ca:
-            compose_files.append(INTERNAL_CA_COMPOSE_FILE)
-            compose_environment["GTA_CA_BUNDLE"] = str(harmless_file)
-
-        command = ["docker", "compose"]
-        for compose_file in compose_files:
-            command.extend(("-f", str(compose_file)))
-        command.extend(("config", "--format", "json"))
+    def render() -> dict[str, object]:
+        providers = ProviderConfiguration.synthetic()
+        environment = {
+            **clean_environment(),
+            "COMPOSE_PROJECT_NAME": "gta-contract",
+            "DOKPLOY_NETWORK_NAME": "gta-contract-dokploy",
+            "DATABASE_NETWORK_NAME": "gta-contract-database",
+            "AUDIO_VOLUME_NAME": "gta-contract-audio",
+            "DATABASE_URL": (
+                "postgresql+psycopg://gta:synthetic@postgres:5432/"
+                "glpi_ticketing_automation"
+            ),
+            "PUBLIC_BASE_URL": "https://tickets.example.invalid",
+            "LEGACY_TRANSCRIPTION_BASE_URL": providers.transcription_base_url,
+            "LEGACY_TRANSCRIPTION_API_KEY": providers.transcription_api_key,
+            "GLPI_BASE_URL": providers.glpi_base_url,
+            "GLPI_USERNAME": providers.glpi_username,
+            "GLPI_PASSWORD": providers.glpi_password,
+            "GLPI_CLIENT_ID": providers.glpi_client_id,
+            "GLPI_CLIENT_SECRET": providers.glpi_client_secret,
+        }
         result = run_command(
-            command,
-            environment={**clean_environment(), **compose_environment},
-            check=check,
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(BASE_COMPOSE_FILE),
+                "config",
+                "--format",
+                "json",
+            ],
+            environment=environment,
+            secrets_to_redact=providers.secrets,
         )
-        if not check:
-            return result
         payload = json.loads(result.stdout)
         if not isinstance(payload, dict):
             raise RuntimeError("Compose returned a non-object configuration")
@@ -125,7 +72,7 @@ def render_compose(tmp_path: Path) -> Callable[..., dict[str, object]]:
 def deployment_environment(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[DeploymentEnvironment]:
-    """Build, start and finally destroy one complete disposable MVP stack."""
+    """Build and run the four apps with test-only PostgreSQL and direct web HTTP."""
     if os.environ.get("PYTEST_XDIST_WORKER") is not None:
         pytest.fail("Deployment tests must not be parallelized")
 
@@ -155,7 +102,5 @@ __all__ = [
     "BASE_COMPOSE_FILE",
     "CUSTOM_SERVICES",
     "DOCKER_ROOT",
-    "ENVIRONMENTS_ROOT",
-    "INTERNAL_CA_COMPOSE_FILE",
     "DeploymentEnvironment",
 ]

@@ -1,15 +1,16 @@
 # Runbook de démonstration et de recette du MVP
 
-Ce runbook décrit la preuve fonctionnelle du MVP avant publication. Il ne
-remplace pas le guide de déploiement et d'exploitation détaillé dans
-[`infra/docker/README.md`](../infra/docker/README.md).
+Ce runbook décrit la preuve fonctionnelle du MVP avant déploiement. Il ne
+remplace pas le contrat de déploiement Dokploy décrit dans le
+[`README`](../README.md#déploiement-dokploy-du-mvp).
 
 ## Périmètre démontré
 
-La recette traverse la frontière HTTPS Nginx et utilise les vraies images du
-web, des deux workers et de la migration. PostgreSQL, GLPI 11 et Transcribe AI
-sont jetables. Les identifiants, réseaux, volumes et bases sont propres à la
-session.
+La recette utilise les vraies images du web, des deux workers et de la
+migration. PostgreSQL, GLPI 11 et Transcribe AI sont jetables. Le web est
+joignable uniquement sur loopback pendant le test ; Traefik reste une
+responsabilité de Dokploy. Les identifiants, réseaux, volumes et bases sont
+propres à la session.
 
 Elle prouve les invariants suivants :
 
@@ -33,7 +34,7 @@ des octets déterministe.
 
 - Docker Engine et Docker Compose fonctionnels ;
 - `uv` installé ;
-- ports loopback `18080` et `18443` disponibles pour la stack E2E ;
+- capacité à réserver deux ports loopback éphémères pour le web et PostgreSQL ;
 - capacité à télécharger ou à réutiliser les images épinglées et le modèle
   Whisper `tiny` ;
 - mémoire et espace disque suffisants pour GLPI, MySQL, PostgreSQL et
@@ -63,8 +64,7 @@ autres projets du daemon Docker.
 
 1. Déployer la stack avec une base PostgreSQL et un volume audio neufs selon le
    guide Docker.
-2. Ouvrir l'URL HTTPS configurée et s'authentifier avec le compte Basic Auth de
-   l'environnement.
+2. Ouvrir l'URL HTTPS configurée par Dokploy sur le réseau interne.
 3. Déposer jusqu'à trois fichiers parmi WAV, MP3, OGG et M4A. Vérifier que
    chaque dépôt reçoit son propre UUID et que l'interface permet immédiatement
    un nouveau dépôt.
@@ -107,13 +107,11 @@ le nom de projet est généré pour leur session.
   `SIGKILL` afin d'isoler la preuve de reprise métier ;
 - les alertes sont consultables sur le dashboard mais ne sont pas encore
   transmises à un système de notification externe ;
-- l'interface est protégée par Basic Auth et prévue pour un réseau interne, pas
-  pour une exposition Internet ;
-- la recette appelle l'API HTTPS mais n'automatise pas encore un navigateur et
-  son JavaScript ;
-- les ports E2E sont fixes et explicites : une collision locale fait échouer la
-  préparation au lieu de sélectionner silencieusement un autre port ;
+- l'interface reste limitée au réseau interne ; une exposition Internet exige
+  un contrôle d'accès configuré au niveau de Dokploy/Traefik ;
+- la recette appelle FastAPI directement en HTTP sur loopback : elle ne valide
+  ni Traefik, ni le certificat TLS, ni un navigateur et son JavaScript ;
 - le pilotage temporel E2E ne change que des timestamps autorisés sur une
   rétention déjà `scheduled` ; il ne fabrique aucune transition métier en SQL ;
-- la publication des images et leur consommation par Dokploy relèvent du
-  sous-jalon 8C.
+- le déploiement Dokploy construit les images sur le serveur ; il ne fournit
+  pas encore de promotion par digest ni de signature d'image.

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import os
 import secrets
 import socket
-import ssl
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
@@ -19,22 +16,31 @@ import httpx
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker"
-BASE_COMPOSE_FILE = DOCKER_ROOT / "compose.yaml"
-INTERNAL_CA_COMPOSE_FILE = DOCKER_ROOT / "compose.internal-ca.yaml"
-ENVIRONMENTS_ROOT = DOCKER_ROOT / "environments"
-DEV_COMPOSE_FILE = ENVIRONMENTS_ROOT / "dev" / "compose.override.yaml"
+BASE_COMPOSE_FILE = DOCKER_ROOT / "docker-compose.prod.yml"
 CUSTOM_SERVICES = (
     "database-migrations",
     "web",
     "worker-automation",
     "worker-retention",
-    "nginx",
 )
 ALL_SERVICES = ("postgres", *CUSTOM_SERVICES)
 CONTROLLABLE_MVP_SERVICES = frozenset({"worker-automation", "worker-retention"})
 POLL_INTERVAL_SECONDS = 0.25
-DEFAULT_TEST_NGINX_HTTP_PORT = 18080
-DEFAULT_TEST_NGINX_HTTPS_PORT = 18443
+
+
+def _deployment_environment_names() -> frozenset[str]:
+    """Return the variables controlled by the versioned Dokploy contract."""
+    example_path = DOCKER_ROOT / ".env.example"
+    return frozenset(
+        name
+        for raw_line in example_path.read_text(encoding="utf-8").splitlines()
+        if (line := raw_line.strip())
+        and not line.startswith("#")
+        and (name := line.partition("=")[0])
+    )
+
+
+DEPLOYMENT_ENVIRONMENT_NAMES = _deployment_environment_names()
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,8 +83,8 @@ def clean_environment() -> dict[str, str]:
     return {
         name: value
         for name, value in os.environ.items()
-        if name != "COMPOSE_FILE"
-        and name != "COMPOSE_PROJECT_NAME"
+        if name not in DEPLOYMENT_ENVIRONMENT_NAMES
+        and not name.startswith("COMPOSE_")
         and not name.startswith("GTA_")
     }
 
@@ -117,19 +123,16 @@ def run_command(
 
 @dataclass(slots=True)
 class MvpComposeEnvironment:
-    """Own one isolated development Compose project and its runtime secrets."""
+    """Own one isolated Compose project and its test-only PostgreSQL service."""
 
     project_name: str
     compose_environment_file: Path
     compose_files: tuple[Path, ...]
-    certificate: Path
-    username: str
-    _password: str = field(repr=False)
     _database_password: str = field(repr=False)
     _runtime_secrets: tuple[str, ...] = field(repr=False)
     _images: tuple[str, ...] = field(repr=False)
-    _postgres_port_reservation: socket.socket | None = field(repr=False)
-    _nginx_port_reservations: tuple[socket.socket, ...] = field(repr=False)
+    _port_reservations: tuple[socket.socket, ...] = field(repr=False)
+    _external_network_names: tuple[str, ...]
 
     def compose(
         self,
@@ -156,7 +159,7 @@ class MvpComposeEnvironment:
             environment=clean_environment(),
             check=check,
             timeout_seconds=timeout_seconds,
-            secrets_to_redact=(*self._runtime_secrets, self._password),
+            secrets_to_redact=self._runtime_secrets,
         )
 
     def inspect_service(
@@ -178,7 +181,7 @@ class MvpComposeEnvironment:
         result = run_command(
             ["docker", "inspect", container_id],
             environment=clean_environment(),
-            secrets_to_redact=(*self._runtime_secrets, self._password),
+            secrets_to_redact=self._runtime_secrets,
         )
         payload = json.loads(result.stdout)
         if not isinstance(payload, list) or len(payload) != 1:
@@ -191,7 +194,7 @@ class MvpComposeEnvironment:
         result = run_command(
             ["docker", "image", "inspect", image_id],
             environment=clean_environment(),
-            secrets_to_redact=(*self._runtime_secrets, self._password),
+            secrets_to_redact=self._runtime_secrets,
         )
         payload = json.loads(result.stdout)
         if not isinstance(payload, list) or len(payload) != 1:
@@ -205,11 +208,10 @@ class MvpComposeEnvironment:
         history = run_command(
             ["docker", "history", "--no-trunc", image_id],
             environment=clean_environment(),
-            secrets_to_redact=(*self._runtime_secrets, self._password),
+            secrets_to_redact=self._runtime_secrets,
         ).stdout
         if any(
-            secret in metadata or secret in history
-            for secret in (*self._runtime_secrets, self._password)
+            secret in metadata or secret in history for secret in self._runtime_secrets
         ):
             raise AssertionError("A synthetic runtime secret leaked into an image")
 
@@ -229,7 +231,7 @@ class MvpComposeEnvironment:
                 source,
             ],
             environment=clean_environment(),
-            secrets_to_redact=(*self._runtime_secrets, self._password),
+            secrets_to_redact=self._runtime_secrets,
         )
 
     def wait_for_health(self, service_name: str, timeout_seconds: float = 60) -> None:
@@ -314,42 +316,22 @@ class MvpComposeEnvironment:
 
     @property
     def base_url(self) -> str:
-        """Return the explicitly configured loopback HTTPS endpoint."""
-        payload = self.inspect_service("nginx")
+        """Return the test-only loopback HTTP endpoint published by FastAPI."""
+        payload = self.inspect_service("web")
         network = payload.get("NetworkSettings")
         if not isinstance(network, dict):
-            raise RuntimeError("Nginx has no network settings")
+            raise RuntimeError("Web has no network settings")
         ports = network.get("Ports")
         if not isinstance(ports, dict):
-            raise RuntimeError("Nginx has no published ports")
-        bindings = ports.get("8443/tcp")
+            raise RuntimeError("Web has no published ports")
+        bindings = ports.get("8000/tcp")
         if not isinstance(bindings, list) or len(bindings) != 1:
-            raise RuntimeError("Nginx has no unique HTTPS binding")
-        return f"https://127.0.0.1:{bindings[0]['HostPort']}"
-
-    @property
-    def http_base_url(self) -> str:
-        """Return the configured loopback HTTP redirect endpoint."""
-        payload = self.inspect_service("nginx")
-        network = payload.get("NetworkSettings")
-        if not isinstance(network, dict):
-            raise RuntimeError("Nginx has no network settings")
-        ports = network.get("Ports")
-        if not isinstance(ports, dict):
-            raise RuntimeError("Nginx has no published ports")
-        bindings = ports.get("8080/tcp")
-        if not isinstance(bindings, list) or len(bindings) != 1:
-            raise RuntimeError("Nginx has no unique HTTP binding")
+            raise RuntimeError("Web has no unique HTTP binding")
         return f"http://127.0.0.1:{bindings[0]['HostPort']}"
 
     def client(self) -> httpx.Client:
-        """Build an authenticated client trusting only the disposable certificate."""
-        return httpx.Client(
-            base_url=self.base_url,
-            verify=self.tls_context(),
-            auth=(self.username, self._password),
-            timeout=5,
-        )
+        """Build a client for the test-only direct FastAPI binding."""
+        return httpx.Client(base_url=self.base_url, timeout=5)
 
     @property
     def postgres_port(self) -> int:
@@ -390,17 +372,19 @@ class MvpComposeEnvironment:
             "glpi_ticketing_automation"
         )
 
-    def tls_context(self) -> ssl.SSLContext:
-        """Trust only the disposable certificate generated for this stack."""
-        return ssl.create_default_context(cafile=str(self.certificate))
-
     def build(self, timeout_seconds: float = 10 * 60) -> None:
-        """Build the five local runtime images once for this test project."""
+        """Build the four application images once for this test project."""
         self.compose("build", timeout_seconds=timeout_seconds)
 
     def start(self) -> None:
         """Start the complete stack and require all long-lived services healthy."""
         self._release_port_reservations()
+        for network_name in self._external_network_names:
+            run_command(
+                ["docker", "network", "create", network_name],
+                environment=clean_environment(),
+                secrets_to_redact=self._runtime_secrets,
+            )
         self.compose(
             "up",
             "--detach",
@@ -415,18 +399,14 @@ class MvpComposeEnvironment:
             "web",
             "worker-automation",
             "worker-retention",
-            "nginx",
         ):
             self.wait_for_health(service_name)
 
     def _release_port_reservations(self) -> None:
         """Release explicit test ports immediately before Docker binds them."""
-        if self._postgres_port_reservation is not None:
-            self._postgres_port_reservation.close()
-            self._postgres_port_reservation = None
-        for reservation in self._nginx_port_reservations:
+        for reservation in self._port_reservations:
             reservation.close()
-        self._nginx_port_reservations = ()
+        self._port_reservations = ()
 
     def destroy(self) -> None:
         """Remove project containers, private networks, volumes and local images."""
@@ -439,14 +419,32 @@ class MvpComposeEnvironment:
             "10",
             check=False,
         )
+        remaining_external_networks: list[str] = []
+        for network_name in self._external_network_names:
+            run_command(
+                ["docker", "network", "rm", network_name],
+                environment=clean_environment(),
+                check=False,
+                secrets_to_redact=self._runtime_secrets,
+            )
+            network_inspection = run_command(
+                ["docker", "network", "inspect", network_name],
+                environment=clean_environment(),
+                check=False,
+                secrets_to_redact=self._runtime_secrets,
+            )
+            if network_inspection.returncode == 0:
+                remaining_external_networks.append(network_name)
         run_command(
             ["docker", "image", "rm", "--force", *self._images],
             environment=clean_environment(),
             check=False,
-            secrets_to_redact=(*self._runtime_secrets, self._password),
+            secrets_to_redact=self._runtime_secrets,
         )
         self.assert_project_removed()
         self.assert_images_removed()
+        if remaining_external_networks:
+            raise RuntimeError("A disposable external network was not removed")
 
     def assert_project_removed(self) -> None:
         """Fail teardown if a project-owned container, network or volume remains."""
@@ -468,7 +466,7 @@ class MvpComposeEnvironment:
             result = run_command(
                 command,
                 environment=clean_environment(),
-                secrets_to_redact=(*self._runtime_secrets, self._password),
+                secrets_to_redact=self._runtime_secrets,
             )
             if result.stdout.strip():
                 raise RuntimeError("The disposable MVP project was not fully removed")
@@ -480,7 +478,7 @@ class MvpComposeEnvironment:
                 ["docker", "image", "inspect", image_reference],
                 environment=clean_environment(),
                 check=False,
-                secrets_to_redact=(*self._runtime_secrets, self._password),
+                secrets_to_redact=self._runtime_secrets,
             )
             if result.returncode == 0:
                 raise RuntimeError("A disposable MVP runtime image was not removed")
@@ -493,88 +491,83 @@ def create_mvp_compose_environment(
     project_prefix: str = "gtamvp",
     extra_compose_files: Sequence[Path] = (),
     extra_compose_environment: Mapping[str, str] | None = None,
-    database_host: str = "postgres",
+    database_host: str = "mvp-postgres",
     public_base_url: str | None = None,
-    publish_postgres_on_loopback: bool = False,
-    nginx_http_port: int = DEFAULT_TEST_NGINX_HTTP_PORT,
-    nginx_https_port: int = DEFAULT_TEST_NGINX_HTTPS_PORT,
 ) -> MvpComposeEnvironment:
     """Materialize private runtime configuration for one disposable MVP project."""
-    _validate_explicit_port(nginx_http_port, "nginx_http_port")
-    _validate_explicit_port(nginx_https_port, "nginx_https_port")
-    if nginx_http_port == nginx_https_port:
-        raise ValueError("Nginx HTTP and HTTPS ports must be distinct")
-    effective_public_base_url = public_base_url or (
-        f"https://127.0.0.1:{nginx_https_port}"
-    )
     provider_configuration = providers or ProviderConfiguration.synthetic()
     database_password = secrets.token_hex(24)
     postgres_password = runtime_root / "postgres.password"
     postgres_password.write_text(f"{database_password}\n", encoding="utf-8")
     postgres_password.chmod(0o640)
-    service_envs = _write_service_environments(
-        runtime_root,
-        database_password=database_password,
-        database_host=database_host,
-        providers=provider_configuration,
-        public_base_url=effective_public_base_url,
-    )
-    certificate, private_key, htpasswd, username, password = _write_proxy_secrets(
-        runtime_root
-    )
     project_name = f"{project_prefix}{secrets.token_hex(5)}"
-    image_variables = {
-        "GTA_MIGRATIONS_IMAGE": f"{project_name}/database-migrations:smoke",
-        "GTA_WEB_IMAGE": f"{project_name}/web:smoke",
-        "GTA_AUTOMATION_IMAGE": f"{project_name}/worker-automation:smoke",
-        "GTA_RETENTION_IMAGE": f"{project_name}/worker-retention:smoke",
-        "GTA_NGINX_IMAGE": f"{project_name}/nginx:smoke",
-    }
-    nginx_port_reservations = _reserve_loopback_ports(
-        nginx_http_port,
-        nginx_https_port,
+    proxy_network_name = f"{project_name}-dokploy"
+    database_network_name = f"{project_name}-database"
+    audio_volume_name = f"{project_name}-audio-data"
+    port_reservations = _reserve_loopback_ports(2)
+    web_port = int(port_reservations[0].getsockname()[1])
+    postgres_port = int(port_reservations[1].getsockname()[1])
+    effective_public_base_url = public_base_url or f"http://127.0.0.1:{web_port}"
+    database_url = (
+        "postgresql+psycopg://gta:"
+        f"{database_password}@{database_host}:5432/glpi_ticketing_automation"
     )
-    postgres_port_reservation: socket.socket | None = None
-    try:
-        if publish_postgres_on_loopback:
-            postgres_port_reservation = socket.socket(
-                socket.AF_INET,
-                socket.SOCK_STREAM,
-            )
-            postgres_port_reservation.bind(("127.0.0.1", 0))
-    except OSError:
-        for reservation in nginx_port_reservations:
-            reservation.close()
-        raise
+    test_override = _write_test_compose_override(runtime_root)
 
     values = {
         "COMPOSE_PROJECT_NAME": project_name,
+        "DOKPLOY_NETWORK_NAME": proxy_network_name,
+        "DATABASE_NETWORK_NAME": database_network_name,
+        "AUDIO_VOLUME_NAME": audio_volume_name,
+        "DATABASE_URL": database_url,
+        "DATABASE_CONNECT_TIMEOUT_SECONDS": "2",
+        "DATABASE_READY_TIMEOUT_SECONDS": "60",
+        "DATABASE_READY_INTERVAL_SECONDS": "0.25",
+        "PUBLIC_BASE_URL": effective_public_base_url,
+        "MAX_UPLOAD_BYTES": "1048576",
+        "WORKER_IDLE_INTERVAL_SECONDS": "0.2",
+        "WORKER_HEARTBEAT_INTERVAL_SECONDS": "1",
+        "WORKER_HEALTHCHECK_STALE_AFTER_SECONDS": "8",
+        "WORKER_RETRY_INITIAL_SECONDS": "30",
+        "WORKER_RETRY_MAX_SECONDS": "30",
+        "WORKER_SYSTEM_PROBE_INTERVAL_SECONDS": "30",
+        "COMPLETED_RETENTION_DAYS": "90",
+        "FAILED_RETENTION_DAYS": "30",
+        "BLOCKED_RETENTION_DAYS": "90",
+        "RETENTION_CHECK_INTERVAL_HOURS": "6",
+        "LEGACY_TRANSCRIPTION_BASE_URL": (
+            provider_configuration.transcription_base_url
+        ),
+        "LEGACY_TRANSCRIPTION_API_KEY": provider_configuration.transcription_api_key,
+        "TRANSCRIPTION_HTTP_TIMEOUT_SECONDS": "30",
+        "TRANSCRIPTION_POLL_INTERVAL_SECONDS": "0.2",
+        "TRANSCRIPTION_JOB_TIMEOUT_SECONDS": "900",
+        "GLPI_BASE_URL": provider_configuration.glpi_base_url,
+        "GLPI_USERNAME": provider_configuration.glpi_username,
+        "GLPI_PASSWORD": provider_configuration.glpi_password,
+        "GLPI_CLIENT_ID": provider_configuration.glpi_client_id,
+        "GLPI_CLIENT_SECRET": provider_configuration.glpi_client_secret,
+        "GLPI_HTTP_TIMEOUT_SECONDS": "30",
+        "GLPI_TICKET_TITLE": "Synthetic audio request",
+        "GLPI_TICKET_TYPE": "2",
+        "GLPI_TICKET_URGENCY": "3",
+        "GLPI_TICKET_IMPACT": "3",
+        "RETENTION_POLL_INTERVAL_SECONDS": "0.2",
+        "RETENTION_RETRY_INITIAL_SECONDS": "30",
+        "RETENTION_RETRY_MAX_SECONDS": "30",
+        "RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS": "30",
+        "DASHBOARD_WORKER_STALE_AFTER_SECONDS": "8",
+        "DASHBOARD_PENDING_ALERT_AFTER_SECONDS": "900",
+        "DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS": "60",
+        "DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS": "120",
         "GTA_POSTGRES_DB": "glpi_ticketing_automation",
         "GTA_POSTGRES_USER": "gta",
         "GTA_POSTGRES_PASSWORD_FILE": str(postgres_password),
         "GTA_POSTGRES_SECRET_GID": str(os.getgid()),
-        **image_variables,
-        "GTA_IMAGE_VERSION": "smoke",
-        "GTA_VCS_REF": "0" * 40,
-        "GTA_DATABASE_ENV_FILE": str(service_envs["database"]),
-        "GTA_MIGRATIONS_ENV_FILE": str(service_envs["migrations"]),
-        "GTA_WEB_ENV_FILE": str(service_envs["web"]),
-        "GTA_AUTOMATION_ENV_FILE": str(service_envs["worker-automation"]),
-        "GTA_RETENTION_ENV_FILE": str(service_envs["worker-retention"]),
-        "GTA_NGINX_BIND_IP": "127.0.0.1",
-        "GTA_NGINX_PUBLIC_HOST": "127.0.0.1",
-        "GTA_NGINX_HTTP_PORT": str(nginx_http_port),
-        "GTA_NGINX_HTTPS_PORT": str(nginx_https_port),
-        "GTA_NGINX_TLS_CERTIFICATE_FILE": str(certificate),
-        "GTA_NGINX_TLS_KEY_FILE": str(private_key),
-        "GTA_NGINX_HTPASSWD_FILE": str(htpasswd),
-        "GTA_NGINX_SECRET_GID": str(os.getgid()),
+        "GTA_TEST_WEB_PORT": str(web_port),
+        "GTA_E2E_POSTGRES_PORT": str(postgres_port),
         **(extra_compose_environment or {}),
     }
-    if postgres_port_reservation is not None:
-        values["GTA_E2E_POSTGRES_PORT"] = str(
-            postgres_port_reservation.getsockname()[1]
-        )
     compose_environment_file = runtime_root / "compose.env"
     try:
         compose_environment_file.write_text(
@@ -583,9 +576,7 @@ def create_mvp_compose_environment(
         )
         compose_environment_file.chmod(0o600)
     except OSError:
-        if postgres_port_reservation is not None:
-            postgres_port_reservation.close()
-        for reservation in nginx_port_reservations:
+        for reservation in port_reservations:
             reservation.close()
         raise
     runtime_secrets = (
@@ -595,23 +586,13 @@ def create_mvp_compose_environment(
     return MvpComposeEnvironment(
         project_name=project_name,
         compose_environment_file=compose_environment_file,
-        compose_files=(BASE_COMPOSE_FILE, DEV_COMPOSE_FILE, *extra_compose_files),
-        certificate=certificate,
-        username=username,
-        _password=password,
+        compose_files=(BASE_COMPOSE_FILE, test_override, *extra_compose_files),
         _database_password=database_password,
         _runtime_secrets=runtime_secrets,
-        _images=tuple(image_variables.values()),
-        _postgres_port_reservation=postgres_port_reservation,
-        _nginx_port_reservations=nginx_port_reservations,
+        _images=tuple(f"{project_name}-{service}" for service in CUSTOM_SERVICES),
+        _port_reservations=port_reservations,
+        _external_network_names=(proxy_network_name, database_network_name),
     )
-
-
-def _validate_explicit_port(port: object, field_name: str) -> None:
-    if isinstance(port, bool) or not isinstance(port, int):
-        raise TypeError(f"{field_name} must be an integer")
-    if port < 1 or port > 65535:
-        raise ValueError(f"{field_name} must be between 1 and 65535")
 
 
 def _require_controllable_mvp_service(service_name: str) -> None:
@@ -619,12 +600,12 @@ def _require_controllable_mvp_service(service_name: str) -> None:
         raise ValueError("service_name is not controllable by the MVP test harness")
 
 
-def _reserve_loopback_ports(*ports: int) -> tuple[socket.socket, ...]:
+def _reserve_loopback_ports(count: int) -> tuple[socket.socket, ...]:
     reservations: list[socket.socket] = []
     try:
-        for port in ports:
+        for _ in range(count):
             reservation = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            reservation.bind(("127.0.0.1", port))
+            reservation.bind(("127.0.0.1", 0))
             reservations.append(reservation)
     except OSError:
         for reservation in reservations:
@@ -633,117 +614,65 @@ def _reserve_loopback_ports(*ports: int) -> tuple[socket.socket, ...]:
     return tuple(reservations)
 
 
-def _write_service_environments(
-    runtime_root: Path,
-    *,
-    database_password: str,
-    database_host: str,
-    providers: ProviderConfiguration,
-    public_base_url: str,
-) -> dict[str, Path]:
-    database_url = (
-        "postgresql+psycopg://gta:"
-        f"{database_password}@{database_host}:5432/glpi_ticketing_automation"
-    )
-    contents = {
-        "database": f"DATABASE_URL={database_url}\n",
-        "migrations": (
-            "DATABASE_CONNECT_TIMEOUT_SECONDS=2\n"
-            "DATABASE_READY_TIMEOUT_SECONDS=60\n"
-            "DATABASE_READY_INTERVAL_SECONDS=0.25\n"
-        ),
-        "web": (
-            "MAX_UPLOAD_BYTES=1048576\n"
-            "WORKER_HEARTBEAT_INTERVAL_SECONDS=1\n"
-            "DASHBOARD_WORKER_STALE_AFTER_SECONDS=8\n"
-        ),
-        "worker-automation": (
-            f"PUBLIC_BASE_URL={public_base_url}\n"
-            "WORKER_IDLE_INTERVAL_SECONDS=0.2\n"
-            "WORKER_HEARTBEAT_INTERVAL_SECONDS=1\n"
-            "WORKER_HEALTHCHECK_STALE_AFTER_SECONDS=8\n"
-            "WORKER_RETRY_INITIAL_SECONDS=30\n"
-            "WORKER_RETRY_MAX_SECONDS=30\n"
-            "WORKER_SYSTEM_PROBE_INTERVAL_SECONDS=30\n"
-            "COMPLETED_RETENTION_DAYS=90\n"
-            "FAILED_RETENTION_DAYS=30\n"
-            "BLOCKED_RETENTION_DAYS=90\n"
-            "RETENTION_CHECK_INTERVAL_HOURS=6\n"
-            f"LEGACY_TRANSCRIPTION_BASE_URL={providers.transcription_base_url}\n"
-            f"LEGACY_TRANSCRIPTION_API_KEY={providers.transcription_api_key}\n"
-            "TRANSCRIPTION_HTTP_TIMEOUT_SECONDS=30\n"
-            "TRANSCRIPTION_POLL_INTERVAL_SECONDS=0.2\n"
-            "TRANSCRIPTION_JOB_TIMEOUT_SECONDS=900\n"
-            f"GLPI_BASE_URL={providers.glpi_base_url}\n"
-            f"GLPI_USERNAME={providers.glpi_username}\n"
-            f"GLPI_PASSWORD={providers.glpi_password}\n"
-            f"GLPI_CLIENT_ID={providers.glpi_client_id}\n"
-            f"GLPI_CLIENT_SECRET={providers.glpi_client_secret}\n"
-            "GLPI_HTTP_TIMEOUT_SECONDS=30\n"
-            "GLPI_TICKET_TITLE=Synthetic audio request\n"
-            "GLPI_TICKET_TYPE=2\n"
-            "GLPI_TICKET_URGENCY=3\n"
-            "GLPI_TICKET_IMPACT=3\n"
-        ),
-        "worker-retention": (
-            "WORKER_HEARTBEAT_INTERVAL_SECONDS=1\n"
-            "WORKER_HEALTHCHECK_STALE_AFTER_SECONDS=8\n"
-            "RETENTION_POLL_INTERVAL_SECONDS=0.2\n"
-            "RETENTION_RETRY_INITIAL_SECONDS=30\n"
-            "RETENTION_RETRY_MAX_SECONDS=30\n"
-            "RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS=30\n"
-            "RETENTION_CHECK_INTERVAL_HOURS=6\n"
-            f"GLPI_BASE_URL={providers.glpi_base_url}\n"
-            f"GLPI_USERNAME={providers.glpi_username}\n"
-            f"GLPI_PASSWORD={providers.glpi_password}\n"
-            f"GLPI_CLIENT_ID={providers.glpi_client_id}\n"
-            f"GLPI_CLIENT_SECRET={providers.glpi_client_secret}\n"
-            "GLPI_HTTP_TIMEOUT_SECONDS=30\n"
-        ),
-    }
-    paths: dict[str, Path] = {}
-    for service_name, content in contents.items():
-        path = runtime_root / f"{service_name}.env"
-        path.write_text(content, encoding="utf-8")
-        path.chmod(0o600)
-        paths[service_name] = path
-    return paths
+def _write_test_compose_override(runtime_root: Path) -> Path:
+    path = runtime_root / "compose.test.yaml"
+    path.write_text(
+        """services:
+  postgres:
+    image: postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+    user: "70:70"
+    group_add:
+      - ${GTA_POSTGRES_SECRET_GID}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      POSTGRES_DB: ${GTA_POSTGRES_DB}
+      POSTGRES_USER: ${GTA_POSTGRES_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /var/run/postgresql:rw,noexec,nosuid,nodev,size=16m,mode=0770,uid=70,gid=70
+    shm_size: 128m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"'
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    ports:
+      - target: 5432
+        published: ${GTA_E2E_POSTGRES_PORT}
+        host_ip: 127.0.0.1
+    networks:
+      database:
+        aliases: [mvp-postgres]
+      e2e-control:
+    restart: unless-stopped
 
+  web:
+    ports:
+      - target: 8000
+        published: ${GTA_TEST_WEB_PORT}
+        host_ip: 127.0.0.1
 
-def _write_proxy_secrets(runtime_root: Path) -> tuple[Path, Path, Path, str, str]:
-    certificate = runtime_root / "nginx.crt"
-    private_key = runtime_root / "nginx.key"
-    htpasswd = runtime_root / "nginx.htpasswd"
-    username = "synthetic-user"
-    password = secrets.token_hex(24)
-    run_command(
-        [
-            "openssl",
-            "req",
-            "-x509",
-            "-newkey",
-            "rsa:2048",
-            "-sha256",
-            "-nodes",
-            "-days",
-            "1",
-            "-subj",
-            "/CN=localhost",
-            "-addext",
-            "subjectAltName=DNS:localhost,IP:127.0.0.1",
-            "-keyout",
-            str(private_key),
-            "-out",
-            str(certificate),
-        ],
-        environment=clean_environment(),
+networks:
+  e2e-control:
+
+volumes:
+  postgres-data:
+
+secrets:
+  postgres_password:
+    file: ${GTA_POSTGRES_PASSWORD_FILE}
+""",
+        encoding="utf-8",
     )
-    sha_digest = base64.b64encode(hashlib.sha1(password.encode()).digest()).decode()
-    htpasswd.write_text(f"{username}:{{SHA}}{sha_digest}\n", encoding="utf-8")
-    certificate.chmod(0o644)
-    private_key.chmod(0o640)
-    htpasswd.chmod(0o640)
-    return certificate, private_key, htpasswd, username, password
+    return path
 
 
 __all__ = [
@@ -751,11 +680,7 @@ __all__ = [
     "BASE_COMPOSE_FILE",
     "CONTROLLABLE_MVP_SERVICES",
     "CUSTOM_SERVICES",
-    "DEFAULT_TEST_NGINX_HTTP_PORT",
-    "DEFAULT_TEST_NGINX_HTTPS_PORT",
     "DOCKER_ROOT",
-    "ENVIRONMENTS_ROOT",
-    "INTERNAL_CA_COMPOSE_FILE",
     "MvpComposeEnvironment",
     "ProviderConfiguration",
     "clean_environment",

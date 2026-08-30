@@ -88,8 +88,8 @@ par défaut et doit rester strictement supérieur à
 
 Le volume Docker canonique est monté en lecture-écriture par le web et le
 worker de rétention, et en lecture seule par le worker d'automatisation. Le
-[runbook Docker Compose](../../infra/docker/README.md) décrit son cycle de vie
-et les configurations dev, staging et production.
+[déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp) décrit son
+volume persistant et sa configuration.
 
 `parse_audio_filename()` accepte une extension en majuscules à la frontière du
 provider et retourne une représentation normalisée. En revanche,

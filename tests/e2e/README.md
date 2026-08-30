@@ -8,8 +8,7 @@ smoke test Compose sous `tests/deployment`.
 
 ```mermaid
 flowchart LR
-    Client[Client de test] -->|HTTPS loopback| Nginx
-    Nginx --> Web[Application web]
+    Client[Client de test] -->|HTTP loopback| Web[Application web]
     Web --> PostgreSQL[(PostgreSQL jetable)]
     Web --> Audio[(volume audio jetable)]
 
@@ -24,20 +23,20 @@ flowchart LR
     Retention --> GLPI
 ```
 
-La stack applicative est celle du Compose MVP : PostgreSQL, migration one-shot,
-web, worker d'automatisation, worker de rétention et Nginx. GLPI, sa base MySQL,
-Transcribe AI et ses dépendances sont lancés comme services de test séparés.
-Leurs URLs et identifiants éphémères sont injectés dans la stack applicative.
+La stack reprend les quatre applications du Compose MVP et lui ajoute un
+PostgreSQL exclusivement réservé aux tests. GLPI, sa base MySQL, Transcribe AI
+et ses dépendances sont lancés comme services de test séparés. Le Traefik de
+Dokploy n'est pas simulé : la fixture publie directement FastAPI sur loopback.
+Les URLs et identifiants éphémères sont injectés dans la stack applicative.
 
-Aucun secret réel ni fichier sous
-`/etc/glpi-ticketing-automation/{staging,prod}` ne doit être utilisé. Les ports
-publiés le sont uniquement sur loopback et les réseaux, volumes, bases et
-identifiants appartiennent à la session de test.
+Aucun secret réel ni fichier d'environnement Dokploy ne doit être utilisé. Les
+ports publiés le sont uniquement sur loopback et les réseaux, volumes, bases
+et identifiants appartiennent à la session de test.
 
-L'overlay E2E ajoute un réseau de contrôle jetable auquel seul PostgreSQL est
+La fixture ajoute un réseau de contrôle jetable auquel seul PostgreSQL est
 attaché. Le support de test peut ainsi avancer uniquement les timestamps
-autorisés d'une rétention déjà dans l'état attendu, sans modifier le réseau
-`database-private` ni fabriquer de transition métier en SQL.
+autorisés d'une rétention déjà dans l'état attendu, sans fabriquer de
+transition métier en SQL.
 
 ## Frontière des sous-jalons
 

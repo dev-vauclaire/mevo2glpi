@@ -87,7 +87,7 @@ class JobEvent:
 
 @dataclass(frozen=True, slots=True)
 class AudioDownload:
-    """Exact completed audio returned through Nginx and FastAPI."""
+    """Exact completed audio returned by FastAPI."""
 
     audio_uuid: UUID
     content: bytes = field(repr=False)

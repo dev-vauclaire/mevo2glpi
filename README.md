@@ -91,10 +91,10 @@ active de la branche MVP :
 - purge audio crash-safe via la quarantaine privée `.purge`, avec publication
   create-only et reprise après chaque frontière disque ou PostgreSQL.
 
-Le déploiement Compose du MVP assemble PostgreSQL, la migration one-shot, les
-deux workers, le web et Nginx à partir d'un socle commun et d'overlays `dev`,
-`staging` et `prod`. Le POC à quatre répertoires n'est plus un manifeste actif
-de la branche ; il reste disponible avec le tag `poc-v0.1.0`.
+Le déploiement Compose du MVP contient uniquement la migration one-shot, les
+deux workers et le web. PostgreSQL est provisionné séparément et Dokploy
+fournit Traefik. Le POC à quatre répertoires reste disponible avec le tag
+`poc-v0.1.0`.
 
 ### Limites du POC ciblées par le MVP
 
@@ -148,9 +148,10 @@ partagé. L'application de migration dépend du package database pour importer
 racine. Une application ne doit pas importer directement les modules internes
 d'une autre application.
 
-Les artefacts sous [`infra/docker/`](infra/docker/README.md) ne constituent pas
-un membre Python supplémentaire. Ils assemblent le déploiement mono-serveur du
-MVP ; le déploiement historique du POC reste figé par `poc-v0.1.0`.
+Le [Compose Dokploy](infra/docker/docker-compose.prod.yml) et les quatre
+Dockerfiles sous `infra/docker/` ne constituent pas un membre Python
+supplémentaire. Ils assemblent le déploiement mono-serveur du MVP ; le
+déploiement historique du POC reste figé par `poc-v0.1.0`.
 
 La convention générale est un layout `src` : le code de chaque membre se
 trouve dans `<membre>/src/<package_python>` et ses tests dans
@@ -317,8 +318,8 @@ vérité ; `uv.lock` fixe les versions exactes installées pour le dépôt.
 | Pytest | `>=8.4,<10` | Tests unitaires et tests d'intégration opt-in |
 | Ruff | `>=0.12,<1` | Formatage et analyse statique |
 | Testcontainers | `>=4.12,<5`, groupe de développement | Stacks PostgreSQL, GLPI/MySQL et Transcribe AI jetables pour les tests d'intégration |
-| Nginx | `1.30.4-alpine3.24`, image épinglée par digest | Terminaison TLS, authentification Basic et reverse proxy du MVP |
-| Docker Engine / Compose | `28.3.3+` / `2.33.1+`, hors workspace Python | PostgreSQL, migration, images applicatives et déploiement mono-serveur multi-environnements |
+| Docker Engine / Compose | hors workspace Python | Construction et exécution des quatre applications conteneurisées |
+| Dokploy / Traefik | services externes | Déploiement du Compose, routage HTTP(S) et terminaison TLS |
 
 Les sept distributions du projet utilisent `uv_build` comme backend de
 construction et portent actuellement la version `0.1.0`.
@@ -327,15 +328,15 @@ construction et portent actuellement la version `0.1.0`.
 
 - Python 3.12 ou supérieur ;
 - [`uv`](https://docs.astral.sh/uv/) ;
-- pour la branche MVP : une base PostgreSQL migrée et une racine audio unique,
-  existante et accessible au web comme aux deux workers ;
+- pour la branche MVP : une base PostgreSQL neuve ou compatible, joignable par
+  les quatre applications ; la migration Alembic est appliquée au démarrage ;
 - pour exécuter spécifiquement le tag POC : ses quatre répertoires audio
   historiques ;
 - uniquement pour les tests marqués `database`, `glpi`, `transcribe_ai` ou
   `e2e` : Docker avec le plugin Compose ;
-- uniquement pour construire ou déployer le MVP : Docker Engine 28.3.3 ou
-  supérieur, Docker Compose 2.33.1 ou supérieur, un certificat TLS avec sa clé
-  privée et l'utilitaire `htpasswd` ;
+- uniquement pour construire ou déployer le MVP : Docker Engine avec le plugin
+  Compose, ou un serveur Dokploy opérationnel avec Traefik et un PostgreSQL
+  provisionné séparément ;
 - uniquement pour `transcribe_ai` ou `e2e` : un hôte et un daemon Docker
   `linux/amd64`, ainsi qu'un accès réseau à chaque session pour le modèle
   Whisper ; le premier lancement télécharge aussi les images. Le mode GPU
@@ -419,78 +420,67 @@ Sa valeur est `cpu` par défaut ou `gpu` pour demander explicitement CUDA. Les
 identifiants de la stack sont générés en mémoire à chaque session pytest :
 aucune clé Transcribe AI ne doit être fournie par le développeur.
 
-## Workflow Git et promotion
+## Workflow Git et déploiement
 
 `main` est la branche d'intégration stable. Le travail passe par des branches
 courtes (`feature/*`, `fix/*` ou `chore/*`) revues avant fusion ; une branche
 d'environnement longue n'est pas utilisée comme source de vérité.
 
-- un commit source `A` de `main` est construit une seule fois ;
-- un commit manifeste `B` inscrit les digests obtenus dans les
-  `versions.env` de staging et de production, puis est déployé en staging ;
-- après validation, un tag immuable `mvp-vX.Y.Z` pointe vers `B` ;
-- production est déployée depuis ce tag sans reconstruire les images ;
-- `poc-v0.1.0` archive le POC historique et ne reçoit aucune modification MVP.
+Dokploy déploie directement la révision Git sélectionnée et construit les
+quatre images depuis leurs Dockerfiles. Un rollback consiste donc à
+redéployer le commit ou le tag Git précédemment validé. Le tag historique
+`poc-v0.1.0` reste l'archive du POC.
 
-Le tag Git identifie le manifeste de release autorisé, les `versions.env`
-suivis identifient les octets des images et leurs labels OCI conservent le
-commit source `A`. Les trois références doivent être consignées ensemble lors
-d'une mise à jour ou d'un rollback.
+## Déploiement Dokploy du MVP
 
-## Déploiement mono-serveur du MVP
+Le fichier unique
+[`infra/docker/docker-compose.prod.yml`](infra/docker/docker-compose.prod.yml)
+contient quatre services : la migration Alembic one-shot, le web, le worker
+d'automatisation et le worker de rétention. PostgreSQL, GLPI et Transcribe AI
+sont externes au Compose. Les trois applications persistantes partagent le
+volume `audio-data` ; le worker d'automatisation le monte en lecture seule.
 
-Le socle [`infra/docker/compose.yaml`](infra/docker/compose.yaml) assemble six
-services : PostgreSQL, la migration Alembic one-shot, le web, les workers
-d'automatisation et de rétention, puis Nginx. GLPI et Transcribe AI restent des
-services externes. PostgreSQL conserve le cycle de vie dans `postgres-data` et
-les trois applications métier partagent les octets immuables de `audio-data`.
+Nginx n'est pas embarqué. Le web écoute sur le port interne `8000`, sans port
+hôte publié, et Dokploy configure son Traefik depuis l'onglet **Domains**. La
+migration attend la base externe et doit réussir avant le démarrage du web et
+des deux workers.
 
-Les overlays `dev`, `staging` et `prod` isolent les projets Compose, réseaux et
-volumes. Seul Nginx publie les ports HTTP et HTTPS ; HTTP répond uniquement par
-une redirection `308` vers le port HTTPS externe configuré. Les ports hôte sont
-pilotés par `GTA_NGINX_HTTP_PORT` et `GTA_NGINX_HTTPS_PORT`, avec `80` et `443`
-par défaut ; `GTA_NGINX_PUBLIC_HOST` fixe l'hôte sûr de cette redirection. Les
-secrets réels de staging et production résident sous
-`/etc/glpi-ticketing-automation/<environnement>/`, jamais dans le checkout. La
-migration doit réussir avant que le web ou les workers démarrent.
+Configuration minimale dans Dokploy :
 
-Commandes principales, détaillées dans le
-[runbook Docker](infra/docker/README.md) :
+1. créer un service **Docker Compose** depuis ce dépôt ;
+2. utiliser le chemin `./infra/docker/docker-compose.prod.yml` ;
+3. copier et renseigner toutes les valeurs de
+   [`infra/docker/.env.example`](infra/docker/.env.example) dans l'onglet
+   **Environment** ;
+4. créer le réseau privé `DATABASE_NETWORK_NAME`, y attacher le PostgreSQL
+   externe et renseigner son URL dans `DATABASE_URL` ;
+5. rendre le bundle indiqué par `CA_BUNDLE_HOST_PATH` lisible sur l'hôte ; il
+   doit contenir la CA interne de GLPI et Transcribe AI si nécessaire ;
+6. ajouter un domaine pour le service `web`, port conteneur `8000`, puis
+   activer HTTPS selon la politique du serveur ;
+7. limiter ce domaine au réseau interne par DNS, pare-feu ou middleware
+   Traefik, puis vérifier qu'il est inaccessible depuis un réseau non autorisé ;
+8. lancer le déploiement.
+
+Le fichier d'environnement réel contient des secrets et ne doit jamais être
+commité. `PUBLIC_BASE_URL` doit correspondre au domaine réellement configuré
+dans Dokploy. Le Compose ne fournit pas d'authentification HTTP : l'isolation
+réseau ou le middleware Traefik constitue donc une barrière obligatoire et
+externe à l'application. La vérification TLS ne doit jamais être désactivée ;
+les quatre conteneurs montent le bundle de confiance en lecture seule.
+
+Le contrat Compose peut être vérifié sans démarrer les services :
 
 ```bash
-# développement : configuration locale ignorée par Git
-docker compose --project-name gta-dev \
-  --env-file infra/docker/environments/dev/compose.env \
-  --file infra/docker/compose.yaml \
-  --file infra/docker/environments/dev/compose.override.yaml \
-  up --detach --build --wait
-
-# staging : commit manifeste B de main + digests versionnés
-sudo docker compose --project-name gta-staging \
-  --env-file /etc/glpi-ticketing-automation/staging/compose.env \
-  --env-file infra/docker/environments/staging/versions.env \
-  --file infra/docker/compose.yaml \
-  --file infra/docker/environments/staging/compose.override.yaml \
-  up --detach --wait
-
-# production : checkout d'un tag mvp-vX.Y.Z + mêmes digests validés
-sudo docker compose --project-name gta-prod \
-  --env-file /etc/glpi-ticketing-automation/prod/compose.env \
-  --env-file infra/docker/environments/prod/versions.env \
-  --file infra/docker/compose.yaml \
-  --file infra/docker/environments/prod/compose.override.yaml \
-  up --detach --wait
+docker compose \
+  --env-file infra/docker/.env.example \
+  --file infra/docker/docker-compose.prod.yml \
+  config --quiet
 ```
 
-Ne lancez jamais `down -v` sur staging ou production : cette option supprime
-les volumes PostgreSQL et audio. Le runbook couvre la sauvegarde, la
-restauration, la mise à jour, le rollback, l'overlay de CA interne et l'unité
-systemd.
-
-Une livraison staging/prod exécute explicitement `docker compose pull` avant
-la commande `up` ci-dessus. Les overlays utilisent ensuite
-`pull_policy: missing` afin qu'un reboot puisse repartir du digest local si le
-registre est indisponible.
+Ne lancez jamais `docker compose down -v` : cette option supprimerait le
+volume audio persistant. La sauvegarde de PostgreSQL relève du service de base
+externe.
 
 ### Démarrage de l'application web du POC
 
@@ -513,8 +503,8 @@ uv run python -m glpi_ticketing_web
 
 Le serveur écoute uniquement sur `127.0.0.1:8000` par défaut. L'image construite
 par `infra/docker/web/Dockerfile` définit explicitement `WEB_HOST=0.0.0.0` dans
-le conteneur, mais Compose expose ce port uniquement à Nginx sur le réseau
-`web-private` et ne le publie jamais sur l'hôte. Le processus retourne `0`
+le conteneur ; le Compose expose ce port au Traefik de Dokploy sans le publier
+sur l'hôte. Le processus retourne `0`
 après l'arrêt normal, `1` pour une erreur inattendue, `2` pour une
 configuration invalide et `130` pour un `KeyboardInterrupt` non pris en charge
 par Uvicorn.
@@ -595,10 +585,10 @@ d'import `importlib`. Les marqueurs enregistrés sont :
 | Marqueur | Politique |
 | --- | --- |
 | `database` | Démarre un PostgreSQL 16 jetable et vérifie migrations, repositories, verrous et cycles applicatifs réels |
-| `deployment` | Valide les images, overlays, migrations, healthchecks et volumes du Compose MVP sans appeler les API externes |
+| `deployment` | Valide le Compose Dokploy, ses quatre images, la migration et le volume audio avec un PostgreSQL jetable |
 | `transcribe_ai` | Démarre une stack Transcribe AI v1 jetable et exécute le contrat POST/polling réel |
 | `glpi` | Démarre une seule stack GLPI 11/MySQL jetable et teste le client V2.3.0 réel |
-| `e2e` | Assemble la stack Compose MVP et les instances GLPI et Transcribe AI jetables ; cette suite de release reste strictement séquentielle |
+| `e2e` | Assemble les quatre applications et les instances PostgreSQL, GLPI et Transcribe AI jetables ; cette suite reste strictement séquentielle |
 
 La suite `database` lance une seule image PostgreSQL épinglée par digest sur un
 réseau privé et un port loopback aléatoire. Chaque test reçoit une base isolée,
@@ -636,13 +626,14 @@ session, une base PostgreSQL migrée et la vraie racine de composition du
 worker. Il conserve une régression directe du pipeline nominal sans démarrer
 la façade web ni les images du déploiement.
 
-La suite de release racine sous [`tests/e2e`](tests/e2e/README.md) assemble au
-contraire la stack Compose MVP complète — PostgreSQL, migration one-shot, web,
-deux workers et Nginx — avec les instances GLPI et Transcribe AI jetables. Le
-sous-jalon 8A porte le socle, ses sondes de disponibilité, ses identifiants
-éphémères et son nettoyage borné. Le sous-jalon 8B ajoute neuf scénarios métier
-sur l'upload, les retries, la reprise, les alertes et la purge. Toute la suite
-E2E s'exécute seule, sans `pytest-xdist` ni autre stack Docker concurrente. Son
+La suite E2E racine sous [`tests/e2e`](tests/e2e/README.md) construit les quatre
+applications du Compose, leur ajoute un PostgreSQL strictement jetable et les
+connecte aux instances GLPI et Transcribe AI de test. Le web est publié
+uniquement sur loopback ; le Traefik de Dokploy n'est pas simulé. Le sous-jalon
+8A porte le socle, ses sondes de disponibilité, ses identifiants éphémères et
+son nettoyage borné. Le sous-jalon 8B ajoute neuf scénarios métier sur
+l'upload, les retries, la reprise, les alertes et la purge. Toute la suite E2E
+s'exécute seule, sans `pytest-xdist` ni autre stack Docker concurrente. Son
 runbook de démonstration est disponible dans
 [`docs/mvp-demo-runbook.md`](docs/mvp-demo-runbook.md).
 

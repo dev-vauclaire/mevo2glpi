@@ -46,10 +46,10 @@ développement ni installation editable. Le runtime non-root exécute uniquement
 one-shot sans healthcheck ni politique de redémarrage.
 
 Cette application accède seulement à PostgreSQL. Elle ne monte pas le volume
-audio `/data/audios`. PostgreSQL doit être healthy avant son lancement et sa
-réussite conditionne le démarrage du web et des deux workers. Les commandes et
-fichiers propres aux environnements dev, staging et production sont décrits
-dans le [runbook Docker Compose](../../infra/docker/README.md).
+audio `/data/audios`. Elle attend elle-même la base externe dans un délai borné
+et sa réussite conditionne le démarrage du web et des deux workers. Le contrat
+est décrit dans la section
+[déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp).
 
 ## Historique courant
 

@@ -434,9 +434,9 @@ Le [Dockerfile du worker](../../infra/docker/worker-automation/Dockerfile)
 installe cette application sans dépendances de développement et l'exécute en
 non-root. Le volume partagé `/data/audios` est monté en lecture seule : le
 worker inspecte et transmet les octets, mais ne peut ni les modifier ni les
-supprimer. Le [runbook Docker Compose](../../infra/docker/README.md) décrit les
-commandes et configurations dev, staging et production ainsi que l'autorité de
-certification interne optionnelle.
+supprimer. Le [déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp)
+centralise sa configuration et monte le bundle de confiance interne en lecture
+seule sans désactiver la vérification TLS.
 
 Suite unitaire du workspace :
 

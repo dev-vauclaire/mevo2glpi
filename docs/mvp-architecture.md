@@ -183,35 +183,20 @@ pour le MVP.
 │       └── tests/                                     🟦 unités + stack GLPI jetable
 │
 ├── docs/
-│   └── mvp-architecture.md                            🟦
+│   ├── mvp-architecture.md                            🟦
+│   └── mvp-demo-runbook.md                            🟦 recette opérateur
 │
 ├── infra/docker/
-│   ├── compose.yaml                                   🟦 socle PostgreSQL + services
-│   ├── compose.internal-ca.yaml                       🟦 CA privée optionnelle
-│   ├── environments/
-│   │   ├── dev/
-│   │   │   ├── compose.override.yaml                  🟦 construction locale
-│   │   │   ├── compose.env.example                    🟦 chemins locaux
-│   │   │   └── services/*.env.example                 🟦 contrats applicatifs
-│   │   ├── staging/
-│   │   │   ├── compose.override.yaml                  🟦 déploiement depuis `main`
-│   │   │   ├── compose.env.example                    🟦 chemins `/etc`
-│   │   │   ├── services/*.env.example                 🟦 dont DB partagée
-│   │   │   └── versions.env                           🟦 digests promus
-│   │   └── prod/
-│   │       ├── compose.override.yaml                  🟦 déploiement depuis un tag MVP
-│   │       ├── compose.env.example                    🟦 chemins `/etc`
-│   │       ├── services/*.env.example                 🟦 dont DB partagée
-│   │       └── versions.env                           🟦 mêmes digests validés en staging
+│   ├── docker-compose.prod.yml                        🟦 contrat Dokploy unique
+│   ├── .env.example                                   🟦 configuration complète commentée
 │   ├── database-migrations/Dockerfile                 🟦
 │   ├── worker-automation/Dockerfile                   🟦
 │   ├── worker-retention/Dockerfile                    🟦
-│   ├── web/Dockerfile                                 🟦
-│   └── nginx/Dockerfile                               🟦
+│   └── web/Dockerfile                                 🟦
 │
 └── tests/
     ├── deployment/                                   🟦 smoke tests Compose MVP
-    └── e2e/                                          🟦 recette de release 8A + 8B
+    └── e2e/                                          🟦 recette métier 8A + 8B
 ```
 
 Les modèles sont séparés par table afin que chaque module porte ses colonnes,
@@ -242,8 +227,8 @@ le partagent, mais il reste un adaptateur HTTP indépendant de la persistance.
 
 ```mermaid
 flowchart LR
-    User[Intervenant]:::implemented --> Nginx[Nginx TLS + Basic Auth]:::implemented
-    Nginx --> Web[Application web]:::implemented
+    User[Intervenant]:::implemented --> Traefik[Traefik Dokploy]:::implemented
+    Traefik --> Web[Application web]:::implemented
 
     Web --> Audio[(Volume audio unique)]:::implemented
     Web --> Database[(PostgreSQL)]:::implemented
@@ -908,11 +893,11 @@ production ; elle est distincte de la rétention audio.
 
 ```mermaid
 flowchart TD
-    Postgres[PostgreSQL healthy]:::implemented --> Migration[Application database-migrations<br/>Alembic upgrade head terminé]:::implemented
+    Postgres[(PostgreSQL externe)]:::implemented --> Migration[Application database-migrations<br/>Alembic upgrade head terminé]:::implemented
     Migration --> Web[Web]:::implemented
     Migration --> Automation[Worker automation]:::implemented
     Migration --> Retention[Worker rétention]:::implemented
-    Web --> Nginx[Nginx healthy]:::implemented
+    Traefik[Traefik fourni par Dokploy]:::implemented --> Web
 
     classDef implemented fill:#dbeafe,stroke:#2563eb,color:#111827;
     classDef future fill:#fff,stroke:#64748b,color:#111827,stroke-dasharray:5 4;
@@ -924,68 +909,27 @@ réussie. Ils ne dépendent pas les uns des autres. Le service
 et des workers emploient la condition Compose
 `service_completed_successfully` pour ce service.
 
-Le premier déploiement MVP crée un volume PostgreSQL et un volume audio vides.
-Le Compose ne monte jamais les volumes historiques du POC et l'application de
-migration ne transforme pas leurs répertoires.
+Le Compose de production ne crée ni PostgreSQL ni reverse proxy. Il construit
+uniquement les quatre images applicatives et utilise une base déjà provisionnée
+via `DATABASE_URL`. Les quatre services rejoignent un réseau privé commun avec
+PostgreSQL ; seul le web rejoint aussi le réseau proxy de Dokploy et expose le
+port interne `8000` à Traefik, sans publier de port sur l'hôte.
 
-PostgreSQL est épinglé par tag et digest, possède son propre volume, un
-healthcheck ainsi qu'une procédure documentée de sauvegarde et restauration.
+Le premier déploiement crée seulement le volume audio nommé par
+`AUDIO_VOLUME_NAME`. La sauvegarde et le cycle de vie PostgreSQL appartiennent
+au service de base externe. Le Compose ne monte jamais les volumes historiques
+du POC.
 
-### Socle commun et overlays
+La configuration est centralisée dans `infra/docker/.env.example`, mais le
+Compose injecte explicitement à chaque conteneur uniquement les variables dont
+il a besoin. Les secrets GLPI et Transcribe AI ne sont donc pas transmis au web
+ou à l'application de migration. Un bundle de confiance monté en lecture seule
+conserve la vérification TLS avec les autorités internes.
 
-`infra/docker/compose.yaml` décrit les invariants des six services. Les
-overlays `dev`, `staging` et `prod` ne recopient pas ce socle : ils définissent
-uniquement les différences de construction, de publication des ports Nginx et
-de configuration propres à l'environnement. Un overlay optionnel
-`compose.internal-ca.yaml` ajoute un bundle de confiance sans désactiver la
-validation TLS.
-
-Chaque environnement emploie un projet Compose distinct (`gta-dev`,
-`gta-staging` ou `gta-prod`). Les noms réels des réseaux et des volumes sont
-donc préfixés par ce projet : une commande staging ne peut pas réutiliser par
-erreur `postgres-data` ou `audio-data` de production. Les tests de déploiement
-utilisent encore un quatrième projet jetable.
-
-PostgreSQL et les quatre applications partagent uniquement le réseau interne
-`database-private`. Nginx et le web communiquent sur `web-private` ; Nginx ne
-possède donc aucune route directe vers la base. Les workers rejoignent en plus
-`worker-egress` pour les API externes, tandis que seul Nginx rejoint
-`proxy-edge` et publie les ports HTTP et HTTPS. HTTP ne porte aucun trafic
-applicatif : il retourne un `308` vers le port HTTPS externe configuré, y
-compris lorsque celui-ci diffère de `443`.
-
-Les configurations et secrets réels de staging et production résident hors
-Git sous `/etc/glpi-ticketing-automation/<environnement>/`. Le dépôt conserve
-seulement les fichiers `*.example` et les `versions.env` de staging et
-production. Ces deux fichiers versionnés portent les digests immuables des
-images : une promotion vers la production reprend exactement les digests
-validés en staging, sans reconstruire depuis une autre révision.
-
-La livraison staging/prod exécute un `compose pull` explicite. Leur
-`pull_policy: missing` permet ensuite à un redémarrage hôte de réutiliser
-l'image en cache si le registre est indisponible ; l'épinglage par digest
-garantit que ce cache ne dérive pas.
-
-Chaque environnement possède un contrat `services/database.env.example`
-chargé par la migration, le web et les deux workers avant leur fichier propre.
-`DATABASE_URL` n'est donc défini qu'une fois par environnement ; les fichiers
-spécifiques conservent seulement les réglages de leur application.
-
-### Politique Git et promotion
-
-Le développement converge vers `main` par branches courtes. Un commit source
-`A` est construit une seule fois. Un second commit `B`, limité au manifeste de
-release, inscrit les digests obtenus dans les `versions.env` de staging et de
-production. Staging déploie `B` ; après validation, le tag immuable
-`mvp-vX.Y.Z` pointe vers `B` et la production réutilise les mêmes digests sans
-reconstruction. Le tag historique `poc-v0.1.0` reste une archive du POC à
-quatre répertoires et ne doit pas recevoir les overlays MVP.
-
-Cette promotion sépare trois identités complémentaires : le label OCI prouve
-quel commit source `A` a produit l'image, le tag Git autorise le manifeste `B`
-en production et les digests prouvent quels octets de conteneurs sont
-réellement exécutés. Réutiliser seulement un tag d'image mutable romprait cette
-chaîne ; reconstruire après la recette changerait les digests validés.
+Le développement converge vers `main` par branches courtes. Dokploy construit
+la révision Git sélectionnée ; un rollback redéploie le commit ou le tag Git
+précédemment validé. Ce contrat simple n'introduit ni registre d'images, ni
+manifeste de digests, ni branche d'environnement.
 
 ### Limite des droits PostgreSQL
 
@@ -1219,46 +1163,36 @@ heartbeat attendue.
 
 ### Itération 7 — Déploiement Docker Compose du MVP
 
-Périmètre : PostgreSQL, migration one-shot, deux workers, web, Nginx, volumes,
-healthchecks, politiques de redémarrage et documentation d'exploitation.
+Périmètre : migration one-shot, deux workers, web, volume audio, healthchecks
+et politiques de redémarrage. PostgreSQL et Traefik sont gérés par Dokploy en
+dehors de ce Compose.
 
-État : 🟦 implémenté sur la branche. Le manifeste commun et ses trois overlays
-forment désormais le seul déploiement actif de la branche MVP. Le déploiement
-POC reste consultable exclusivement depuis `poc-v0.1.0`.
+État : 🟦 implémenté sous la forme d'un unique
+`infra/docker/docker-compose.prod.yml` et d'un `.env.example` commenté.
 
-- Tests unitaires : validation ciblée des settings et des commandes d'entrée ;
-  aucun test Docker simulé.
-- Tests d'intégration : smoke test Compose, ordre de démarrage, échec de
-  migration bloquant, persistance après redémarrage, isolation des projets et
-  permissions des volumes.
-- Tests POC adaptés : `tests/deployment/test_compose.py` cible les six services,
-  la migration one-shot, PostgreSQL et le volume audio canonique. Les attentes
-  portant sur quatre répertoires et un worker unique sont supprimées parce que
-  leur intention est remplacée par les invariants PostgreSQL du MVP.
-- Code POC remplacé : l'ancien manifeste production, son overlay local, le
-  script de démarrage du worker et le script de préparation des quatre bind
-  mounts n'appartiennent plus aux manifestes actifs. Ils restent récupérables
-  avec le tag d'archive `poc-v0.1.0`.
-- Sortie : un hôte vierge peut initialiser la stack avec des secrets injectés.
+- Tests unitaires : validation ciblée des settings et des commandes d'entrée.
+- Tests de déploiement : rendu du Compose, ordre de démarrage, volume audio,
+  réseau externe, absence de ports publiés et isolation des secrets.
+- Sortie : Dokploy peut construire les quatre applications depuis le dépôt,
+  joindre une base existante et router le web sur son port interne `8000`.
 
-### Itération 8 — Validation E2E et publication du MVP
+### Itération 8 — Validation E2E du MVP
 
 Périmètre : scénario complet upload, retry, reprise, ticket GLPI, dashboard,
 fermeture du ticket, purge et audit persistant.
 
 L'itération est découpée en trois frontières afin de ne pas confondre un défaut
-de bootstrap Docker avec une régression métier ou un défaut de publication.
+de bootstrap Docker, une régression métier et un défaut du contrat Dokploy.
 
 #### Sous-jalon 8A — Socle E2E racine
 
-`tests/e2e` assemble la stack Compose MVP complète — PostgreSQL, migration
-one-shot, web, worker d'automatisation, worker de rétention et Nginx — avec les
-stacks GLPI et Transcribe AI jetables. Les ports, réseaux, volumes, bases et
-identifiants sont propres à la session. Les ports Nginx sont explicitement
-configurés et réservés par le harness avant le démarrage ; aucune configuration
-staging ou production n'est consommée. Le sous-jalon attend chaque service par
-une sonde bornée puis détruit les ressources qu'il a créées, mais ne porte
-encore aucun scénario métier.
+`tests/e2e` complète temporairement le Compose par un PostgreSQL jetable et un
+port web lié à loopback, puis le connecte aux stacks GLPI et Transcribe AI de
+test. Les ports, réseaux, volumes, bases et identifiants sont propres à la
+session. Traefik n'est pas simulé : ce jalon valide le pipeline métier et les
+images applicatives, pas l'installation Dokploy. Le sous-jalon attend chaque
+service par une sonde bornée puis détruit les ressources qu'il a créées, mais
+ne porte encore aucun scénario métier.
 
 La validation CPU est obligatoire et doit être exécutée seule, sans
 `pytest-xdist` :
@@ -1270,8 +1204,7 @@ uv run pytest -m e2e tests/e2e -vv --maxfail=1
 
 Le même socle peut être validé sur GPU en complément, jamais à la place du
 CPU, avec `TRANSCRIBE_AI_TEST_DEVICE=gpu`. Les identifiants sont exclusivement
-éphémères et ne doivent jamais provenir des fichiers `/etc` de staging ou de
-production.
+éphémères et ne doivent jamais provenir de l'environnement réel de Dokploy.
 
 #### Sous-jalon 8B — Scénarios métier
 
@@ -1298,8 +1231,23 @@ aucun reliquat dont l'intention serait remplacée par ces scénarios. Le runbook
 et les limites résiduelles sont consignés dans
 [`docs/mvp-demo-runbook.md`](mvp-demo-runbook.md).
 
-#### Sous-jalon 8C — Publication (à définir après 8A et 8B)
+#### Sous-jalon 8C — Déploiement Dokploy simplifié
 
-La publication des images, leur consommation par Dokploy et les règles de
-promotion entre environnements seront décidées après validation des scénarios
-métier. Le tag candidat validé pour cette publication est `mvp-v0.1.0`.
+Le déploiement repose sur un unique `infra/docker/docker-compose.prod.yml`.
+Dokploy clone le dépôt, construit les quatre Dockerfiles et fournit Traefik.
+Le Compose n'embarque donc ni Nginx, ni PostgreSQL, ni logique de publication
+vers un registre.
+
+L'opérateur renseigne `infra/docker/.env.example` dans Dokploy, connecte le
+PostgreSQL provisionné séparément au réseau privé indiqué, fournit le bundle CA
+attendu, puis associe un domaine interne au service `web` sur le port `8000`.
+La migration one-shot reste la barrière de démarrage des trois processus
+persistants.
+
+- Tests statiques : rendu Compose, liste exacte des quatre services, absence de
+  port hôte, de Nginx et de PostgreSQL, isolation des secrets et exhaustivité du
+  fichier d'environnement.
+- Tests E2E : PostgreSQL reste créé par la fixture jetable, hors du contrat de
+  production ; les scénarios métier 8B sont conservés.
+- Sortie : le même commit contient le Compose autonome et son contrat de
+  configuration, directement exploitables par un service Compose Dokploy.
