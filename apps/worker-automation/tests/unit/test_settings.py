@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from glpi_ticketing_glpi import TicketLevel, TicketType
-from glpi_ticketing_worker_automation.settings import WorkerSettings
+from glpi_ticketing_worker_automation.settings import WorkerLogLevel, WorkerSettings
 
 TRANSCRIPTION_BASE_URL = "https://transcription.example.test"
 TRANSCRIPTION_API_KEY = "synthetic-api-key"
@@ -74,6 +74,43 @@ def test_audio_root_can_be_overridden(
     )
 
     assert settings.audio_root == audio_root
+
+
+def test_worker_log_level_defaults_to_info(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("WORKER_LOG_LEVEL", raising=False)
+    monkeypatch.delenv("worker_log_level", raising=False)
+
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        _env_file=None,
+    )
+
+    assert settings.worker_log_level is WorkerLogLevel.INFO
+
+
+def test_worker_log_level_accepts_case_insensitive_environment_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WORKER_LOG_LEVEL", "debug")
+
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        _env_file=None,
+    )
+
+    assert settings.worker_log_level is WorkerLogLevel.DEBUG
+
+
+@pytest.mark.parametrize("invalid_level", ["TRACE", "WARNING", 10])
+def test_worker_log_level_rejects_unknown_value(invalid_level: object) -> None:
+    with pytest.raises(ValidationError, match="worker_log_level"):
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            worker_log_level=invalid_level,
+            _env_file=None,
+        )
 
 
 def test_worker_settings_read_environment_overrides(

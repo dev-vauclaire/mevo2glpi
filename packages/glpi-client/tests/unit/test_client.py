@@ -1,5 +1,7 @@
 import json
+import logging
 import math
+import ssl
 from collections.abc import Callable
 from inspect import signature
 from urllib.parse import parse_qs
@@ -338,6 +340,66 @@ def test_authenticate_classifies_transport_errors_without_leaking_secrets() -> N
     assert CLIENT_SECRET not in str(error)
 
 
+def test_debug_transport_diagnostic_exposes_tls_metadata_without_secrets(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        tls_error = ssl.SSLCertVerificationError(
+            1,
+            f"sensitive {PASSWORD} {CLIENT_SECRET}",
+        )
+        tls_error.verify_code = 20
+        tls_error.verify_message = "unable to get local issuer certificate"
+        raise httpx.ConnectError(
+            f"sensitive {PASSWORD} {CLIENT_SECRET}",
+            request=request,
+        ) from tls_error
+
+    client, http_client = make_glpi_client(handler)
+    with (
+        http_client,
+        caplog.at_level(logging.DEBUG, logger="glpi_ticketing_glpi.client"),
+        pytest.raises(GlpiTransportError),
+    ):
+        client.authenticate()
+
+    rendered = caplog.text
+    assert "GLPI transport diagnostic" in rendered
+    assert "operation=authenticate" in rendered
+    assert "host=glpi.example.test" in rendered
+    assert "error_type=ConnectError" in rendered
+    assert "root_cause_type=SSLCertVerificationError" in rendered
+    assert "tls_verify_code=20" in rendered
+    assert "tls_verify_message=unable to get local issuer certificate" in rendered
+    assert PASSWORD not in rendered
+    assert CLIENT_SECRET not in rendered
+    diagnostic_records = [
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("GLPI transport diagnostic")
+    ]
+    assert len(diagnostic_records) == 1
+    assert diagnostic_records[0].levelno == logging.DEBUG
+    assert diagnostic_records[0].exc_info is None
+
+
+def test_transport_diagnostic_is_silent_at_info(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("synthetic timeout", request=request)
+
+    client, http_client = make_glpi_client(handler)
+    with (
+        http_client,
+        caplog.at_level(logging.INFO, logger="glpi_ticketing_glpi.client"),
+        pytest.raises(GlpiTransportError),
+    ):
+        client.authenticate()
+
+    assert "GLPI transport diagnostic" not in caplog.text
+
+
 def test_get_ticket_uses_the_direct_id_endpoint() -> None:
     requests: list[httpx.Request] = []
 
@@ -544,14 +606,20 @@ def test_get_ticket_rejects_unexpected_success_or_redirect_statuses(
     assert error.retryable is False
 
 
-def test_get_ticket_classifies_transport_unavailability() -> None:
+def test_get_ticket_classifies_transport_unavailability(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == TOKEN_PATH:
             return token_response()
         raise httpx.ReadTimeout(f"sensitive {PASSWORD}", request=request)
 
     client, http_client = make_glpi_client(handler)
-    with http_client, pytest.raises(GlpiTransportError) as error_info:
+    with (
+        http_client,
+        caplog.at_level(logging.DEBUG, logger="glpi_ticketing_glpi.client"),
+        pytest.raises(GlpiTransportError) as error_info,
+    ):
         client.get_ticket(TicketId(73))
 
     error = error_info.value
@@ -560,6 +628,8 @@ def test_get_ticket_classifies_transport_unavailability() -> None:
     assert error.retryable is True
     assert error.outcome_unknown is False
     assert PASSWORD not in str(error)
+    assert "operation=get_ticket" in caplog.text
+    assert PASSWORD not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -779,7 +849,9 @@ def test_ensure_ticket_rejects_invalid_search_responses(payload: object) -> None
     assert error_info.value.category is GlpiErrorCategory.PROTOCOL
 
 
-def test_search_transport_error_never_creates_a_ticket() -> None:
+def test_search_transport_error_never_creates_a_ticket(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     request_methods: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -789,7 +861,11 @@ def test_search_transport_error_never_creates_a_ticket() -> None:
         raise httpx.ConnectError("GLPI unavailable", request=request)
 
     client, http_client = make_glpi_client(handler)
-    with http_client, pytest.raises(GlpiTransportError) as error_info:
+    with (
+        http_client,
+        caplog.at_level(logging.DEBUG, logger="glpi_ticketing_glpi.client"),
+        pytest.raises(GlpiTransportError) as error_info,
+    ):
         client.ensure_ticket(make_ticket_command())
 
     error = error_info.value
@@ -798,6 +874,39 @@ def test_search_transport_error_never_creates_a_ticket() -> None:
     assert error.retryable is True
     assert error.outcome_unknown is False
     assert request_methods == ["POST", "GET"]
+    assert "operation=find_ticket" in caplog.text
+
+
+def test_create_transport_diagnostic_identifies_the_ambiguous_operation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    get_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal get_count
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        if request.method == "GET":
+            get_count += 1
+            return httpx.Response(200, json=[])
+        raise httpx.ReadTimeout(
+            f"sensitive {PASSWORD} {CLIENT_SECRET}",
+            request=request,
+        )
+
+    client, http_client = make_glpi_client(handler)
+    with (
+        http_client,
+        caplog.at_level(logging.DEBUG, logger="glpi_ticketing_glpi.client"),
+        pytest.raises(GlpiCreateOutcomeUnknownError),
+    ):
+        client.ensure_ticket(make_ticket_command())
+
+    assert get_count == 2
+    assert "operation=create_ticket" in caplog.text
+    assert "error_type=ReadTimeout" in caplog.text
+    assert PASSWORD not in caplog.text
+    assert CLIENT_SECRET not in caplog.text
 
 
 @pytest.mark.parametrize(

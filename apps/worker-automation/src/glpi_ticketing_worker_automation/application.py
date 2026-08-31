@@ -18,10 +18,14 @@ from .runtime import (
     shutdown_signal_handlers,
     worker_runtime,
 )
-from .settings import WorkerSettings
+from .settings import WorkerLogLevel, WorkerSettings
 from .worker import run_forever
 
 LOGGER = logging.getLogger(__name__)
+_APPLICATION_LOGGER_NAMES = (
+    "glpi_ticketing_worker_automation",
+    "glpi_ticketing_glpi",
+)
 
 
 class WorkerExitCode(IntEnum):
@@ -44,6 +48,20 @@ class RuntimeFactoryProtocol(Protocol):
         wait_once: Callable[[float], object],
         should_stop: Callable[[], bool],
     ) -> AbstractContextManager[RuntimeAutomationWorkerProtocol]: ...
+
+
+class LoggingConfiguratorProtocol(Protocol):
+    """Apply the validated runtime level to application-owned loggers."""
+
+    def __call__(self, level: WorkerLogLevel) -> None: ...
+
+
+def configure_worker_logging(level: WorkerLogLevel) -> None:
+    """Configure only application namespaces, leaving dependencies quiet."""
+    if not isinstance(level, WorkerLogLevel):
+        raise TypeError("level must be a WorkerLogLevel")
+    for logger_name in _APPLICATION_LOGGER_NAMES:
+        logging.getLogger(logger_name).setLevel(level.value)
 
 
 def run_application(
@@ -76,6 +94,7 @@ def run_cli(
     signal_context_factory: Callable[
         [Event], AbstractContextManager[None]
     ] = shutdown_signal_handlers,
+    logging_configurator: LoggingConfiguratorProtocol = configure_worker_logging,
 ) -> WorkerExitCode:
     """Load configuration and run the worker with sanitized diagnostics."""
     try:
@@ -90,6 +109,7 @@ def run_cli(
         )
         return WorkerExitCode.UNEXPECTED_ERROR
 
+    logging_configurator(settings.worker_log_level)
     stop_event = Event()
     LOGGER.info("worker starting")
     try:
@@ -125,8 +145,10 @@ def main() -> int:
 
 
 __all__ = [
+    "LoggingConfiguratorProtocol",
     "RuntimeFactoryProtocol",
     "WorkerExitCode",
+    "configure_worker_logging",
     "main",
     "run_application",
     "run_cli",

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import html
+import logging
 import math
+import ssl
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -31,6 +33,8 @@ from .models import (
     TicketId,
     TicketStatus,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 GLPI_API_VERSION = "2.3.0"
 GLPI_API_ROOT = f"/api.php/v{GLPI_API_VERSION}"
@@ -120,7 +124,8 @@ class GlpiClient:
                     follow_redirects=False,
                 )
             )
-        except httpx.RequestError:
+        except httpx.RequestError as error:
+            self._log_transport_error(operation, error)
             raise GlpiTransportError(operation) from None
 
         if response.status_code != httpx.codes.OK:
@@ -230,7 +235,8 @@ class GlpiClient:
                     follow_redirects=False,
                 )
             )
-        except httpx.RequestError:
+        except httpx.RequestError as error:
+            self._log_transport_error(operation, error)
             raise GlpiTransportError(operation) from None
 
         if response.status_code == httpx.codes.UNAUTHORIZED:
@@ -284,7 +290,8 @@ class GlpiClient:
                     follow_redirects=False,
                 )
             )
-        except httpx.RequestError:
+        except httpx.RequestError as error:
+            self._log_transport_error(operation, error)
             raise GlpiTransportError(operation) from None
 
         if response.status_code not in {httpx.codes.OK, httpx.codes.PARTIAL_CONTENT}:
@@ -327,7 +334,8 @@ class GlpiClient:
                     follow_redirects=False,
                 )
             )
-        except httpx.RequestError:
+        except httpx.RequestError as error:
+            self._log_transport_error(operation, error)
             raise GlpiCreateOutcomeUnknownError(
                 category=GlpiErrorCategory.UNAVAILABLE,
                 technical_code="transport_error",
@@ -417,6 +425,43 @@ class GlpiClient:
         finally:
             self._ownership_guard()
 
+    def _log_transport_error(
+        self,
+        operation: GlpiOperation,
+        error: httpx.RequestError,
+    ) -> None:
+        """Log actionable transport metadata without request or secret values."""
+        exception_chain = _exception_chain(error)
+        root_cause = exception_chain[-1]
+        tls_error = next(
+            (
+                candidate
+                for candidate in reversed(exception_chain)
+                if isinstance(candidate, ssl.SSLCertVerificationError)
+            ),
+            None,
+        )
+        operating_system_error = next(
+            (
+                candidate
+                for candidate in reversed(exception_chain)
+                if isinstance(candidate, OSError)
+            ),
+            None,
+        )
+        LOGGER.debug(
+            "GLPI transport diagnostic operation=%s host=%s error_type=%s "
+            "root_cause_type=%s errno=%s tls_verify_code=%s "
+            "tls_verify_message=%s",
+            operation.value,
+            self._base_url.host,
+            type(error).__name__,
+            type(root_cause).__name__,
+            getattr(operating_system_error, "errno", None),
+            getattr(tls_error, "verify_code", None),
+            _safe_diagnostic_text(getattr(tls_error, "verify_message", None)),
+        )
+
 
 def _token_is_reusable(cached_token: _CachedOAuthToken, now: float) -> bool:
     renewal_skew = min(
@@ -424,6 +469,29 @@ def _token_is_reusable(cached_token: _CachedOAuthToken, now: float) -> bool:
         cached_token.token.expires_in_seconds * 0.1,
     )
     return now < cached_token.expires_at - renewal_skew
+
+
+def _exception_chain(error: BaseException) -> tuple[BaseException, ...]:
+    """Return a bounded, cycle-safe exception chain for metadata inspection."""
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and len(chain) < 8 and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__
+        if current is None and not chain[-1].__suppress_context__:
+            current = chain[-1].__context__
+    return tuple(chain)
+
+
+def _safe_diagnostic_text(value: object) -> str | None:
+    """Bound and flatten library-owned diagnostic text before logging it."""
+    if not isinstance(value, str) or not value:
+        return None
+    flattened = " ".join(value.splitlines())
+    printable = "".join(character for character in flattened if character.isprintable())
+    return printable[:160] or None
 
 
 def _build_ticket_content(command: GlpiTicketCreateCommand) -> str:

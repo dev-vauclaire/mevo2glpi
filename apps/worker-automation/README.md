@@ -398,6 +398,7 @@ Principaux réglages optionnels :
 | --- | ---: | --- |
 | `AUDIO_ROOT` | `/data/audios` | Racine du stockage canonique. |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Timeout de connexion PostgreSQL. |
+| `WORKER_LOG_LEVEL` | `INFO` | Niveau des logs applicatifs ; `DEBUG` ajoute des diagnostics GLPI réseau/TLS expurgés. |
 | `WORKER_HEARTBEAT_INTERVAL_SECONDS` | `10` | Cadence maximale des checkpoints de heartbeat pendant les attentes coopératives. |
 | `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS` | `45` | Âge maximal du heartbeat accepté par la sonde conteneur ; strictement supérieur à sa cadence. |
 | `WORKER_IDLE_INTERVAL_SECONDS` | `1` | Attente lorsqu'aucun job n'est éligible. |
@@ -415,6 +416,12 @@ Principaux réglages optionnels :
 
 Les secrets utilisent `SecretStr` et les erreurs de validation ne recopient
 pas les valeurs reçues. Aucun secret réel ne doit être ajouté au dépôt.
+
+Pour diagnostiquer temporairement un `transport_error` GLPI, définir
+`WORKER_LOG_LEVEL=DEBUG` puis redéployer le worker. Le diagnostic indique
+l'opération, l'hôte, les types d'exception, l'errno et les métadonnées de
+validation TLS disponibles. Il n'inclut ni headers, ni corps HTTP, ni URL
+complète, ni transcription. Revenir à `INFO` après l'investigation.
 
 ## Exécution et validation
 

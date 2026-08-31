@@ -23,6 +23,12 @@ puis transportées par `GlpiTicketCreateCommand` ; elles ne font pas partie de
 l'état du client HTTP.
 Les exceptions ne conservent ni corps HTTP brut ni secret.
 
+En niveau `DEBUG`, le client émet pour une erreur de transport un diagnostic
+expurgé : opération, hôte, types d'exception, `errno` et métadonnées de
+validation TLS disponibles. Le message brut de l'exception, les headers, les
+corps HTTP, les identifiants et les transcriptions ne sont jamais journalisés.
+Le niveau est configuré par l'application appelante.
+
 ## Validation
 
 Depuis la racine du workspace :

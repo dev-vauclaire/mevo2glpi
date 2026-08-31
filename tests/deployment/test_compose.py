@@ -172,6 +172,7 @@ def test_web_receives_no_provider_credentials(
     assert (
         "LEGACY_TRANSCRIPTION_API_KEY" in services["worker-automation"]["environment"]
     )
+    assert services["worker-automation"]["environment"]["WORKER_LOG_LEVEL"] == "INFO"
     assert (
         "LEGACY_TRANSCRIPTION_API_KEY"
         not in services["worker-retention"]["environment"]

@@ -94,6 +94,7 @@ services:
     environment:
       <<: [*database-environment, *glpi-environment]
       AUDIO_ROOT: /data/audios
+      WORKER_LOG_LEVEL: ${WORKER_LOG_LEVEL:-INFO}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL to the public Dokploy URL}
       DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
       WORKER_IDLE_INTERVAL_SECONDS: ${WORKER_IDLE_INTERVAL_SECONDS:-1}

@@ -391,6 +391,7 @@ FastAPI puis en serveur Uvicorn.
 | `DASHBOARD_PENDING_ALERT_AFTER_SECONDS` | web | Durée depuis la dernière entrée en `pending`, `900` secondes par défaut |
 | `DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS` | web | Grâce après l'échéance d'un retry job ou rétention, `60` secondes par défaut |
 | `DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS` | web | Grâce après une deadline audio, `120` secondes par défaut |
+| `WORKER_LOG_LEVEL` | worker d'automatisation | Niveau des logs applicatifs (`INFO` par défaut, `DEBUG` temporairement pour les diagnostics réseau/TLS expurgés) |
 | `WORKER_IDLE_INTERVAL_SECONDS` | worker | Attente lorsqu'aucun job n'est éligible, `1` seconde par défaut |
 | `WORKER_RETRY_INITIAL_SECONDS` | worker | Premier délai du backoff exponentiel, `5` secondes par défaut |
 | `WORKER_RETRY_MAX_SECONDS` | worker | Plafond du backoff, `300` secondes par défaut |

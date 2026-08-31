@@ -1,5 +1,6 @@
 """Typed configuration for the automation worker."""
 
+from enum import StrEnum
 from pathlib import Path
 from typing import Self
 
@@ -9,6 +10,13 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 from glpi_ticketing_glpi import TicketLevel, TicketType
+
+
+class WorkerLogLevel(StrEnum):
+    """Supported application log levels for the automation worker."""
+
+    DEBUG = "DEBUG"
+    INFO = "INFO"
 
 
 class WorkerSettings(BaseSettings):
@@ -28,6 +36,7 @@ class WorkerSettings(BaseSettings):
     public_base_url: HttpUrl
     database_url: SecretStr = Field(repr=False)
     audio_root: Path = Path("/data/audios")
+    worker_log_level: WorkerLogLevel = WorkerLogLevel.INFO
     database_connect_timeout_seconds: int = Field(default=5, gt=0)
     worker_idle_interval_seconds: float = Field(
         default=1.0,
@@ -104,6 +113,14 @@ class WorkerSettings(BaseSettings):
         if parsed_url.drivername != "postgresql+psycopg":
             raise ValueError("DATABASE_URL must use the postgresql+psycopg driver")
         return database_url
+
+    @field_validator("worker_log_level", mode="before")
+    @classmethod
+    def normalize_worker_log_level(cls, value: object) -> object:
+        """Accept conventional case-insensitive logging level names."""
+        if isinstance(value, str):
+            return value.strip().upper()
+        return value
 
     @field_validator(
         "database_connect_timeout_seconds",
