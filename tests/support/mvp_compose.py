@@ -17,6 +17,7 @@ import httpx
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker"
 BASE_COMPOSE_FILE = DOCKER_ROOT / "docker-compose.prod.yml"
+PRODUCTION_COMPOSE_SERVICES_FILE = DOCKER_ROOT / "docker-compose.prod.services.yml"
 CUSTOM_SERVICES = (
     "database-migrations",
     "web",
@@ -146,6 +147,8 @@ class MvpComposeEnvironment:
         command = [
             "docker",
             "compose",
+            "--project-directory",
+            str(REPOSITORY_ROOT),
             "--project-name",
             project_name or self.project_name,
             "--env-file",
@@ -514,8 +517,10 @@ def create_mvp_compose_environment(
     )
     test_override = _write_test_compose_override(runtime_root)
 
+    compose_environment_file = runtime_root / "compose.env"
     values = {
         "COMPOSE_PROJECT_NAME": project_name,
+        "GTA_DOKPLOY_ENV_FILE": str(compose_environment_file),
         "DOKPLOY_NETWORK_NAME": proxy_network_name,
         "DATABASE_NETWORK_NAME": database_network_name,
         "AUDIO_VOLUME_NAME": audio_volume_name,
@@ -568,7 +573,6 @@ def create_mvp_compose_environment(
         "GTA_E2E_POSTGRES_PORT": str(postgres_port),
         **(extra_compose_environment or {}),
     }
-    compose_environment_file = runtime_root / "compose.env"
     try:
         compose_environment_file.write_text(
             "\n".join(f"{name}={value}" for name, value in values.items()) + "\n",
@@ -678,11 +682,13 @@ secrets:
 __all__ = [
     "ALL_SERVICES",
     "BASE_COMPOSE_FILE",
+    "PRODUCTION_COMPOSE_SERVICES_FILE",
     "CONTROLLABLE_MVP_SERVICES",
     "CUSTOM_SERVICES",
     "DOCKER_ROOT",
     "MvpComposeEnvironment",
     "ProviderConfiguration",
+    "REPOSITORY_ROOT",
     "clean_environment",
     "create_mvp_compose_environment",
     "run_command",

@@ -14,6 +14,7 @@ from .conftest import (
     BASE_COMPOSE_FILE,
     CUSTOM_SERVICES,
     DOCKER_ROOT,
+    PRODUCTION_COMPOSE_SERVICES_FILE,
     DeploymentEnvironment,
 )
 
@@ -36,11 +37,29 @@ def _volume_for(service: dict[str, Any], target: str) -> dict[str, Any] | None:
 def test_production_manifest_contains_only_the_four_applications() -> None:
     assert BASE_COMPOSE_FILE == DOCKER_ROOT / "docker-compose.prod.yml"
     assert BASE_COMPOSE_FILE.is_file()
+    assert PRODUCTION_COMPOSE_SERVICES_FILE == (
+        DOCKER_ROOT / "docker-compose.prod.services.yml"
+    )
+    assert PRODUCTION_COMPOSE_SERVICES_FILE.is_file()
     assert (DOCKER_ROOT / ".env.example").is_file()
 
 
-def test_environment_example_documents_every_compose_variable_without_secrets() -> None:
+def test_production_entrypoint_explicitly_loads_dokploy_environment_file() -> None:
     compose_source = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
+
+    assert "include:" in compose_source
+    assert "path: ./infra/docker/docker-compose.prod.services.yml" in compose_source
+    assert "project_directory: ./infra/docker" in compose_source
+    assert "env_file: ${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}" in compose_source
+
+
+def test_environment_example_documents_every_compose_variable_without_secrets() -> None:
+    compose_source = "\n".join(
+        (
+            BASE_COMPOSE_FILE.read_text(encoding="utf-8"),
+            PRODUCTION_COMPOSE_SERVICES_FILE.read_text(encoding="utf-8"),
+        )
+    )
     example_source = (DOCKER_ROOT / ".env.example").read_text(encoding="utf-8")
     interpolated_names = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose_source))
     documented_values = dict(

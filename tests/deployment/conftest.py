@@ -12,6 +12,8 @@ from tests.support.mvp_compose import (
     BASE_COMPOSE_FILE,
     CUSTOM_SERVICES,
     DOCKER_ROOT,
+    PRODUCTION_COMPOSE_SERVICES_FILE,
+    REPOSITORY_ROOT,
     MvpComposeEnvironment,
     ProviderConfiguration,
     clean_environment,
@@ -31,6 +33,7 @@ def render_compose() -> Callable[[], dict[str, object]]:
         environment = {
             **clean_environment(),
             "COMPOSE_PROJECT_NAME": "gta-contract",
+            "GTA_DOKPLOY_ENV_FILE": str(DOCKER_ROOT / ".env.example"),
             "DOKPLOY_NETWORK_NAME": "gta-contract-dokploy",
             "DATABASE_NETWORK_NAME": "gta-contract-database",
             "AUDIO_VOLUME_NAME": "gta-contract-audio",
@@ -51,6 +54,8 @@ def render_compose() -> Callable[[], dict[str, object]]:
             [
                 "docker",
                 "compose",
+                "--project-directory",
+                str(REPOSITORY_ROOT),
                 "-f",
                 str(BASE_COMPOSE_FILE),
                 "config",
@@ -103,4 +108,5 @@ __all__ = [
     "CUSTOM_SERVICES",
     "DOCKER_ROOT",
     "DeploymentEnvironment",
+    "PRODUCTION_COMPOSE_SERVICES_FILE",
 ]

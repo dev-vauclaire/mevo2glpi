@@ -434,12 +434,19 @@ redéployer le commit ou le tag Git précédemment validé. Le tag historique
 
 ## Déploiement Dokploy du MVP
 
-Le fichier unique
-[`infra/docker/docker-compose.prod.yml`](infra/docker/docker-compose.prod.yml)
-contient quatre services : la migration Alembic one-shot, le web, le worker
-d'automatisation et le worker de rétention. PostgreSQL, GLPI et Transcribe AI
-sont externes au Compose. Les trois applications persistantes partagent le
-volume `audio-data` ; le worker d'automatisation le monte en lecture seule.
+Le point d'entrée unique fourni à Dokploy est
+[`infra/docker/docker-compose.prod.yml`](infra/docker/docker-compose.prod.yml).
+Il charge explicitement `infra/docker/.env`, puis inclut le fragment interne
+`docker-compose.prod.services.yml` qui contient la migration Alembic one-shot,
+le web, le worker d'automatisation et le worker de rétention. PostgreSQL, GLPI
+et Transcribe AI sont externes au Compose. Les trois applications persistantes
+partagent le volume `audio-data` ; le worker d'automatisation le monte en
+lecture seule.
+
+Ce wrapper contourne temporairement la régression
+[Dokploy #5252](https://github.com/Dokploy/dokploy/issues/5252) : depuis la
+version `0.30.3`, Dokploy peut créer le `.env` à côté du Compose tout en lançant
+Docker Compose avec la racine du dépôt comme répertoire de projet.
 
 Nginx n'est pas embarqué. Le web écoute sur le port interne `8000`, sans port
 hôte publié, et Dokploy configure son Traefik depuis l'onglet **Domains**. La
@@ -452,7 +459,9 @@ Configuration minimale dans Dokploy :
 2. utiliser le chemin `./infra/docker/docker-compose.prod.yml` ;
 3. copier et renseigner toutes les valeurs de
    [`infra/docker/.env.example`](infra/docker/.env.example) dans l'onglet
-   **Environment** ;
+   **Environment** ; Dokploy génère alors `./infra/docker/.env` et le wrapper
+   le charge explicitement malgré le `--project-directory` positionné à la
+   racine du dépôt ;
 4. créer le réseau privé `DATABASE_NETWORK_NAME`, y attacher le PostgreSQL
    externe et renseigner son URL dans `DATABASE_URL` ;
 5. rendre le bundle indiqué par `CA_BUNDLE_HOST_PATH` lisible sur l'hôte ; il
@@ -473,8 +482,8 @@ les quatre conteneurs montent le bundle de confiance en lecture seule.
 Le contrat Compose peut être vérifié sans démarrer les services :
 
 ```bash
-docker compose \
-  --env-file infra/docker/.env.example \
+GTA_DOKPLOY_ENV_FILE=./infra/docker/.env.example docker compose \
+  --project-directory . \
   --file infra/docker/docker-compose.prod.yml \
   config --quiet
 ```

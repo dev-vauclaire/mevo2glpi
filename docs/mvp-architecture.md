@@ -187,7 +187,8 @@ pour le MVP.
 │   └── mvp-demo-runbook.md                            🟦 recette opérateur
 │
 ├── infra/docker/
-│   ├── docker-compose.prod.yml                        🟦 contrat Dokploy unique
+│   ├── docker-compose.prod.yml                        🟦 point d'entrée Dokploy
+│   ├── docker-compose.prod.services.yml               🟦 services de production
 │   ├── .env.example                                   🟦 configuration complète commentée
 │   ├── database-migrations/Dockerfile                 🟦
 │   ├── worker-automation/Dockerfile                   🟦
@@ -920,10 +921,12 @@ Le premier déploiement crée seulement le volume audio nommé par
 au service de base externe. Le Compose ne monte jamais les volumes historiques
 du POC.
 
-La configuration est centralisée dans `infra/docker/.env.example`, mais le
-Compose injecte explicitement à chaque conteneur uniquement les variables dont
-il a besoin. Les secrets GLPI et Transcribe AI ne sont donc pas transmis au web
-ou à l'application de migration. Un bundle de confiance monté en lecture seule
+La configuration est centralisée dans `infra/docker/.env.example`. Le point
+d'entrée Compose charge explicitement le `.env` généré dans ce répertoire pour
+rester compatible avec le `--project-directory` racine de Dokploy. Le fragment
+de services injecte ensuite à chaque conteneur uniquement les variables dont il
+a besoin. Les secrets GLPI et Transcribe AI ne sont donc pas transmis au web ou
+à l'application de migration. Un bundle de confiance monté en lecture seule
 conserve la vérification TLS avec les autorités internes.
 
 Le développement converge vers `main` par branches courtes. Dokploy construit
@@ -1167,8 +1170,9 @@ Périmètre : migration one-shot, deux workers, web, volume audio, healthchecks
 et politiques de redémarrage. PostgreSQL et Traefik sont gérés par Dokploy en
 dehors de ce Compose.
 
-État : 🟦 implémenté sous la forme d'un unique
-`infra/docker/docker-compose.prod.yml` et d'un `.env.example` commenté.
+État : 🟦 implémenté sous la forme d'un point d'entrée Dokploy unique
+`infra/docker/docker-compose.prod.yml`, d'un fragment de services interne et
+d'un `.env.example` commenté.
 
 - Tests unitaires : validation ciblée des settings et des commandes d'entrée.
 - Tests de déploiement : rendu du Compose, ordre de démarrage, volume audio,
@@ -1233,10 +1237,12 @@ et les limites résiduelles sont consignés dans
 
 #### Sous-jalon 8C — Déploiement Dokploy simplifié
 
-Le déploiement repose sur un unique `infra/docker/docker-compose.prod.yml`.
-Dokploy clone le dépôt, construit les quatre Dockerfiles et fournit Traefik.
-Le Compose n'embarque donc ni Nginx, ni PostgreSQL, ni logique de publication
-vers un registre.
+Le déploiement expose un unique point d'entrée
+`infra/docker/docker-compose.prod.yml` à Dokploy. Ce wrapper charge
+explicitement `infra/docker/.env` et inclut le fragment des quatre services.
+Dokploy clone le dépôt, construit les quatre Dockerfiles et fournit Traefik. Le
+Compose n'embarque donc ni Nginx, ni PostgreSQL, ni logique de publication vers
+un registre.
 
 L'opérateur renseigne `infra/docker/.env.example` dans Dokploy, connecte le
 PostgreSQL provisionné séparément au réseau privé indiqué, fournit le bundle CA
