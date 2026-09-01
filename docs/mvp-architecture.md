@@ -1239,10 +1239,13 @@ et les limites résiduelles sont consignés dans
 
 Le déploiement expose un unique point d'entrée
 `infra/docker/docker-compose.prod.yml` à Dokploy. Ce wrapper charge
-explicitement `infra/docker/.env` et inclut le fragment des quatre services.
-Dokploy clone le dépôt, construit les quatre Dockerfiles et fournit Traefik. Le
-Compose n'embarque donc ni Nginx, ni PostgreSQL, ni logique de publication vers
-un registre.
+explicitement `infra/docker/.env`, expose les quatre noms de services au parseur
+de Dokploy et inclut le fragment qui porte leur configuration complète. La
+fusion des ressources homonymes requiert Docker Compose 5.0 ou ultérieur. La clé
+du réseau proxy reste `dokploy-network` afin de correspondre au réseau et au
+label Traefik injectés par Dokploy. Dokploy clone le dépôt, construit les quatre
+Dockerfiles et fournit Traefik. Le Compose n'embarque donc ni Nginx, ni
+PostgreSQL, ni logique de publication vers un registre.
 
 L'opérateur renseigne `infra/docker/.env.example` dans Dokploy, connecte le
 PostgreSQL provisionné séparément au réseau privé indiqué, fournit le bundle CA

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,7 +17,10 @@ from .conftest import (
     CUSTOM_SERVICES,
     DOCKER_ROOT,
     PRODUCTION_COMPOSE_SERVICES_FILE,
+    REPOSITORY_ROOT,
     DeploymentEnvironment,
+    clean_environment,
+    run_command,
 )
 
 pytestmark = [pytest.mark.deployment, pytest.mark.timeout(15 * 60)]
@@ -51,6 +56,74 @@ def test_production_entrypoint_explicitly_loads_dokploy_environment_file() -> No
     assert "path: ./infra/docker/docker-compose.prod.services.yml" in compose_source
     assert "project_directory: ./infra/docker" in compose_source
     assert "env_file: ${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}" in compose_source
+
+
+def test_production_entrypoint_exposes_services_to_dokploy() -> None:
+    compose_source = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
+    entrypoint_service_index = """services:
+  database-migrations: {}
+  web: {}
+  worker-automation: {}
+  worker-retention: {}
+"""
+
+    assert entrypoint_service_index in compose_source
+
+
+def test_dokploy_domain_patch_merges_with_web_configuration(tmp_path: Path) -> None:
+    compose_source = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
+    web_stub = "  web: {}\n"
+    assert compose_source.count(web_stub) == 1
+    compose_source = compose_source.replace(
+        web_stub,
+        """  web:
+    labels:
+      - traefik.docker.network=dokploy-network
+      - traefik.enable=true
+    networks:
+      - dokploy-network
+      - default
+""",
+        1,
+    ).replace(
+        "${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}",
+        "./infra/docker/.env.example",
+    )
+    compose_source += """
+networks:
+  dokploy-network:
+    external: true
+"""
+    patched_compose_file = tmp_path / "docker-compose.dokploy-domain.yml"
+    patched_compose_file.write_text(compose_source, encoding="utf-8")
+
+    result = run_command(
+        [
+            "docker",
+            "compose",
+            "--project-directory",
+            str(REPOSITORY_ROOT),
+            "--file",
+            str(patched_compose_file),
+            "config",
+            "--format",
+            "json",
+        ],
+        environment=clean_environment(),
+    )
+    config = json.loads(result.stdout)
+    services = _services(config)
+    web = services["web"]
+
+    assert set(services) == set(CUSTOM_SERVICES)
+    assert web["build"]["dockerfile"] == "infra/docker/web/Dockerfile"
+    assert web["read_only"] is True
+    assert web["depends_on"]["database-migrations"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert set(web["networks"]) == {"database", "default", "dokploy-network"}
+    assert web["labels"]["traefik.enable"] == "true"
+    assert config["networks"]["dokploy-network"]["name"] == "dokploy-network"
 
 
 def test_environment_example_documents_every_compose_variable_without_secrets() -> None:
@@ -111,14 +184,14 @@ def test_production_manifest_separates_proxy_and_database_networks(
     render_compose: Callable[[], dict[str, object]],
 ) -> None:
     config = render_compose()
-    assert set(config["networks"]) == {"database", "dokploy"}
+    assert set(config["networks"]) == {"database", "dokploy-network"}
     assert config["networks"]["database"]["name"] == "gta-contract-database"
     assert config["networks"]["database"]["external"] is True
-    assert config["networks"]["dokploy"]["name"] == "gta-contract-dokploy"
-    assert config["networks"]["dokploy"]["external"] is True
+    assert config["networks"]["dokploy-network"]["name"] == "gta-contract-dokploy"
+    assert config["networks"]["dokploy-network"]["external"] is True
     assert config["volumes"] == {"audio-data": {"name": "gta-contract-audio"}}
     services = _services(config)
-    assert set(services["web"]["networks"]) == {"database", "dokploy"}
+    assert set(services["web"]["networks"]) == {"database", "dokploy-network"}
     for service_name in (
         "database-migrations",
         "worker-automation",

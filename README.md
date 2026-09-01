@@ -335,8 +335,8 @@ construction et portent actuellement la version `0.1.0`.
 - uniquement pour les tests marqués `database`, `glpi`, `transcribe_ai` ou
   `e2e` : Docker avec le plugin Compose ;
 - uniquement pour construire ou déployer le MVP : Docker Engine avec le plugin
-  Compose, ou un serveur Dokploy opérationnel avec Traefik et un PostgreSQL
-  provisionné séparément ;
+  Compose 5.0 ou ultérieur, ou un serveur Dokploy doté de cette version de
+  Compose, de Traefik et d'un PostgreSQL provisionné séparément ;
 - uniquement pour `transcribe_ai` ou `e2e` : un hôte et un daemon Docker
   `linux/amd64`, ainsi qu'un accès réseau à chaque session pour le modèle
   Whisper ; le premier lancement télécharge aussi les images. Le mode GPU
@@ -436,12 +436,18 @@ redéployer le commit ou le tag Git précédemment validé. Le tag historique
 
 Le point d'entrée unique fourni à Dokploy est
 [`infra/docker/docker-compose.prod.yml`](infra/docker/docker-compose.prod.yml).
-Il charge explicitement `infra/docker/.env`, puis inclut le fragment interne
-`docker-compose.prod.services.yml` qui contient la migration Alembic one-shot,
-le web, le worker d'automatisation et le worker de rétention. PostgreSQL, GLPI
-et Transcribe AI sont externes au Compose. Les trois applications persistantes
-partagent le volume `audio-data` ; le worker d'automatisation le monte en
-lecture seule.
+Il déclare les quatre noms de services pour que Dokploy puisse les découvrir
+avant la résolution du manifeste, charge explicitement `infra/docker/.env`,
+puis inclut le fragment interne `docker-compose.prod.services.yml` qui contient
+leur configuration complète : migration Alembic one-shot, web, worker
+d'automatisation et worker de rétention. PostgreSQL, GLPI et Transcribe AI sont
+externes au Compose. Les trois applications persistantes partagent le volume
+`audio-data` ; le worker d'automatisation le monte en lecture seule.
+
+Les stubs et les définitions incluses portent volontairement les mêmes noms.
+Leur fusion nécessite Docker Compose 5.0 ou ultérieur. Le réseau proxy utilise
+la clé `dokploy-network`, identique à celle que Dokploy ajoute avec les labels
+Traefik lorsqu'un domaine est attaché au service `web`.
 
 Ce wrapper contourne temporairement la régression
 [Dokploy #5252](https://github.com/Dokploy/dokploy/issues/5252) : depuis la

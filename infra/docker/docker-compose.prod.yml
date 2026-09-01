@@ -1,5 +1,14 @@
 name: ${COMPOSE_PROJECT_NAME:-gta-prod}
 
+# Dokploy analyse uniquement ce point d'entrée pour valider les domaines, avant
+# que Docker Compose ne résolve l'include. Ces stubs rendent donc les quatre
+# services découvrables ; Compose 5+ les fusionne ensuite avec leur configuration.
+services:
+  database-migrations: {}
+  web: {}
+  worker-automation: {}
+  worker-retention: {}
+
 # Dokploy crée ce fichier à côté du point d'entrée Compose. L'include explicite
 # contourne la régression v0.30.3 lorsque --project-directory désigne la racine
 # du dépôt au lieu du répertoire contenant ce fichier.

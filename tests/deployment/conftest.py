@@ -109,4 +109,7 @@ __all__ = [
     "DOCKER_ROOT",
     "DeploymentEnvironment",
     "PRODUCTION_COMPOSE_SERVICES_FILE",
+    "REPOSITORY_ROOT",
+    "clean_environment",
+    "run_command",
 ]

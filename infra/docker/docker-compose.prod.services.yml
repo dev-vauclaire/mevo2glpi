@@ -81,7 +81,7 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
     networks:
       - database
-      - dokploy
+      - dokploy-network
     restart: unless-stopped
 
   worker-automation:
@@ -158,7 +158,7 @@ networks:
   database:
     name: ${DATABASE_NETWORK_NAME:-gta-database-network}
     external: true
-  dokploy:
+  dokploy-network:
     name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
     external: true
 
