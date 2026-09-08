@@ -9,8 +9,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
-DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-
 
 class WebSettings(BaseSettings):
     """Configuration required by the persistent web application."""
@@ -31,14 +29,13 @@ class WebSettings(BaseSettings):
     web_host: str = Field(default="127.0.0.1", min_length=1)
     web_port: int = Field(default=8000, ge=1, le=65535)
     web_trust_proxy_headers: bool = False
-    max_upload_bytes: int = Field(default=DEFAULT_MAX_UPLOAD_BYTES, gt=0)
     worker_heartbeat_interval_seconds: float = Field(default=10.0, gt=0)
     dashboard_worker_stale_after_seconds: float = Field(default=45.0, gt=0)
     dashboard_pending_alert_after_seconds: float = Field(default=900.0, gt=0)
     dashboard_retry_overdue_grace_seconds: float = Field(default=60.0, gt=0)
     dashboard_retention_deadline_grace_seconds: float = Field(default=120.0, gt=0)
 
-    @field_validator("web_port", "max_upload_bytes", mode="before")
+    @field_validator("web_port", mode="before")
     @classmethod
     def reject_boolean_integers(cls, value: object) -> object:
         """Reject booleans instead of silently treating them as integers."""

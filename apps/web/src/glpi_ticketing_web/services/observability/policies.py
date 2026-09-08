@@ -25,6 +25,7 @@ from .models import (
 )
 
 _EXPECTED_SERVICES = (
+    WorkerServiceName.PUBLISHER,
     WorkerServiceName.AUTOMATION,
     WorkerServiceName.RETENTION,
 )
@@ -119,6 +120,7 @@ class ObservabilityPolicy:
                 runtime_state=None,
                 last_heartbeat_at=None,
                 current_job_uuid=None,
+                current_ingestion_uuid=None,
                 last_error_category=None,
                 last_error_code=None,
             )
@@ -147,6 +149,7 @@ class ObservabilityPolicy:
             runtime_state=runtime.state,
             last_heartbeat_at=heartbeat_at,
             current_job_uuid=runtime.current_job_uuid,
+            current_ingestion_uuid=runtime.current_ingestion_uuid,
             last_error_category=error_category,
             last_error_code=error_code,
         )

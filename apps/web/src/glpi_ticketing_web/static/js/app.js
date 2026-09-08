@@ -2,7 +2,6 @@
 
 import { createDashboardController } from "./dashboard.js";
 import { createObservabilityController } from "./observability.js";
-import { createUploadController } from "./uploads.js";
 
 const REFRESH_INTERVAL_MS = 10000;
 const refreshButton = document.querySelector("[data-dashboard-refresh]");
@@ -108,17 +107,5 @@ window.addEventListener(
   },
   { once: true },
 );
-
-createUploadController({
-  form: document.querySelector("[data-upload-form]"),
-  fileInput: document.querySelector("[data-audio-input]"),
-  selectedFiles: document.querySelector("[data-selected-files]"),
-  resultsContainer: document.querySelector("[data-upload-results-container]"),
-  results: document.querySelector("[data-upload-results]"),
-  feedback: document.querySelector("[data-upload-feedback]"),
-  submitButton: document.querySelector("[data-upload-submit]"),
-  onAccepted: () =>
-    refreshApplication({ announce: false, onlyWhenIdle: true }),
-});
 
 refreshThenSchedule({ announce: true, onlyWhenIdle: false });

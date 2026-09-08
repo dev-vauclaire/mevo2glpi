@@ -128,7 +128,6 @@ h3 {
 
 .section-heading,
 .dialog-heading,
-.upload-form__actions,
 .pagination,
 .detail-actions {
   display: flex;
@@ -149,32 +148,6 @@ h3 {
   text-align: right;
 }
 
-.upload-form {
-  display: grid;
-  gap: 0.8rem;
-}
-
-.drop-zone {
-  display: grid;
-  gap: 0.35rem;
-  padding: 1.4rem;
-  border: 2px dashed #9fb6ce;
-  border-radius: 0.65rem;
-  background: #f8fbff;
-  cursor: pointer;
-  text-align: center;
-}
-
-.drop-zone:hover {
-  border-color: var(--primary);
-  background: #f1f7ff;
-}
-
-.drop-zone__title {
-  font-weight: 700;
-}
-
-.drop-zone__hint,
 .hint,
 .dashboard-feedback,
 .observability-feedback,
@@ -182,14 +155,6 @@ h3 {
 [data-events-feedback] {
   color: var(--muted);
   font-size: 0.9rem;
-}
-
-.file-input {
-  width: 100%;
-  padding: 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 0.45rem;
-  background: #fff;
 }
 
 .hint,
@@ -204,7 +169,7 @@ h3 {
 
 .worker-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
   margin-top: 1rem;
 }
@@ -442,55 +407,6 @@ h3 {
 .icon-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-.upload-results {
-  margin-top: 1.2rem;
-  padding-top: 1.2rem;
-  border-top: 1px solid var(--border);
-}
-
-.upload-list {
-  display: grid;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.upload-list__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.65rem 0.8rem;
-  border-left: 0.25rem solid #8091a5;
-  border-radius: 0.35rem;
-  background: #f5f7fa;
-}
-
-.upload-list__item[data-state="uploading"] {
-  border-left-color: #2e90fa;
-}
-
-.upload-list__item[data-state="accepted"] {
-  border-left-color: #079455;
-}
-
-.upload-list__item[data-state="failed"] {
-  border-left-color: #d92d20;
-}
-
-.upload-list__filename {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-weight: 650;
-}
-
-.upload-list__status {
-  color: var(--muted);
-  font-size: 0.85rem;
-  text-align: right;
 }
 
 .filters {
@@ -742,7 +658,6 @@ tbody tr:last-child td {
 @media (max-width: 48rem) {
   .app-header__content,
   .section-heading,
-  .upload-form__actions,
   .filters,
   .alerts__heading {
     align-items: stretch;
@@ -759,19 +674,10 @@ tbody tr:last-child td {
     text-align: left;
   }
 
-  .upload-form__actions .button,
   .filters .button {
     width: 100%;
   }
 
-  .upload-list__item {
-    align-items: start;
-    flex-direction: column;
-  }
-
-  .upload-list__status {
-    text-align: left;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

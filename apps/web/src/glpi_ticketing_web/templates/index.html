@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Dépôt et suivi des demandes de création de tickets GLPI."
+      content="Suivi opérationnel des demandes de création de tickets GLPI."
     >
     <title>Automatisation des tickets GLPI</title>
     <link rel="stylesheet" href="{{ request.url_for('static', path='/css/app.css') }}">
@@ -28,60 +28,9 @@
     <main class="page-shell">
       <noscript>
         <p class="notice notice--error">
-          JavaScript doit être activé pour déposer et suivre les fichiers audio.
+          JavaScript doit être activé pour consulter le tableau de suivi.
         </p>
       </noscript>
-
-      <section class="panel upload-panel" aria-labelledby="upload-title">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Nouveau traitement</p>
-            <h2 id="upload-title">Déposer des fichiers audio</h2>
-          </div>
-          <p class="section-heading__aside">
-            Jusqu’à 3 envois sont traités simultanément.
-          </p>
-        </div>
-
-        <form
-          class="upload-form"
-          action="{{ upload_path }}"
-          method="post"
-          enctype="multipart/form-data"
-          data-upload-form
-        >
-          <label class="drop-zone" for="audio-files">
-            <span class="drop-zone__title">Choisir un ou plusieurs audios</span>
-            <span class="drop-zone__hint">
-              WAV, MP3, OGG ou M4A — {{ max_upload_bytes }} octets maximum par fichier
-            </span>
-          </label>
-          <input
-            class="file-input"
-            id="audio-files"
-            name="audio_file"
-            type="file"
-            accept=".wav,.mp3,.ogg,.m4a"
-            data-audio-input
-            multiple
-            required
-          >
-          <div class="upload-form__actions">
-            <p class="hint" data-selected-files aria-live="polite">
-              Aucun fichier sélectionné.
-            </p>
-            <button class="button button--primary" type="submit" data-upload-submit>
-              Lancer les traitements
-            </button>
-          </div>
-        </form>
-
-        <div class="upload-results" data-upload-results-container hidden>
-          <h3>Résultat des envois</h3>
-          <p class="sr-only" data-upload-feedback aria-live="assertive"></p>
-          <ul class="upload-list" data-upload-results></ul>
-        </div>
-      </section>
 
       <section
         class="panel observability-panel"

@@ -7,9 +7,7 @@ const STATUS_MESSAGES = new Map([
   [404, "Le traitement demandé est introuvable."],
   [409, "L’état actuel du traitement ne permet pas cette opération."],
   [410, "L’audio de ce traitement a été supprimé."],
-  [413, "Le fichier dépasse la taille maximale autorisée."],
-  [415, "Ce format audio n’est pas pris en charge."],
-  [422, "Le fichier ou les paramètres fournis ne sont pas valides."],
+  [422, "Les paramètres fournis ne sont pas valides."],
   [503, "Le service est temporairement indisponible. Réessayez plus tard."],
 ]);
 
@@ -54,12 +52,6 @@ async function requestJson(path, options = {}) {
 
 function jobPath(audioUuid, suffix = "") {
   return `/api/jobs/${encodeURIComponent(audioUuid)}${suffix}`;
-}
-
-export function uploadAudio(file) {
-  const body = new FormData();
-  body.append("audio_file", file, file.name);
-  return requestJson("/api/jobs", { method: "POST", body });
 }
 
 export function listJobs({ limit = 25, state = "", audioUuid = "", cursor = "" }) {

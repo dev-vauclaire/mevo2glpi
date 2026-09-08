@@ -25,7 +25,6 @@ from .services import (
     ListAudioJobs,
     ObservabilityThresholds,
     RetryAudioJob,
-    SubmitAudioJob,
 )
 from .settings import WebSettings
 from .web import create_app
@@ -84,11 +83,6 @@ def build_application(settings: WebSettings) -> FastAPI:
         )
         return create_app(
             audio_root=audio_root,
-            submit_audio_job=SubmitAudioJob(
-                audio_root=audio_root,
-                session_factory=session_factory,
-                max_upload_bytes=settings.max_upload_bytes,
-            ),
             list_audio_jobs=ListAudioJobs(session_factory),
             get_audio_job=get_audio_job,
             list_audio_job_events=ListAudioJobEvents(session_factory),
@@ -105,7 +99,6 @@ def build_application(settings: WebSettings) -> FastAPI:
                 session_factory,
                 thresholds=observability_thresholds,
             ),
-            max_upload_bytes=settings.max_upload_bytes,
             shutdown_callback=engine.dispose,
         )
     except (DatabaseConfigurationError, OSError, RuntimeError, ValueError):
@@ -117,7 +110,7 @@ def build_application(settings: WebSettings) -> FastAPI:
 
 
 def build_server(settings: WebSettings) -> uvicorn.Server:
-    """Create the single-process Uvicorn server used by the POC."""
+    """Create the single-process Uvicorn server used by the MVP."""
     application = build_application(settings)
     config = uvicorn.Config(
         application,

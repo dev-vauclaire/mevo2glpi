@@ -25,7 +25,6 @@ def _settings(tmp_path: Path, **overrides: object) -> WebSettings:
         "database_url": DATABASE_URL,
         "web_host": "127.0.0.1",
         "web_port": 8765,
-        "max_upload_bytes": 4096,
     }
     values.update(overrides)
     return WebSettings(**values, _env_file=None)
@@ -38,7 +37,7 @@ def test_build_application_wires_settings_into_fastapi(tmp_path: Path) -> None:
 
     config = application.state.web_config
     assert config.audio_root == settings.audio_root.resolve()
-    assert config.max_upload_bytes == 4096
+    assert not hasattr(config, "max_upload_bytes")
 
 
 def test_build_server_uses_configured_bind_address(tmp_path: Path) -> None:

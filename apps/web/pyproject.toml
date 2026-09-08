@@ -1,7 +1,7 @@
 [project]
 name = "glpi-ticketing-web"
 version = "0.1.0"
-description = "Application web de dépôt et de consultation des audios"
+description = "Tableau web de consultation des traitements audio"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.116,<1",
@@ -9,7 +9,6 @@ dependencies = [
     "glpi-ticketing-database>=0.1,<0.2",
     "jinja2>=3.1,<4",
     "pydantic-settings>=2.10,<3",
-    "python-multipart>=0.0.20,<1",
     "uvicorn>=0.35,<1",
 ]
 

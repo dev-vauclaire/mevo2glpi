@@ -7,13 +7,11 @@ TEMPLATE_ROOT = ASSET_ROOT / "templates"
 JAVASCRIPT_ROOT = ASSET_ROOT / "static" / "js"
 
 
-def test_index_exposes_reusable_multi_audio_upload_and_dashboard() -> None:
+def test_index_exposes_read_only_dashboard_and_operator_retry() -> None:
     template = (TEMPLATE_ROOT / "index.html").read_text(encoding="utf-8")
 
-    assert 'action="{{ upload_path }}"' in template
-    assert 'name="audio_file"' in template
-    assert "multiple" in template
-    assert "data-upload-results" in template
+    assert "data-upload-form" not in template
+    assert 'name="audio_file"' not in template
     assert "data-jobs-table" in template
     assert "data-job-dialog" in template
     assert "data-job-events" in template
@@ -23,16 +21,6 @@ def test_index_exposes_reusable_multi_audio_upload_and_dashboard() -> None:
     assert "data-alert-empty" in template
     assert 'type="module"' in template
     assert "path='/js/app.js'" in template
-
-
-def test_upload_pool_limits_browser_concurrency_to_three() -> None:
-    uploads = (JAVASCRIPT_ROOT / "uploads.js").read_text(encoding="utf-8")
-
-    assert "MAX_CONCURRENT_UPLOADS = 3" in uploads
-    assert "Math.min(MAX_CONCURRENT_UPLOADS, files.length)" in uploads
-    assert "Promise.all" in uploads
-    assert 'form.addEventListener("submit"' in uploads
-    assert "form.reset()" in uploads
 
 
 def test_dashboard_uses_cursor_and_separate_event_endpoint() -> None:
@@ -126,10 +114,13 @@ def test_observability_names_every_alert_and_links_job_alerts_to_filters() -> No
     assert "Voir les traitements concernés" in observability
 
 
-def test_observability_renders_two_expected_workers_and_an_empty_state() -> None:
+def test_observability_renders_three_expected_workers_and_an_empty_state() -> None:
     observability = (JAVASCRIPT_ROOT / "observability.js").read_text(encoding="utf-8")
 
-    assert '"worker_automation", "worker_retention"' in observability
+    assert '"worker_publisher"' in observability
+    assert '"worker_automation"' in observability
+    assert '"worker_retention"' in observability
+    assert "worker.current_ingestion_uuid" in observability
     assert "orderedWorkers(workers)" in observability
     assert "alertEmpty.hidden = alerts.length > 0" in observability
     assert "alertCount.hidden = alerts.length === 0" in observability
@@ -160,3 +151,4 @@ def test_javascript_never_injects_server_content_as_html() -> None:
 def test_obsolete_confirmation_assets_are_removed() -> None:
     assert not (TEMPLATE_ROOT / "uploaded.html").exists()
     assert not (JAVASCRIPT_ROOT / "upload.js").exists()
+    assert not (JAVASCRIPT_ROOT / "uploads.js").exists()

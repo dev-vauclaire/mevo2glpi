@@ -27,7 +27,7 @@ class JobStage(StrEnum):
 
 
 class AudioFileExtension(StrEnum):
-    """Canonical audio extensions accepted by ingestion."""
+    """Canonical audio extensions persisted and served by the MVP."""
 
     WAV = "wav"
     MP3 = "mp3"
@@ -83,16 +83,12 @@ class JobEventName(StrEnum):
     AUDIO_DELETED = "audio_deleted"
 
 
-class JobAcceptedResponse(BaseModel):
-    """Durable ingestion acknowledgement."""
+class JobRetryAcceptedResponse(BaseModel):
+    """Representation returned after an operator retry is committed."""
 
     model_config = ConfigDict(frozen=True)
     audio_uuid: UUID
     state: JobState
-
-
-class JobRetryAcceptedResponse(JobAcceptedResponse):
-    """Representation returned after an operator retry is committed."""
 
 
 class JobSummaryResponse(BaseModel):
@@ -165,7 +161,6 @@ class JobEventListResponse(BaseModel):
 
 __all__ = [
     "AudioFileExtension",
-    "JobAcceptedResponse",
     "JobDetailResponse",
     "JobErrorScope",
     "JobEventActor",

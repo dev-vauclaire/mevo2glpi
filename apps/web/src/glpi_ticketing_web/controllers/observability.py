@@ -48,6 +48,7 @@ class ObservabilityController:
                     ),
                     last_heartbeat_at=worker.last_heartbeat_at,
                     current_job_uuid=worker.current_job_uuid,
+                    current_ingestion_uuid=worker.current_ingestion_uuid,
                     last_error_category=worker.last_error_category,
                     last_error_code=worker.last_error_code,
                 )

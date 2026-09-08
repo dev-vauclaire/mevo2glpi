@@ -97,6 +97,7 @@ class WorkerObservation:
     runtime_state: WorkerRuntimeState | None
     last_heartbeat_at: datetime | None
     current_job_uuid: UUID | None
+    current_ingestion_uuid: UUID | None
     last_error_category: str | None
     last_error_code: str | None
 

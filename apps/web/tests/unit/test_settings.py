@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from glpi_ticketing_web.settings import DEFAULT_MAX_UPLOAD_BYTES, WebSettings
+from glpi_ticketing_web.settings import WebSettings
 
 DATABASE_URL = "postgresql+psycopg://web:password@database:5432/jobs"
 
@@ -19,7 +19,6 @@ def test_web_settings_expose_canonical_storage_and_required_database(
         "WEB_HOST",
         "WEB_PORT",
         "WEB_TRUST_PROXY_HEADERS",
-        "MAX_UPLOAD_BYTES",
         "WORKER_HEARTBEAT_INTERVAL_SECONDS",
         "DASHBOARD_WORKER_STALE_AFTER_SECONDS",
         "DASHBOARD_PENDING_ALERT_AFTER_SECONDS",
@@ -38,7 +37,7 @@ def test_web_settings_expose_canonical_storage_and_required_database(
     assert settings.web_host == "127.0.0.1"
     assert settings.web_port == 8000
     assert settings.web_trust_proxy_headers is False
-    assert settings.max_upload_bytes == DEFAULT_MAX_UPLOAD_BYTES
+    assert not hasattr(settings, "max_upload_bytes")
     assert settings.worker_heartbeat_interval_seconds == 10.0
     assert settings.dashboard_worker_stale_after_seconds == 45.0
     assert settings.dashboard_pending_alert_after_seconds == 900.0
@@ -58,7 +57,6 @@ def test_web_settings_read_environment_overrides(
     monkeypatch.setenv("WEB_HOST", "0.0.0.0")
     monkeypatch.setenv("WEB_PORT", "8080")
     monkeypatch.setenv("WEB_TRUST_PROXY_HEADERS", "true")
-    monkeypatch.setenv("MAX_UPLOAD_BYTES", "4096")
     monkeypatch.setenv("WORKER_HEARTBEAT_INTERVAL_SECONDS", "8.5")
     monkeypatch.setenv("DASHBOARD_WORKER_STALE_AFTER_SECONDS", "35.5")
     monkeypatch.setenv("DASHBOARD_PENDING_ALERT_AFTER_SECONDS", "600")
@@ -72,7 +70,6 @@ def test_web_settings_read_environment_overrides(
     assert settings.web_host == "0.0.0.0"
     assert settings.web_port == 8080
     assert settings.web_trust_proxy_headers is True
-    assert settings.max_upload_bytes == 4096
     assert settings.worker_heartbeat_interval_seconds == 8.5
     assert settings.dashboard_worker_stale_after_seconds == 35.5
     assert settings.dashboard_pending_alert_after_seconds == 600
@@ -97,18 +94,6 @@ def test_web_database_url_requires_psycopg_without_exposing_its_value(
 
     if invalid_url:
         assert invalid_url not in str(captured_error.value)
-
-
-@pytest.mark.parametrize("invalid_limit", [0, -1, True])
-def test_web_upload_limit_must_be_a_positive_integer(
-    invalid_limit: int | bool,
-) -> None:
-    with pytest.raises(ValidationError):
-        WebSettings(
-            database_url=DATABASE_URL,
-            max_upload_bytes=invalid_limit,
-            _env_file=None,
-        )
 
 
 @pytest.mark.parametrize("invalid_port", [0, 65536, True])

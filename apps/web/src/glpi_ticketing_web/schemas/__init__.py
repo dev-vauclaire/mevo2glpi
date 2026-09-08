@@ -2,7 +2,6 @@
 
 from .jobs import (
     AudioFileExtension,
-    JobAcceptedResponse,
     JobDetailResponse,
     JobErrorScope,
     JobEventActor,
@@ -29,7 +28,6 @@ from .observability import (
 
 __all__ = [
     "AudioFileExtension",
-    "JobAcceptedResponse",
     "JobDetailResponse",
     "JobErrorScope",
     "JobEventActor",

@@ -100,7 +100,6 @@ def test_event_history_serializes_supported_event_actors(
         )
     )
     controller = JobController(
-        submit_audio_job=object(),  # type: ignore[arg-type]
         list_audio_jobs=object(),  # type: ignore[arg-type]
         get_audio_job=object(),  # type: ignore[arg-type]
         list_audio_job_events=event_service,  # type: ignore[arg-type]
@@ -139,7 +138,6 @@ def test_download_closes_audio_if_response_construction_fails(
         _stream=audio_stream,
     )
     controller = JobController(
-        submit_audio_job=object(),  # type: ignore[arg-type]
         list_audio_jobs=object(),  # type: ignore[arg-type]
         get_audio_job=object(),  # type: ignore[arg-type]
         list_audio_job_events=object(),  # type: ignore[arg-type]
@@ -212,7 +210,6 @@ def test_retry_translates_unknown_and_conflicting_jobs(
 
 def test_download_translates_storage_unavailability_to_503() -> None:
     controller = JobController(
-        submit_audio_job=object(),  # type: ignore[arg-type]
         list_audio_jobs=object(),  # type: ignore[arg-type]
         get_audio_job=object(),  # type: ignore[arg-type]
         list_audio_job_events=object(),  # type: ignore[arg-type]
@@ -308,7 +305,6 @@ def _controller(
     list_service: FakeListService | None = None,
 ) -> JobController:
     return JobController(
-        submit_audio_job=object(),  # type: ignore[arg-type]
         list_audio_jobs=list_service
         or FakeListService(JobListPage(items=(), next_cursor=None)),  # type: ignore[arg-type]
         get_audio_job=object(),  # type: ignore[arg-type]

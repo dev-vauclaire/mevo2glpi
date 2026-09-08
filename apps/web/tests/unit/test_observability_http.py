@@ -21,6 +21,7 @@ from glpi_ticketing_web.services import (
 
 NOW = datetime(2026, 8, 29, 12, tzinfo=UTC)
 JOB_UUID = UUID("e53683a9-f884-402c-acf8-e9ed5d9fe07c")
+INGESTION_UUID = UUID("04cb377a-6827-4e6d-845d-3ebd48dbd137")
 
 
 class FakeGetObservability:
@@ -38,11 +39,22 @@ def test_observability_controller_serializes_only_stable_sanitized_contract() ->
         observed_at=NOW,
         workers=(
             WorkerObservation(
+                service_name=WorkerServiceName.PUBLISHER,
+                heartbeat_status=HeartbeatStatus.FRESH,
+                runtime_state=WorkerRuntimeState.RUNNING,
+                last_heartbeat_at=NOW,
+                current_job_uuid=None,
+                current_ingestion_uuid=INGESTION_UUID,
+                last_error_category=None,
+                last_error_code=None,
+            ),
+            WorkerObservation(
                 service_name=WorkerServiceName.AUTOMATION,
                 heartbeat_status=HeartbeatStatus.FRESH,
                 runtime_state=WorkerRuntimeState.BLOCKED,
                 last_heartbeat_at=NOW,
                 current_job_uuid=JOB_UUID,
+                current_ingestion_uuid=None,
                 last_error_category="dependency_unavailable",
                 last_error_code="transcribe_unavailable",
             ),
@@ -52,6 +64,7 @@ def test_observability_controller_serializes_only_stable_sanitized_contract() ->
                 runtime_state=None,
                 last_heartbeat_at=None,
                 current_job_uuid=None,
+                current_ingestion_uuid=None,
                 last_error_category=None,
                 last_error_code=None,
             ),
@@ -76,11 +89,22 @@ def test_observability_controller_serializes_only_stable_sanitized_contract() ->
         "observed_at": "2026-08-29T12:00:00Z",
         "workers": [
             {
+                "service_name": "worker_publisher",
+                "heartbeat_status": "fresh",
+                "runtime_state": "running",
+                "last_heartbeat_at": "2026-08-29T12:00:00Z",
+                "current_job_uuid": None,
+                "current_ingestion_uuid": str(INGESTION_UUID),
+                "last_error_category": None,
+                "last_error_code": None,
+            },
+            {
                 "service_name": "worker_automation",
                 "heartbeat_status": "fresh",
                 "runtime_state": "blocked",
                 "last_heartbeat_at": "2026-08-29T12:00:00Z",
                 "current_job_uuid": str(JOB_UUID),
+                "current_ingestion_uuid": None,
                 "last_error_category": "dependency_unavailable",
                 "last_error_code": "transcribe_unavailable",
             },
@@ -90,6 +114,7 @@ def test_observability_controller_serializes_only_stable_sanitized_contract() ->
                 "runtime_state": None,
                 "last_heartbeat_at": None,
                 "current_job_uuid": None,
+                "current_ingestion_uuid": None,
                 "last_error_category": None,
                 "last_error_code": None,
             },

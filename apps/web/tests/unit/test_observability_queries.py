@@ -23,6 +23,7 @@ from glpi_ticketing_web.services import (
 NOW = datetime(2026, 8, 29, 12, tzinfo=UTC)
 INSTANCE_ID = UUID("e4b68965-df78-4d98-9c99-7ae9b32056a4")
 DEPLOYED_WORKER_SERVICES = (
+    WorkerServiceName.PUBLISHER,
     WorkerServiceName.AUTOMATION,
     WorkerServiceName.RETENTION,
 )

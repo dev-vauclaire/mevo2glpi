@@ -3,11 +3,10 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, File, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, Query, Request, Response, status
 
 from glpi_ticketing_web.controllers import JobController
 from glpi_ticketing_web.schemas import (
-    JobAcceptedResponse,
     JobDetailResponse,
     JobEventListResponse,
     JobListResponse,
@@ -22,18 +21,6 @@ PageCursor = Annotated[str | None, Query(min_length=1, max_length=512)]
 def create_jobs_router(controller: JobController) -> APIRouter:
     """Bind audio-job URLs to their controller."""
     router = APIRouter()
-
-    @router.post(
-        "/api/jobs",
-        response_model=JobAcceptedResponse,
-        status_code=status.HTTP_202_ACCEPTED,
-    )
-    def create_job(
-        request: Request,
-        response: Response,
-        audio_file: Annotated[UploadFile, File(description="Audio file to process")],
-    ) -> JobAcceptedResponse:
-        return controller.create_job(request, response, audio_file)
 
     @router.get("/api/jobs", response_model=JobListResponse)
     def list_jobs(

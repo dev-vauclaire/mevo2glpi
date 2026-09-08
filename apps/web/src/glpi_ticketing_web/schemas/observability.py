@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 class WorkerService(StrEnum):
     """Singleton workers expected by the MVP deployment."""
 
+    PUBLISHER = "worker_publisher"
     AUTOMATION = "worker_automation"
     RETENTION = "worker_retention"
 
@@ -23,7 +24,7 @@ class WorkerHeartbeatStatus(StrEnum):
 
 
 class WorkerRuntimeState(StrEnum):
-    """Stable runtime states emitted by the two workers."""
+    """Stable runtime states emitted by the three workers."""
 
     STARTING = "starting"
     RUNNING = "running"
@@ -67,6 +68,7 @@ class WorkerObservationResponse(BaseModel):
     runtime_state: WorkerRuntimeState | None
     last_heartbeat_at: datetime | None
     current_job_uuid: UUID | None
+    current_ingestion_uuid: UUID | None
     last_error_category: str | None
     last_error_code: str | None
 

@@ -2,9 +2,14 @@
 
 import { getObservability } from "./api.js";
 
-const EXPECTED_SERVICES = ["worker_automation", "worker_retention"];
+const EXPECTED_SERVICES = [
+  "worker_publisher",
+  "worker_automation",
+  "worker_retention",
+];
 
 const SERVICE_LABELS = new Map([
+  ["worker_publisher", "Worker de publication"],
   ["worker_automation", "Worker d’automatisation"],
   ["worker_retention", "Worker de rétention"],
 ]);
@@ -135,8 +140,14 @@ function createWorkerCard(worker, onFilterJobs) {
       ),
     );
     card.append(currentJob);
-  } else {
+  } else if (worker.service_name !== "worker_publisher") {
     appendMeta(card, "Traitement courant", null);
+  }
+
+  if (worker.current_ingestion_uuid) {
+    appendMeta(card, "Ingestion mail courante", worker.current_ingestion_uuid);
+  } else if (worker.service_name === "worker_publisher") {
+    appendMeta(card, "Ingestion mail courante", null);
   }
 
   const errorParts = [worker.last_error_category, worker.last_error_code].filter(
@@ -162,6 +173,7 @@ function orderedWorkers(workers) {
         runtime_state: null,
         last_heartbeat_at: null,
         current_job_uuid: null,
+        current_ingestion_uuid: null,
         last_error_category: null,
         last_error_code: null,
       },

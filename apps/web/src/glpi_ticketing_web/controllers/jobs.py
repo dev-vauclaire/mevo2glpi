@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import BinaryIO, cast
 from uuid import UUID
 
-from fastapi import HTTPException, Request, Response, UploadFile, status
+from fastapi import HTTPException, Request, Response, status
 
 from glpi_ticketing_web.controllers.responses import ManagedStreamingResponse
 from glpi_ticketing_web.schemas import (
     AudioFileExtension,
-    JobAcceptedResponse,
     JobDetailResponse,
     JobErrorScope,
     JobEventActor,
@@ -26,10 +24,8 @@ from glpi_ticketing_web.schemas import (
 )
 from glpi_ticketing_web.services import (
     AudioPurgedError,
-    AudioStorageConflictError,
     AudioStorageInvariantError,
     AudioStorageUnavailableError,
-    EmptyAudioError,
     GetAudioJob,
     GetDownloadableAudio,
     InvalidCursorError,
@@ -41,10 +37,6 @@ from glpi_ticketing_web.services import (
     ListAudioJobEvents,
     ListAudioJobs,
     RetryAudioJob,
-    SubmitAudioJob,
-    SubmittedJob,
-    UnsupportedAudioUploadError,
-    UploadTooLargeError,
 )
 
 _AUDIO_MEDIA_TYPES = {
@@ -61,38 +53,17 @@ class JobController:
     def __init__(
         self,
         *,
-        submit_audio_job: SubmitAudioJob,
         list_audio_jobs: ListAudioJobs,
         get_audio_job: GetAudioJob,
         list_audio_job_events: ListAudioJobEvents,
         retry_audio_job: RetryAudioJob,
         get_downloadable_audio: GetDownloadableAudio,
     ) -> None:
-        self._submit_audio_job = submit_audio_job
         self._list_audio_jobs = list_audio_jobs
         self._get_audio_job = get_audio_job
         self._list_audio_job_events = list_audio_job_events
         self._retry_audio_job = retry_audio_job
         self._get_downloadable_audio = get_downloadable_audio
-
-    def create_job(
-        self,
-        request: Request,
-        response: Response,
-        audio_file: UploadFile,
-    ) -> JobAcceptedResponse:
-        """Accept one API upload and return its durable job location."""
-        submitted_job = self._submit_upload(audio_file)
-        location = request.app.url_path_for(
-            "get_job",
-            audio_uuid=str(submitted_job.audio_uuid),
-        )
-        response.status_code = status.HTTP_202_ACCEPTED
-        response.headers["Location"] = str(location)
-        return JobAcceptedResponse(
-            audio_uuid=submitted_job.audio_uuid,
-            state=JobState(submitted_job.state.value),
-        )
 
     def list_jobs(
         self,
@@ -240,41 +211,6 @@ class JobController:
         except BaseException:
             downloadable.close()
             raise
-
-    def _submit_upload(self, audio_file: UploadFile) -> SubmittedJob:
-        try:
-            self._submit_audio_job.prevalidate(audio_file.filename)
-            return self._submit_audio_job.execute(
-                audio_file.filename,
-                cast(BinaryIO, audio_file.file),
-            )
-        except UnsupportedAudioUploadError as error:
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail="Unsupported audio file extension",
-            ) from error
-        except UploadTooLargeError as error:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail="Audio file exceeds the upload size limit",
-            ) from error
-        except EmptyAudioError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Audio file must not be empty",
-            ) from error
-        except AudioStorageConflictError as error:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Audio identifier conflict",
-            ) from error
-        except (AudioStorageUnavailableError, JobPersistenceUnavailableError) as error:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Audio job submission is temporarily unavailable",
-            ) from error
-        finally:
-            audio_file.file.close()
 
 
 def _summary_response(job: JobView) -> JobSummaryResponse:

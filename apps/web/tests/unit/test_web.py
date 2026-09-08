@@ -19,45 +19,17 @@ from glpi_ticketing_database import (
     RetentionStatus,
 )
 from glpi_ticketing_web.services import (
-    AudioStorageConflictError,
-    AudioStorageUnavailableError,
-    EmptyAudioError,
     GetDownloadableAudio,
     JobEventListPage,
     JobListPage,
-    JobPersistenceUnavailableError,
     JobQueryUnavailableError,
     JobView,
     ObservabilitySnapshot,
     RetriedJob,
-    SubmittedJob,
-    UnsupportedAudioUploadError,
-    UploadTooLargeError,
 )
 from glpi_ticketing_web.web import create_app
 
 SYNTHETIC_AUDIO = b"RIFF\x10\x00\x00\x00WAVEfmt \x00\x00\x00\x00data"
-MAX_UPLOAD_BYTES = 64
-
-
-@dataclass
-class FakeSubmitAudioJob:
-    results: list[SubmittedJob | Exception]
-    uploads: list[tuple[str | None, bytes]] = field(default_factory=list)
-    streams: list[BinaryIO] = field(default_factory=list)
-    prevalidated_filenames: list[str | None] = field(default_factory=list)
-
-    def prevalidate(self, filename: str | None) -> str:
-        self.prevalidated_filenames.append(filename)
-        return Path(filename).suffix.removeprefix(".").lower() if filename else ""
-
-    def execute(self, filename: str | None, source: BinaryIO) -> SubmittedJob:
-        self.streams.append(source)
-        self.uploads.append((filename, source.read()))
-        result = self.results.pop(0)
-        if isinstance(result, Exception):
-            raise result
-        return result
 
 
 @dataclass
@@ -99,7 +71,6 @@ class FakeGetObservability:
 class WebTestContext:
     client: TestClient
     audio_root: Path
-    submit: FakeSubmitAudioJob
     query: FakeGetAudioJob
 
 
@@ -107,26 +78,20 @@ class WebTestContext:
 def web_context(tmp_path: Path) -> Iterator[WebTestContext]:
     audio_root = tmp_path / "audios"
     audio_root.mkdir()
-    submit = FakeSubmitAudioJob(
-        results=[SubmittedJob(uuid4()), SubmittedJob(uuid4()), SubmittedJob(uuid4())]
-    )
     query = FakeGetAudioJob()
     app = create_app(
         audio_root=audio_root,
-        submit_audio_job=submit,
         list_audio_jobs=FakeListAudioJobs(),
         get_audio_job=query,
         list_audio_job_events=FakeListAudioJobEvents(),
         retry_audio_job=FakeRetryAudioJob(),
         get_downloadable_audio=GetDownloadableAudio(audio_root, query),
         get_observability=FakeGetObservability(),  # type: ignore[arg-type]
-        max_upload_bytes=MAX_UPLOAD_BYTES,
     )
     with TestClient(app) as client:
         yield WebTestContext(
             client=client,
             audio_root=audio_root,
-            submit=submit,
             query=query,
         )
 
@@ -150,71 +115,13 @@ def test_page_references_versioned_static_assets(
     assert web_context.client.get("/static/js/app.js").status_code == 200
 
 
-def test_api_upload_returns_202_uuid_state_and_resolvable_location(
+def test_api_job_collection_rejects_ingestion_posts(
     web_context: WebTestContext,
 ) -> None:
-    expected_uuid = web_context.submit.results[0].audio_uuid
-
-    response = _upload_audio(
-        web_context.client,
-        "/api/jobs",
-        "recording.wav",
-        SYNTHETIC_AUDIO,
-    )
-
-    assert response.status_code == 202
-    assert response.json() == {
-        "audio_uuid": str(expected_uuid),
-        "state": "pending",
-    }
-    assert response.headers["location"] == f"/api/jobs/{expected_uuid}"
-    assert web_context.submit.uploads == [("recording.wav", SYNTHETIC_AUDIO)]
-    assert web_context.submit.prevalidated_filenames == ["recording.wav"]
-    assert web_context.submit.streams[0].closed
-
-
-@pytest.mark.parametrize(
-    ("error", "expected_status"),
-    [
-        (UnsupportedAudioUploadError("secret"), 415),
-        (UploadTooLargeError("secret"), 413),
-        (EmptyAudioError("secret"), 422),
-        (AudioStorageConflictError("secret"), 409),
-        (AudioStorageUnavailableError("secret"), 503),
-        (JobPersistenceUnavailableError("database_write_failed"), 503),
-    ],
-)
-def test_upload_errors_are_sanitized(
-    tmp_path: Path,
-    error: Exception,
-    expected_status: int,
-) -> None:
-    audio_root = tmp_path / "audios"
-    audio_root.mkdir()
-    query = FakeGetAudioJob()
-    app = create_app(
-        audio_root=audio_root,
-        submit_audio_job=FakeSubmitAudioJob(results=[error]),
-        list_audio_jobs=FakeListAudioJobs(),
-        get_audio_job=query,
-        list_audio_job_events=FakeListAudioJobEvents(),
-        retry_audio_job=FakeRetryAudioJob(),
-        get_downloadable_audio=GetDownloadableAudio(audio_root, query),
-        get_observability=FakeGetObservability(),  # type: ignore[arg-type]
-    )
-
-    with TestClient(app) as client:
-        response = _upload_audio(client, "/api/jobs", "recording.wav", b"audio")
-
-    assert response.status_code == expected_status
-    assert "secret" not in response.text
-
-
-def test_api_upload_requires_multipart_audio_file(web_context: WebTestContext) -> None:
     response = web_context.client.post("/api/jobs")
 
-    assert response.status_code == 422
-    assert not web_context.submit.uploads
+    assert response.status_code == 405
+    assert response.headers["allow"] == "GET"
 
 
 def test_minimal_job_detail_returns_persisted_state(
@@ -388,18 +295,6 @@ def test_web_exposes_no_directory_derived_state(web_context: WebTestContext) -> 
     assert not hasattr(config, "completed_directory")
     assert not hasattr(config, "failed_directory")
     assert all("failed" not in path for path in openapi_paths)
-
-
-def _upload_audio(
-    client: TestClient,
-    path: str,
-    filename: str,
-    content: bytes,
-):
-    return client.post(
-        path,
-        files={"audio_file": (filename, content, "application/octet-stream")},
-    )
 
 
 def _job_snapshot(

@@ -11,20 +11,14 @@ class PageController:
         self,
         *,
         templates: Jinja2Templates,
-        max_upload_bytes: int,
     ) -> None:
         self._templates = templates
-        self._max_upload_bytes = max_upload_bytes
 
     def index(self, request: Request) -> Response:
-        """Render the audio upload page."""
+        """Render the read-only operations dashboard."""
         return self._templates.TemplateResponse(
             request=request,
             name="index.html",
-            context={
-                "max_upload_bytes": self._max_upload_bytes,
-                "upload_path": request.app.url_path_for("create_job"),
-            },
         )
 
 

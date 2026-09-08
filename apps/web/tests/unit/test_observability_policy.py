@@ -24,7 +24,9 @@ from glpi_ticketing_web.services import (
 NOW = datetime(2026, 8, 29, 12, tzinfo=UTC)
 INSTANCE_ID = UUID("e4b68965-df78-4d98-9c99-7ae9b32056a4")
 JOB_UUID = UUID("e53683a9-f884-402c-acf8-e9ed5d9fe07c")
+INGESTION_UUID = UUID("04cb377a-6827-4e6d-845d-3ebd48dbd137")
 DEPLOYED_WORKER_SERVICES = (
+    WorkerServiceName.PUBLISHER,
     WorkerServiceName.AUTOMATION,
     WorkerServiceName.RETENTION,
 )
@@ -46,6 +48,7 @@ def test_absent_workers_are_always_projected_once(
     )
 
     assert [worker.service_name for worker in snapshot.workers] == [
+        WorkerServiceName.PUBLISHER,
         WorkerServiceName.AUTOMATION,
         WorkerServiceName.RETENTION,
     ]
@@ -54,13 +57,14 @@ def test_absent_workers_are_always_projected_once(
     )
     assert [alert.key for alert in snapshot.alerts] == [
         "workers:worker_automation",
+        "workers:worker_publisher",
         "workers:worker_retention",
     ]
     assert all(alert.kind is AlertKind.WORKER_ABSENT for alert in snapshot.alerts)
     assert all(alert.condition_since is None for alert in snapshot.alerts)
 
 
-def test_future_publisher_heartbeat_does_not_break_current_dashboard(
+def test_publisher_heartbeat_exposes_current_ingestion(
     policy: ObservabilityPolicy,
 ) -> None:
     publisher = WorkerRuntimeSnapshot(
@@ -69,7 +73,7 @@ def test_future_publisher_heartbeat_does_not_break_current_dashboard(
         state=WorkerRuntimeState.RUNNING,
         last_heartbeat_at=NOW,
         current_job_uuid=None,
-        current_ingestion_uuid=JOB_UUID,
+        current_ingestion_uuid=INGESTION_UUID,
         last_error_category=None,
         last_error_code=None,
         updated_at=NOW,
@@ -77,15 +81,30 @@ def test_future_publisher_heartbeat_does_not_break_current_dashboard(
 
     snapshot = policy.evaluate(
         observed_at=NOW,
-        runtimes=(*_healthy_runtimes(), publisher),
+        runtimes=(
+            publisher,
+            _runtime(
+                WorkerServiceName.AUTOMATION,
+                state=WorkerRuntimeState.RUNNING,
+                heartbeat_at=NOW,
+            ),
+            _runtime(
+                WorkerServiceName.RETENTION,
+                state=WorkerRuntimeState.RUNNING,
+                heartbeat_at=NOW,
+            ),
+        ),
         jobs=_empty_jobs(),
         retentions=_empty_retentions(),
     )
 
     assert tuple(worker.service_name for worker in snapshot.workers) == (
+        WorkerServiceName.PUBLISHER,
         WorkerServiceName.AUTOMATION,
         WorkerServiceName.RETENTION,
     )
+    assert snapshot.workers[0].current_job_uuid is None
+    assert snapshot.workers[0].current_ingestion_uuid == INGESTION_UUID
     assert snapshot.alerts == ()
 
 
@@ -111,10 +130,14 @@ def test_heartbeat_is_fresh_at_exact_threshold_and_stale_after_it(
         retentions=_empty_retentions(),
     )
 
-    assert snapshot.workers[0].heartbeat_status is HeartbeatStatus.FRESH
-    assert snapshot.workers[1].heartbeat_status is HeartbeatStatus.STALE
-    assert [alert.kind for alert in snapshot.alerts] == [AlertKind.WORKER_STALE]
-    assert snapshot.alerts[0].condition_since == NOW - timedelta(microseconds=1)
+    assert snapshot.workers[0].heartbeat_status is HeartbeatStatus.ABSENT
+    assert snapshot.workers[1].heartbeat_status is HeartbeatStatus.FRESH
+    assert snapshot.workers[2].heartbeat_status is HeartbeatStatus.STALE
+    assert [alert.kind for alert in snapshot.alerts] == [
+        AlertKind.WORKER_ABSENT,
+        AlertKind.WORKER_STALE,
+    ]
+    assert snapshot.alerts[1].condition_since == NOW - timedelta(microseconds=1)
 
 
 def test_stopped_state_has_priority_over_stale_heartbeat(
@@ -138,8 +161,11 @@ def test_stopped_state_has_priority_over_stale_heartbeat(
         retentions=_empty_retentions(),
     )
 
-    assert snapshot.workers[0].heartbeat_status is HeartbeatStatus.STALE
-    assert [alert.kind for alert in snapshot.alerts] == [AlertKind.WORKER_STOPPED]
+    assert snapshot.workers[1].heartbeat_status is HeartbeatStatus.STALE
+    assert [alert.kind for alert in snapshot.alerts] == [
+        AlertKind.WORKER_STOPPED,
+        AlertKind.WORKER_ABSENT,
+    ]
 
 
 def test_worker_diagnostics_are_defensively_sanitized(
@@ -166,10 +192,10 @@ def test_worker_diagnostics_are_defensively_sanitized(
         retentions=_empty_retentions(),
     )
 
-    assert snapshot.workers[0].last_error_category is None
-    assert snapshot.workers[0].last_error_code is None
-    assert snapshot.workers[1].last_error_category == "dependency_unavailable"
-    assert snapshot.workers[1].last_error_code == "glpi_unavailable"
+    assert snapshot.workers[1].last_error_category is None
+    assert snapshot.workers[1].last_error_code is None
+    assert snapshot.workers[2].last_error_category == "dependency_unavailable"
+    assert snapshot.workers[2].last_error_code == "glpi_unavailable"
     assert secret not in repr(snapshot)
     by_kind = {alert.kind: alert for alert in snapshot.alerts}
     assert by_kind[AlertKind.WORKER_BLOCKED].severity is AlertSeverity.CRITICAL
@@ -289,8 +315,12 @@ def _runtime(
         instance_id=INSTANCE_ID,
         state=state,
         last_heartbeat_at=heartbeat_at,
-        current_job_uuid=JOB_UUID,
-        current_ingestion_uuid=None,
+        current_job_uuid=(
+            None if service_name is WorkerServiceName.PUBLISHER else JOB_UUID
+        ),
+        current_ingestion_uuid=(
+            INGESTION_UUID if service_name is WorkerServiceName.PUBLISHER else None
+        ),
         last_error_category=error[0] if error is not None else None,
         last_error_code=error[1] if error is not None else None,
         updated_at=heartbeat_at,

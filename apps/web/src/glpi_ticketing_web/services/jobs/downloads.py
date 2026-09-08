@@ -22,6 +22,15 @@ from .models import (
     JobView,
 )
 
+_DOWNLOADABLE_RETENTION_STATUSES = frozenset(
+    {
+        RetentionStatus.SCHEDULED,
+        RetentionStatus.CHECKING,
+        RetentionStatus.RETRY_SCHEDULED,
+        RetentionStatus.BLOCKED,
+    }
+)
+
 
 class _AudioJobReader(Protocol):
     def execute(self, audio_uuid: UUID) -> JobView | None:
@@ -48,9 +57,9 @@ class GetDownloadableAudio:
             RetentionStatus.DELETED,
         }:
             raise AudioPurgedError("Audio has been purged")
-        if job.retention_status is None:
+        if job.retention_status not in _DOWNLOADABLE_RETENTION_STATUSES:
             raise AudioStorageInvariantError(
-                "Completed audio has no retention lifecycle"
+                "Completed audio has no active retention lifecycle"
             )
 
         try:

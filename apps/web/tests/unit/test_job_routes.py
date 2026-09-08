@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from glpi_ticketing_web.routes.jobs import create_jobs_router
 
 
-def test_job_routes_expose_dashboard_events_retry_and_no_html_post() -> None:
+def test_job_routes_expose_read_only_collection_and_operator_retry() -> None:
     router = create_jobs_router(object())  # type: ignore[arg-type]
     route_methods = {
         (route.path, method)
@@ -13,7 +13,7 @@ def test_job_routes_expose_dashboard_events_retry_and_no_html_post() -> None:
         for method in (route.methods or set())
     }
 
-    assert ("/api/jobs", "POST") in route_methods
+    assert ("/api/jobs", "POST") not in route_methods
     assert ("/api/jobs", "GET") in route_methods
     assert ("/api/jobs/{audio_uuid}", "GET") in route_methods
     assert ("/api/jobs/{audio_uuid}/events", "GET") in route_methods

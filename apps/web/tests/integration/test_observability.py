@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from glpi_ticketing_database import (
     AudioRetention,
+    MailIngestion,
     TicketCreationJob,
     WorkerRuntimeStatus,
     create_session_factory,
@@ -67,6 +68,7 @@ def test_observability_endpoint_combines_workers_jobs_and_retentions(
     rearmed_uuid = uuid4()
     blocked_uuid = uuid4()
     completed_uuid = uuid4()
+    ingestion_uuid = uuid4()
     with observability_context.session_factory.begin() as session:
         session.add_all(
             [
@@ -119,6 +121,20 @@ def test_observability_endpoint_combines_workers_jobs_and_retentions(
             ]
         )
         session.flush()
+        session.add(
+            MailIngestion(
+                uuid=ingestion_uuid,
+                mailbox_id=uuid4(),
+                message_id="synthetic-immutable-message-id",
+                status="processing",
+                stage="validation",
+                attempt_count=1,
+                received_at=OBSERVED_AT - timedelta(minutes=2),
+                first_started_at=OBSERVED_AT - timedelta(minutes=1),
+                updated_at=OBSERVED_AT - timedelta(seconds=5),
+            )
+        )
+        session.flush()
         session.add_all(
             [
                 AudioRetention(
@@ -128,6 +144,14 @@ def test_observability_endpoint_combines_workers_jobs_and_retentions(
                     hard_delete_at=OBSERVED_AT - timedelta(minutes=10),
                     created_at=OBSERVED_AT - timedelta(days=1),
                     updated_at=OBSERVED_AT - timedelta(days=1),
+                ),
+                WorkerRuntimeStatus(
+                    service_name="worker_publisher",
+                    instance_id=uuid4(),
+                    state="running",
+                    last_heartbeat_at=OBSERVED_AT - timedelta(seconds=5),
+                    current_ingestion_uuid=ingestion_uuid,
+                    updated_at=OBSERVED_AT - timedelta(seconds=5),
                 ),
                 WorkerRuntimeStatus(
                     service_name="worker_automation",
@@ -147,11 +171,22 @@ def test_observability_endpoint_combines_workers_jobs_and_retentions(
     assert body["observed_at"] == "2026-08-29T12:00:00Z"
     assert body["workers"] == [
         {
+            "service_name": "worker_publisher",
+            "heartbeat_status": "fresh",
+            "runtime_state": "running",
+            "last_heartbeat_at": "2026-08-29T11:59:55Z",
+            "current_job_uuid": None,
+            "current_ingestion_uuid": str(ingestion_uuid),
+            "last_error_category": None,
+            "last_error_code": None,
+        },
+        {
             "service_name": "worker_automation",
             "heartbeat_status": "fresh",
             "runtime_state": "running",
             "last_heartbeat_at": "2026-08-29T11:59:15Z",
             "current_job_uuid": str(blocked_uuid),
+            "current_ingestion_uuid": None,
             "last_error_category": None,
             "last_error_code": None,
         },
@@ -161,6 +196,7 @@ def test_observability_endpoint_combines_workers_jobs_and_retentions(
             "runtime_state": None,
             "last_heartbeat_at": None,
             "current_job_uuid": None,
+            "current_ingestion_uuid": None,
             "last_error_category": None,
             "last_error_code": None,
         },
@@ -213,7 +249,7 @@ def test_observability_endpoint_combines_workers_jobs_and_retentions(
 
     assert stale_response.status_code == 200
     stale_body = stale_response.json()
-    assert stale_body["workers"][0]["heartbeat_status"] == "stale"
+    assert stale_body["workers"][1]["heartbeat_status"] == "stale"
     stale_alerts = {alert["key"]: alert for alert in stale_body["alerts"]}
     assert stale_alerts["workers:worker_automation"] == {
         "key": "workers:worker_automation",

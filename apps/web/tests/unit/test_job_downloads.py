@@ -65,11 +65,16 @@ def test_missing_or_wrong_sized_completed_audio_is_an_invariant_error(
         GetDownloadableAudio(audio_root, FakeReader(job)).execute(AUDIO_UUID)
 
 
-def test_completed_audio_without_retention_is_an_invariant_error(
+@pytest.mark.parametrize(
+    "retention_status",
+    [None, RetentionStatus.INACTIVE],
+)
+def test_completed_audio_without_active_retention_is_an_invariant_error(
     tmp_path: Path,
+    retention_status: RetentionStatus | None,
 ) -> None:
     audio_root = _root(tmp_path)
-    job = _job(retention_status=None)
+    job = _job(retention_status=retention_status)
     (audio_root / f"{AUDIO_UUID}.wav").write_bytes(AUDIO)
 
     with pytest.raises(AudioStorageInvariantError):
@@ -104,15 +109,25 @@ def test_known_non_completed_audio_is_not_downloadable(tmp_path: Path) -> None:
     assert result is None
 
 
-def test_download_uses_persisted_size_and_closes_after_iteration(
+@pytest.mark.parametrize(
+    "retention_status",
+    [
+        RetentionStatus.SCHEDULED,
+        RetentionStatus.CHECKING,
+        RetentionStatus.RETRY_SCHEDULED,
+        RetentionStatus.BLOCKED,
+    ],
+)
+def test_active_retention_download_uses_size_and_closes_after_iteration(
     tmp_path: Path,
+    retention_status: RetentionStatus,
 ) -> None:
     audio_root = _root(tmp_path)
     (audio_root / f"{AUDIO_UUID}.wav").write_bytes(AUDIO)
 
     downloadable = GetDownloadableAudio(
         audio_root,
-        FakeReader(_job()),
+        FakeReader(_job(retention_status=retention_status)),
     ).execute(AUDIO_UUID)
 
     assert downloadable is not None

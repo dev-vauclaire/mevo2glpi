@@ -19,24 +19,8 @@ from glpi_ticketing_database import (
 )
 
 
-class UploadTooLargeError(ValueError):
-    """Report an upload exceeding the configured byte limit."""
-
-
-class UnsupportedAudioUploadError(ValueError):
-    """Report an upload filename whose extension is not supported."""
-
-
-class EmptyAudioError(ValueError):
-    """Report an empty upload, which cannot become a lifecycle job."""
-
-
 class AudioStorageUnavailableError(RuntimeError):
-    """Report a sanitized failure to publish or clean audio storage."""
-
-
-class AudioStorageConflictError(RuntimeError):
-    """Report that a generated canonical storage destination already exists."""
+    """Report a sanitized failure to access canonical audio storage."""
 
 
 class AudioStorageInvariantError(RuntimeError):
@@ -65,14 +49,6 @@ class InvalidCursorError(ValueError):
 
 class JobRetryConflictError(RuntimeError):
     """Report that a job cannot safely be rearmed by an operator."""
-
-
-@dataclass(frozen=True, slots=True)
-class SubmittedJob:
-    """Stable result returned after accepting a new audio job."""
-
-    audio_uuid: UUID
-    state: JobStatus = JobStatus.PENDING
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,11 +138,9 @@ class JobEventListPage:
 
 __all__ = [
     "AudioPurgedError",
-    "AudioStorageConflictError",
     "AudioStorageInvariantError",
     "AudioStorageUnavailableError",
     "DownloadableAudio",
-    "EmptyAudioError",
     "InvalidCursorError",
     "JobEventListPage",
     "JobEventView",
@@ -176,7 +150,4 @@ __all__ = [
     "JobRetryConflictError",
     "JobView",
     "RetriedJob",
-    "SubmittedJob",
-    "UnsupportedAudioUploadError",
-    "UploadTooLargeError",
 ]
