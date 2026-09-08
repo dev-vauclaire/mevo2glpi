@@ -188,6 +188,20 @@ class MailIngestionRepository:
             resumed=resumed,
         )
 
+    def get_next_system_retry_at(self) -> datetime | None:
+        """Return the earliest systemic retry deadline that gates new work."""
+        statement = (
+            select(MailIngestion.next_attempt_at)
+            .where(
+                MailIngestion.status == MailIngestionStatus.RETRY_SCHEDULED.value,
+                MailIngestion.last_error_scope == MailIngestionErrorScope.SYSTEM.value,
+                MailIngestion.next_attempt_at.is_not(None),
+            )
+            .order_by(MailIngestion.next_attempt_at)
+            .limit(1)
+        )
+        return self._session.scalar(statement)
+
     def record_attachment_validated(
         self,
         ingestion_uuid: UUID,

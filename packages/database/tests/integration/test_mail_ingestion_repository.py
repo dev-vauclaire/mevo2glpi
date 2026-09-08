@@ -176,12 +176,9 @@ def test_future_system_retry_prevents_claiming_another_message(
             now=NOW,
         )
     with session_factory.begin() as session:
-        assert (
-            MailIngestionRepository(session).resume_or_claim_next(
-                NOW + timedelta(seconds=30)
-            )
-            is None
-        )
+        repository = MailIngestionRepository(session)
+        assert repository.resume_or_claim_next(NOW + timedelta(seconds=30)) is None
+        assert repository.get_next_system_retry_at() == NOW + timedelta(minutes=1)
 
     with session_factory() as session:
         pending = session.get(MailIngestion, pending_uuid)

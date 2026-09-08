@@ -89,11 +89,11 @@ def parse_audio_filename(name_or_path: str | Path) -> AudioFileName:
 
 
 def build_audio_storage_key(audio_uuid: UUID, extension: str) -> str:
-    """Build a canonical key from a UUID and an upload extension.
+    """Build a canonical key from a UUID and a source-file extension.
 
-    The upload boundary may provide an extension with a leading dot or uppercase
-    characters. The persisted key is always normalized and is validated again
-    before being returned.
+    The ingestion boundary may provide an extension with a leading dot or
+    uppercase characters. The persisted key is always normalized and is
+    validated again before being returned.
     """
     if not isinstance(audio_uuid, UUID):
         raise TypeError("audio_uuid must be a UUID")

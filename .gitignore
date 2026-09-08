@@ -22,6 +22,10 @@ dist/
 .env
 .env.*
 !.env.example
+*.key
+*.pem
+*.p12
+*.pfx
 /infra/docker/.env
 /infra/docker/.env.*
 !/infra/docker/.env.example

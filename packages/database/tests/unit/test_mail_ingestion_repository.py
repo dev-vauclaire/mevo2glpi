@@ -167,6 +167,18 @@ def test_future_system_retry_suspends_pending_fanout() -> None:
     session.flush.assert_not_called()
 
 
+def test_next_system_retry_deadline_is_exposed_without_mutation() -> None:
+    session = _session()
+    expected_deadline = NOW + timedelta(minutes=1)
+    session.scalar.return_value = expected_deadline
+
+    deadline = MailIngestionRepository(session).get_next_system_retry_at()
+
+    assert deadline == expected_deadline
+    session.scalar.assert_called_once()
+    session.flush.assert_not_called()
+
+
 def test_pending_claim_enters_validation_and_initializes_attempt_timestamps() -> None:
     session = _session()
     pending = _ingestion(
