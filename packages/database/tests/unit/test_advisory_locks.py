@@ -42,17 +42,24 @@ def test_unavailable_lock_closes_its_candidate_connection() -> None:
 
 
 def test_worker_services_use_distinct_stable_lock_keys() -> None:
-    first_engine, first_connection = _engine_and_connection()
-    second_engine, second_connection = _engine_and_connection()
-    first_connection.scalar.side_effect = [False, 10]
-    second_connection.scalar.side_effect = [False, 11]
+    expected_keys = {
+        WorkerServiceName.AUTOMATION: 0x4754415F4155544F,
+        WorkerServiceName.RETENTION: 0x4754415F5245544E,
+        WorkerServiceName.PUBLISHER: 0x4754415F5055424C,
+    }
+    observed_keys: dict[WorkerServiceName, int] = {}
 
-    try_acquire_advisory_lock(first_engine, WorkerServiceName.AUTOMATION)
-    try_acquire_advisory_lock(second_engine, WorkerServiceName.RETENTION)
+    for backend_pid, service_name in enumerate(WorkerServiceName, start=10):
+        engine, connection = _engine_and_connection()
+        connection.scalar.side_effect = [False, backend_pid]
 
-    first_parameters = first_connection.scalar.call_args_list[0].args[1]
-    second_parameters = second_connection.scalar.call_args_list[0].args[1]
-    assert first_parameters["lock_key"] != second_parameters["lock_key"]
+        try_acquire_advisory_lock(engine, service_name)
+
+        parameters = connection.scalar.call_args_list[0].args[1]
+        observed_keys[service_name] = parameters["lock_key"]
+
+    assert observed_keys == expected_keys
+    assert len(set(observed_keys.values())) == len(expected_keys)
 
 
 def test_replaced_backend_connection_is_observable_and_fails_closed() -> None:

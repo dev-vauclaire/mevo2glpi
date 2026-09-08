@@ -1,8 +1,9 @@
 # Package `glpi-ticketing-database`
 
 `glpi-ticketing-database` porte les contrats SQLAlchemy partagés par le web,
-le worker d'automatisation, le worker de rétention et l'application de
-migration du MVP.
+les workers et l'application de migration du MVP. Le jalon P0 y ajoute le
+socle persistant destiné au futur worker publisher ; l'accès à Exchange et le
+pipeline Microsoft Graph ne font pas partie de ce package.
 
 Le package ne contient ni point d'entrée ni historique Alembic. L'application
 one-shot `apps/database-migrations` est seule responsable de l'exécution des
@@ -11,11 +12,13 @@ par modèle, et les verrous advisory protègent l'unicité des workers persistan
 
 ## Responsabilités
 
-- déclarer les quatre tables persistantes du cycle de vie ;
+- déclarer les six tables persistantes des cycles de vie métier ;
 - exposer `Base.metadata` à Alembic ;
 - fournir un moteur SQLAlchemy synchrone limité à PostgreSQL avec Psycopg 3 ;
 - fournir une fabrique de sessions synchrones ;
 - créer et faire évoluer un job sans modifier implicitement un autre modèle ;
+- enregistrer séparément l'ingestion d'un message Exchange, y compris lorsqu'il
+  ne peut produire aucun job ;
 - ajouter séparément des événements append-only et des politiques de
   rétention dans la transaction appartenant à l'application ;
 - persister l'identifiant Transcribe AI dès la soumission et l'identifiant
@@ -41,7 +44,9 @@ ces modèles.
 | `ticket_creation_jobs` | Source de vérité du traitement audio vers GLPI |
 | `audio_retentions` | Planification et audit de la suppression des octets audio |
 | `ticket_creation_job_events` | Historique append-only affiché par le dashboard |
-| `worker_runtime_status` | Dernier heartbeat des deux workers singleton |
+| `worker_runtime_status` | Dernier heartbeat des services worker singleton |
+| `mail_ingestions` | État durable et expurgé de l'acquisition d'un message Exchange |
+| `mail_ingestion_events` | Historique append-only des transitions d'une ingestion |
 
 Les valeurs d'état utilisent des colonnes `VARCHAR` et des contraintes
 `CHECK`, pas des enums natifs PostgreSQL. Les UUID utilisent le type UUID natif
@@ -87,6 +92,61 @@ L'index `(status, updated_at DESC, job_uuid DESC)` couvre les agrégats par éta
 du dashboard lorsque les lignes `deleted` commencent à s'accumuler. Les
 deadlines et retries continuent d'utiliser leurs index partiels dédiés.
 
+## Contrat d'ingestion des messages
+
+`MailIngestion` et `TicketCreationJob` décrivent deux réalités distinctes. Une
+ingestion représente un message source découvert dans une boîte Exchange ; un
+job représente uniquement un audio valide publié pour le pipeline de création
+de ticket. Un message rejeté, par exemple sans WAV valide, reste donc
+observable dans `mail_ingestions` sans créer artificiellement de
+`ticket_creation_jobs`.
+
+L'identité idempotente d'une source est la paire
+`(mailbox_id, message_id)` : `mailbox_id` est l'UUID de la boîte et
+`message_id` l'identifiant immuable fourni par Microsoft Graph. La contrainte
+unique PostgreSQL compare l'identifiant de message avec la collation `C`, donc
+de manière exacte et sensible à la casse. Deux messages distincts peuvent
+produire deux jobs même si leurs pièces jointes ont le même contenu. À
+l'inverse, redécouvrir le même message dans la même boîte ne peut pas créer une
+seconde ingestion. `attachment_id` utilise la même comparaison sensible à la
+casse, mais ne participe pas à l'identité puisque le contrat métier prévoit
+une seule pièce jointe WAV par message.
+
+La colonne `job_uuid` est nullable, unique et liée à
+`ticket_creation_jobs.uuid` :
+
+- une disposition `accepted` exige une pièce jointe validée et un job ;
+- une disposition `rejected` exige une catégorie et un code expurgés et
+  interdit tout job ;
+- la disposition reste nulle tant qu'aucune décision locale durable n'a été
+  prise.
+
+Une décision `accepted` ou `rejected` fait passer l'ingestion à l'étape
+`acknowledgement`. Cette séparation permet à l'application appelante de
+persister son résultat local avant de déplacer le message à distance. Si
+l'acquittement Exchange est interrompu, l'ingestion conserve sa disposition et
+peut reprendre uniquement cette étape, sans republier l'audio ni recréer le
+job. L'état terminal `completed` confirme l'acquittement d'une ingestion
+acceptée ; `failed` confirme celui d'un message rejeté. `blocked` signale une
+continuation automatique devenue ambiguë, tandis que `retry_scheduled`
+conserve la prochaine échéance et une erreur technique expurgée.
+
+`MailIngestionRepository.resume_or_claim_next()` reprend dans cet ordre une
+ingestion `processing`, un retry arrivé à échéance, puis le plus ancien message
+`pending`. L'index unique partiel sur l'état `processing` matérialise le contrat
+P0 d'un seul traitement publisher à la fois. Un retry de portée `system`
+suspend l'acquisition de nouveaux messages en attente afin de ne pas propager
+une panne commune à toute la file.
+
+`MailIngestionEvent` conserve l'audit append-only de ces transitions. Il ne
+stocke que les UUID, états, étapes, dispositions et erreurs expurgées : ni
+sujet, ni expéditeur, ni corps du message, ni contenu audio, ni réponse HTTP
+brute. Son repository n'altère jamais `MailIngestion`.
+
+Ces modèles constituent uniquement le contrat de persistance P0. Le client
+Microsoft Graph, la validation WAV, le déplacement des messages et
+l'application `worker-publisher` seront ajoutés dans les jalons suivants.
+
 ## Cycle de vie du worker d'automatisation
 
 `TicketCreationJobRepository.resume_or_claim_next()` sélectionne atomiquement
@@ -110,6 +170,12 @@ le chemin exact avec le package commun.
 Les repositories n'appellent jamais `commit()`. Ils valident et `flush()` les
 mutations dans la session fournie, ce qui laisse la frontière transactionnelle
 au service appelant.
+
+Cette convention vaut également pour les ingestions :
+`MailIngestionRepository` ne crée ni `TicketCreationJob` ni événement, et
+`MailIngestionEventRepository` ne modifie que `MailIngestionEvent`. La création
+atomique d'un job, de son événement `JOB_CREATED`, du lien d'ingestion et de
+l'événement d'ingestion appartient au service applicatif appelant.
 
 ## Lecture dashboard et relance opérateur
 
@@ -172,14 +238,23 @@ transactions métier à cette connexion propriétaire : perdre le verrou fait
 transition locale.
 
 `WorkerRuntimeStatusRepository.record_heartbeat()` remplace la ligne du
-service singleton avec son instance, son état, son job courant éventuel et des
-codes d'erreur expurgés. Les états `degraded` et `blocked` exigent une erreur ;
+service singleton avec son instance, son état, son travail courant éventuel et
+des codes d'erreur expurgés. Les états `degraded` et `blocked` exigent une erreur ;
 les autres états ne peuvent pas en stocker. Seul un heartbeat `starting`, écrit
 après acquisition du verrou advisory, peut remplacer l'identifiant d'une
 ancienne instance. Tout heartbeat ultérieur portant un autre identifiant est
 refusé afin qu'un processus supplanté ne puisse pas écraser l'état du nouveau.
 Cette cohérence erreur/état est également imposée par PostgreSQL afin qu'une
 écriture extérieure au repository ne puisse produire un snapshot ambigu.
+
+Le travail courant est typé par service : `worker_automation` et
+`worker_retention` peuvent référencer `current_job_uuid`, tandis que
+`worker_publisher` peut référencer `current_ingestion_uuid`. Les deux clés sont
+nullables et utilisent `ON DELETE SET NULL`, mais PostgreSQL interdit qu'un
+service renseigne la mauvaise clé. Le dashboard actuel ignore explicitement le
+heartbeat publisher tant que sa projection dédiée n'est pas livrée ; cela
+permet de déployer la migration avant le futur worker sans rendre
+l'observabilité des deux workers existants indisponible.
 
 ## Transactions
 
@@ -245,6 +320,8 @@ packages/database/
 │   │   ├── ticket_creation_job.py
 │   │   ├── ticket_creation_job_event.py
 │   │   ├── audio_retention.py
+│   │   ├── mail_ingestion.py
+│   │   ├── mail_ingestion_event.py
 │   │   └── worker_runtime_status.py
 │   └── models/
 │       ├── __init__.py
@@ -253,6 +330,8 @@ packages/database/
 │       ├── ticket_creation_job.py
 │       ├── audio_retention.py
 │       ├── ticket_creation_job_event.py
+│       ├── mail_ingestion.py
+│       ├── mail_ingestion_event.py
 │       └── worker_runtime_status.py
 └── tests/
     ├── unit/
@@ -262,6 +341,8 @@ packages/database/
     │   ├── test_audio_retention_repository.py
     │   ├── test_audio_retention_transitions.py
     │   ├── test_engine.py
+    │   ├── test_mail_ingestion_event_repository.py
+    │   ├── test_mail_ingestion_repository.py
     │   ├── test_models.py
     │   ├── test_repository_boundaries.py
     │   ├── test_ticket_creation_job_event_repository.py
@@ -271,6 +352,7 @@ packages/database/
     └── integration/
         ├── test_audio_retention_repository.py
         ├── test_dashboard_repositories.py
+        ├── test_mail_ingestion_repository.py
         ├── test_observability_repositories.py
         └── test_ticket_creation_job_repository.py
 ```

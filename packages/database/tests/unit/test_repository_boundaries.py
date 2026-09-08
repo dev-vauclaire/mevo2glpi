@@ -10,6 +10,8 @@ REPOSITORY_ROOT = (
 )
 ORM_MODELS = {
     "AudioRetention",
+    "MailIngestion",
+    "MailIngestionEvent",
     "TicketCreationJob",
     "TicketCreationJobEvent",
     "WorkerRuntimeStatus",
@@ -20,6 +22,8 @@ ORM_MODELS = {
     ("module_name", "expected_model"),
     [
         ("audio_retention.py", "AudioRetention"),
+        ("mail_ingestion.py", "MailIngestion"),
+        ("mail_ingestion_event.py", "MailIngestionEvent"),
         ("ticket_creation_job.py", "TicketCreationJob"),
         ("ticket_creation_job_event.py", "TicketCreationJobEvent"),
         ("worker_runtime_status.py", "WorkerRuntimeStatus"),

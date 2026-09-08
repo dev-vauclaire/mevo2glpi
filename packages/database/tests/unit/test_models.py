@@ -1,7 +1,14 @@
 from enum import StrEnum
 
 import pytest
-from sqlalchemy import CheckConstraint, DateTime, SmallInteger, String, Uuid
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    SmallInteger,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex, CreateTable
 
@@ -16,6 +23,13 @@ from glpi_ticketing_database.models import (
     JobEventType,
     JobStage,
     JobStatus,
+    MailIngestion,
+    MailIngestionDisposition,
+    MailIngestionErrorScope,
+    MailIngestionEvent,
+    MailIngestionEventType,
+    MailIngestionStage,
+    MailIngestionStatus,
     RetentionPolicy,
     RetentionStatus,
     TicketCreationJob,
@@ -46,6 +60,39 @@ from glpi_ticketing_database.models import (
         ),
         (AudioExtension, {"wav", "mp3", "ogg", "m4a"}),
         (ErrorScope, {"job", "system"}),
+        (
+            MailIngestionStatus,
+            {
+                "pending",
+                "processing",
+                "retry_scheduled",
+                "completed",
+                "failed",
+                "blocked",
+            },
+        ),
+        (
+            MailIngestionStage,
+            {"discovery", "validation", "publication", "acknowledgement"},
+        ),
+        (MailIngestionDisposition, {"accepted", "rejected"}),
+        (MailIngestionErrorScope, {"message", "system"}),
+        (
+            MailIngestionEventType,
+            {
+                "message_discovered",
+                "processing_started",
+                "processing_resumed",
+                "attachment_validated",
+                "audio_published",
+                "message_rejected",
+                "retry_scheduled",
+                "message_moved",
+                "ingestion_completed",
+                "ingestion_failed",
+                "ingestion_blocked",
+            },
+        ),
         (RetentionPolicy, {"ticket_or_deadline", "deadline_only"}),
         (
             RetentionStatus,
@@ -70,7 +117,7 @@ from glpi_ticketing_database.models import (
         ),
         (
             JobEventActor,
-            {"web", "worker_automation", "worker_retention"},
+            {"web", "worker_publisher", "worker_automation", "worker_retention"},
         ),
         (
             JobEventType,
@@ -92,7 +139,10 @@ from glpi_ticketing_database.models import (
                 "audio_deleted",
             },
         ),
-        (WorkerServiceName, {"worker_automation", "worker_retention"}),
+        (
+            WorkerServiceName,
+            {"worker_publisher", "worker_automation", "worker_retention"},
+        ),
         (
             WorkerRuntimeState,
             {"starting", "running", "degraded", "blocked", "stopped"},
@@ -111,6 +161,8 @@ def test_expected_tables_are_registered() -> None:
         "ticket_creation_jobs",
         "audio_retentions",
         "ticket_creation_job_events",
+        "mail_ingestions",
+        "mail_ingestion_events",
         "worker_runtime_status",
     }
 
@@ -130,6 +182,20 @@ def test_public_model_imports_use_shared_metadata(
 ) -> None:
     assert model.__table__ is Base.metadata.tables[table_name]
     assert getattr(database_api, model.__name__) is model
+
+
+@pytest.mark.parametrize(
+    ("model", "table_name"),
+    [
+        (MailIngestion, "mail_ingestions"),
+        (MailIngestionEvent, "mail_ingestion_events"),
+    ],
+)
+def test_mail_ingestion_model_imports_use_shared_metadata(
+    model: type[Base],
+    table_name: str,
+) -> None:
+    assert model.__table__ is Base.metadata.tables[table_name]
 
 
 def test_datetime_columns_are_timezone_aware() -> None:
@@ -171,6 +237,14 @@ def test_metadata_uses_deterministic_constraint_names() -> None:
             "ticket_creation_job_events",
             {"status", "stage", "event_type", "error_scope", "actor"},
         ),
+        (
+            "mail_ingestions",
+            {"status", "stage", "disposition", "last_error_scope"},
+        ),
+        (
+            "mail_ingestion_events",
+            {"status", "stage", "disposition", "event_type", "error_scope"},
+        ),
         ("worker_runtime_status", {"service_name", "state"}),
     ],
 )
@@ -191,8 +265,13 @@ def test_persisted_state_columns_use_varchar(
         ("ticket_creation_jobs", "uuid"),
         ("audio_retentions", "job_uuid"),
         ("ticket_creation_job_events", "job_uuid"),
+        ("mail_ingestions", "uuid"),
+        ("mail_ingestions", "mailbox_id"),
+        ("mail_ingestions", "job_uuid"),
+        ("mail_ingestion_events", "ingestion_uuid"),
         ("worker_runtime_status", "instance_id"),
         ("worker_runtime_status", "current_job_uuid"),
+        ("worker_runtime_status", "current_ingestion_uuid"),
     ],
 )
 def test_uuid_columns_use_native_uuid_mapping(
@@ -223,6 +302,26 @@ def test_database_schema_cannot_store_audio_or_transcription_content() -> None:
     assert "audio" not in column_names
     assert "audio_bytes" not in column_names
     assert "transcription" not in column_names
+    assert "subject" not in column_names
+    assert "body" not in column_names
+    assert "sender" not in column_names
+    assert "attachment_filename" not in column_names
+
+
+def test_mail_source_identity_is_unique_and_case_sensitive() -> None:
+    ingestions = Base.metadata.tables["mail_ingestions"]
+    unique_constraints = {
+        constraint.name: tuple(column.name for column in constraint.columns)
+        for constraint in ingestions.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+
+    assert unique_constraints["uq_mail_ingestions_source"] == (
+        "mailbox_id",
+        "message_id",
+    )
+    assert ingestions.c.message_id.type.collation == "C"
+    assert ingestions.c.attachment_id.type.collation == "C"
 
 
 def test_storage_key_and_state_invariants_have_database_checks() -> None:
@@ -273,6 +372,39 @@ def test_retention_invariants_have_database_checks() -> None:
     }
 
 
+def test_mail_ingestion_invariants_have_database_checks() -> None:
+    ingestions = Base.metadata.tables["mail_ingestions"]
+    check_names = {
+        constraint.name
+        for constraint in ingestions.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert check_names >= {
+        "ck_mail_ingestions_message_id_not_empty",
+        "ck_mail_ingestions_attachment_id_not_empty",
+        "ck_mail_ingestions_status",
+        "ck_mail_ingestions_stage",
+        "ck_mail_ingestions_disposition",
+        "ck_mail_ingestions_last_error_scope",
+        "ck_mail_ingestions_attachment_size_bytes_non_negative",
+        "ck_mail_ingestions_attempt_count_non_negative",
+        "ck_mail_ingestions_consecutive_retry_count_non_negative",
+        "ck_mail_ingestions_retry_has_attempt",
+        "ck_mail_ingestions_retry_schedule",
+        "ck_mail_ingestions_finished_at",
+        "ck_mail_ingestions_attempt_state",
+        "ck_mail_ingestions_disposition_at_acknowledgement",
+        "ck_mail_ingestions_accepted_disposition",
+        "ck_mail_ingestions_rejected_disposition",
+        "ck_mail_ingestions_job_for_accepted_disposition",
+        "ck_mail_ingestions_completed_disposition",
+        "ck_mail_ingestions_failed_disposition",
+        "ck_mail_ingestions_error_fields",
+        "ck_mail_ingestions_error_for_status",
+    }
+
+
 def test_event_type_is_constrained_to_the_public_enum() -> None:
     events = Base.metadata.tables["ticket_creation_job_events"]
     check_names = {
@@ -283,6 +415,34 @@ def test_event_type_is_constrained_to_the_public_enum() -> None:
 
     assert "ck_ticket_creation_job_events_event_type" in check_names
 
+    ingestion_events = Base.metadata.tables["mail_ingestion_events"]
+    ingestion_check_names = {
+        constraint.name
+        for constraint in ingestion_events.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert ingestion_check_names >= {
+        "ck_mail_ingestion_events_status",
+        "ck_mail_ingestion_events_stage",
+        "ck_mail_ingestion_events_disposition",
+        "ck_mail_ingestion_events_event_type",
+        "ck_mail_ingestion_events_error_scope",
+        "ck_mail_ingestion_events_disposition_at_acknowledgement",
+        "ck_mail_ingestion_events_error_fields",
+    }
+
+
+def test_worker_runtime_current_work_is_constrained_by_service() -> None:
+    runtimes = Base.metadata.tables["worker_runtime_status"]
+    check_names = {
+        constraint.name
+        for constraint in runtimes.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert "ck_worker_runtime_status_current_work_for_service" in check_names
+
 
 def test_audit_foreign_keys_restrict_job_deletion() -> None:
     for table_name in ("audio_retentions", "ticket_creation_job_events"):
@@ -290,6 +450,11 @@ def test_audit_foreign_keys_restrict_job_deletion() -> None:
         foreign_key = next(iter(table.foreign_keys))
 
         assert foreign_key.ondelete == "RESTRICT"
+
+    ingestion_events = Base.metadata.tables["mail_ingestion_events"]
+    ingestion_foreign_key = next(iter(ingestion_events.foreign_keys))
+
+    assert ingestion_foreign_key.ondelete == "RESTRICT"
 
 
 def test_worker_singleton_assumptions_are_enforced_by_partial_indexes() -> None:
@@ -305,11 +470,18 @@ def test_worker_singleton_assumptions_are_enforced_by_partial_indexes() -> None:
         for index in retentions.indexes
         if index.name == "uq_audio_retentions_single_active_operation"
     )
+    ingestion_index = next(
+        index
+        for index in Base.metadata.tables["mail_ingestions"].indexes
+        if index.name == "uq_mail_ingestions_single_processing"
+    )
 
     assert job_index.unique is True
     assert job_index.dialect_options["postgresql"]["where"] is not None
     assert retention_index.unique is True
     assert retention_index.dialect_options["postgresql"]["where"] is not None
+    assert ingestion_index.unique is True
+    assert ingestion_index.dialect_options["postgresql"]["where"] is not None
 
 
 def test_query_indexes_match_the_documented_access_paths() -> None:
@@ -325,6 +497,10 @@ def test_query_indexes_match_the_documented_access_paths() -> None:
         "ix_audio_retentions_deadline",
         "ix_audio_retentions_due_check",
         "ix_ticket_creation_job_events_history",
+        "ix_mail_ingestions_pending",
+        "ix_mail_ingestions_retry_scheduled",
+        "ix_mail_ingestions_dashboard",
+        "ix_mail_ingestion_events_history",
         "ix_worker_runtime_status_heartbeat",
     }
 

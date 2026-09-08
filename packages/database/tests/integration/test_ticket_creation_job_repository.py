@@ -35,6 +35,7 @@ def test_postgresql_advisory_lock_enforces_singleton_and_releases(
     )
     assert automation is not None
     retention = None
+    publisher = None
     replacement = None
     try:
         assert (
@@ -49,6 +50,18 @@ def test_postgresql_advisory_lock_enforces_singleton_and_releases(
             WorkerServiceName.RETENTION,
         )
         assert retention is not None
+        publisher = try_acquire_advisory_lock(
+            migrated_engine,
+            WorkerServiceName.PUBLISHER,
+        )
+        assert publisher is not None
+        assert (
+            try_acquire_advisory_lock(
+                migrated_engine,
+                WorkerServiceName.PUBLISHER,
+            )
+            is None
+        )
         with automation.open_session() as locked_session:
             with locked_session.begin():
                 assert locked_session.scalar(text("SELECT 1")) == 1
@@ -72,6 +85,8 @@ def test_postgresql_advisory_lock_enforces_singleton_and_releases(
             automation.release()
         if retention is not None:
             retention.release()
+        if publisher is not None:
+            publisher.release()
         if replacement is not None:
             replacement.release()
 

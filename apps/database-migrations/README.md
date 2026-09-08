@@ -47,8 +47,8 @@ one-shot sans healthcheck ni politique de redémarrage.
 
 Cette application accède seulement à PostgreSQL. Elle ne monte pas le volume
 audio `/data/audios`. Elle attend elle-même la base externe dans un délai borné
-et sa réussite conditionne le démarrage du web et des deux workers. Le contrat
-est décrit dans la section
+et sa réussite conditionne le démarrage des applications persistantes du MVP.
+Le contrat est décrit dans la section
 [déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp).
 
 ## Historique courant
@@ -60,7 +60,33 @@ est décrit dans la section
   numérique, ajoute les invariants du cycle de purge et autorise les quatre
   événements du worker de rétention ;
 - `0004_add_observability_queries` ajoute l'index de lecture des rétentions par
-  état et impose la cohérence entre état runtime et erreur expurgée.
+  état et impose la cohérence entre état runtime et erreur expurgée ;
+- `0005_add_mail_ingestions` crée `mail_ingestions` et
+  `mail_ingestion_events`, puis autorise `worker_publisher` comme acteur des
+  jobs et comme service de runtime. Le runtime peut référencer l'ingestion
+  courante via `current_ingestion_uuid`, sans détourner la clé de job utilisée
+  par les deux workers existants.
+
+`0005` est compatible avec les deux situations de déploiement attendues :
+
+- sur une base vide, `upgrade head` applique l'historique complet et crée les
+  six tables du MVP ;
+- sur une base existante à la révision `0004`, la montée ajoute les deux tables
+  d'ingestion sans modifier les jobs, événements, rétentions et heartbeats déjà
+  présents.
+
+Relancer `upgrade head` après cette montée est un no-op Alembic et conserve les
+données existantes. La migration ajoute une identité de source unique composée
+de l'UUID de boîte et de l'identifiant de message. Ce dernier utilise la
+collation PostgreSQL `C` afin que l'idempotence respecte la casse des
+identifiants immuables Exchange.
+
+La migration ne crée volontairement aucune ingestion à partir des jobs
+historiques : une ingestion Exchange et un job audio sont deux concepts
+distincts, et les lignes antérieures à l'introduction du publisher n'ont pas de
+source Exchange fiable à reconstruire. Les nouvelles ingestions peuvent rester
+sans job lorsqu'un message est rejeté ; une ingestion acceptée lie au contraire
+un unique `TicketCreationJob` avant l'étape durable d'acquittement.
 
 Les montées depuis `0001` et `0002` sont testées avec des données
 préexistantes. `0003` convertit explicitement les valeurs numériques de
@@ -74,6 +100,12 @@ existent encore, au lieu de supprimer silencieusement l'historique d'audit.
 De même, `0004` refuse une donnée runtime antérieure incohérente au lieu de
 masquer ou réécrire son erreur pendant la montée de version.
 
+Le downgrade de `0005` supprime les tables propres à l'ingestion. Avant cette
+suppression, il restaure les contraintes d'acteurs et de services antérieures ;
+PostgreSQL refuse donc le downgrade si des événements de job ou des heartbeats
+`worker_publisher` doivent encore être conservés. Aucun enregistrement d'audit
+historique n'est réécrit silencieusement.
+
 ## Tests
 
 Les tests unitaires ne nécessitent pas PostgreSQL :
@@ -82,11 +114,22 @@ Les tests unitaires ne nécessitent pas PostgreSQL :
 uv run pytest apps/database-migrations/tests/unit
 ```
 
-La fixture commune `tests/integration/postgres` démarre une seule image
+La compatibilité de la migration est vérifiée explicitement sur une base vide
+et sur une base existante arrêtée à `0004`, préchargée avec un job, son
+événement, sa rétention et les heartbeats des workers existants :
+
+```bash
+uv run pytest -m database \
+  apps/database-migrations/tests/integration/test_mail_ingestion_migration.py \
+  -vv --maxfail=1
+```
+
+La fixture commune `tests/integration/postgres` démarre une image
 PostgreSQL 16 épinglée par digest. Elle l'expose sur un port aléatoire limité au
 loopback, crée une base isolée par test, vérifie la migration et les contraintes
 réelles, puis détruit le conteneur et son réseau. Elle est partagée avec les
-tests d'ingestion du web et ne doit pas être parallélisée :
+tests d'intégration du package database et du web et ne doit pas être
+parallélisée :
 
 ```bash
 uv run pytest -m database \

@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
+
+import pytest
+from sqlalchemy import Engine, func, select
+from sqlalchemy.exc import IntegrityError
+
+from glpi_ticketing_database import create_session_factory
+from glpi_ticketing_database.models import (
+    AudioExtension,
+    MailIngestion,
+    MailIngestionDisposition,
+    MailIngestionErrorScope,
+    MailIngestionStage,
+    MailIngestionStatus,
+)
+from glpi_ticketing_database.repositories import (
+    DiscoveredMail,
+    MailIngestionRepository,
+    PendingJob,
+    TicketCreationJobRepository,
+)
+
+pytestmark = pytest.mark.database
+
+NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
+MAILBOX_UUID = UUID("94023353-3fb5-45fa-8336-a938e1dc914c")
+
+
+def test_source_identity_is_idempotent_but_distinct_messages_are_allowed(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    first_uuid = UUID("00000000-0000-0000-0000-000000000101")
+    duplicate_uuid = UUID("00000000-0000-0000-0000-000000000102")
+    distinct_uuid = UUID("00000000-0000-0000-0000-000000000103")
+
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        repository.add_discovered(
+            _discovered(first_uuid, "immutable-message-a"),
+            now=NOW,
+        )
+        repository.add_discovered(
+            _discovered(distinct_uuid, "immutable-message-b"),
+            now=NOW,
+        )
+
+    with pytest.raises(IntegrityError):
+        with session_factory.begin() as session:
+            MailIngestionRepository(session).add_discovered(
+                _discovered(duplicate_uuid, "immutable-message-a"),
+                now=NOW,
+            )
+
+    with session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(MailIngestion)) == 2
+        assert (
+            MailIngestionRepository(session)
+            .get_by_source(MAILBOX_UUID, "immutable-message-a")
+            .uuid
+            == first_uuid
+        )
+
+
+def test_claim_priority_and_both_terminal_dispositions(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    accepted_uuid = UUID("00000000-0000-0000-0000-000000000111")
+    rejected_uuid = UUID("00000000-0000-0000-0000-000000000112")
+    job_uuid = UUID("00000000-0000-0000-0000-000000000113")
+
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        repository.add_discovered(
+            _discovered(accepted_uuid, "immutable-message-old", minutes_ago=2),
+            now=NOW,
+        )
+        repository.add_discovered(
+            _discovered(rejected_uuid, "immutable-message-new", minutes_ago=1),
+            now=NOW,
+        )
+
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        acquisition = repository.resume_or_claim_next(NOW)
+        assert acquisition is not None
+        assert acquisition.ingestion.uuid == accepted_uuid
+        repository.record_attachment_validated(
+            accepted_uuid,
+            attachment_id="attachment-a",
+            attachment_size_bytes=128,
+            now=NOW + timedelta(seconds=1),
+        )
+        TicketCreationJobRepository(session).add_pending(
+            PendingJob(
+                uuid=job_uuid,
+                storage_key=f"{job_uuid}.wav",
+                audio_extension=AudioExtension.WAV,
+                audio_size_bytes=128,
+            )
+        )
+        repository.record_accepted(
+            accepted_uuid,
+            job_uuid=job_uuid,
+            now=NOW + timedelta(seconds=2),
+        )
+        repository.record_completed(
+            accepted_uuid,
+            now=NOW + timedelta(seconds=3),
+        )
+
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        acquisition = repository.resume_or_claim_next(NOW + timedelta(seconds=4))
+        assert acquisition is not None
+        assert acquisition.ingestion.uuid == rejected_uuid
+        repository.record_rejected(
+            rejected_uuid,
+            rejection_category="invalid_audio",
+            rejection_code="empty_file",
+            attachment_id="attachment-b",
+            attachment_size_bytes=0,
+            now=NOW + timedelta(seconds=5),
+        )
+        repository.record_failed(
+            rejected_uuid,
+            now=NOW + timedelta(seconds=6),
+        )
+
+    with session_factory() as session:
+        accepted = MailIngestionRepository(session).get_by_uuid(accepted_uuid)
+        rejected = MailIngestionRepository(session).get_by_uuid(rejected_uuid)
+        assert accepted is not None
+        assert accepted.status is MailIngestionStatus.COMPLETED
+        assert accepted.disposition is MailIngestionDisposition.ACCEPTED
+        assert accepted.job_uuid == job_uuid
+        assert rejected is not None
+        assert rejected.status is MailIngestionStatus.FAILED
+        assert rejected.disposition is MailIngestionDisposition.REJECTED
+        assert rejected.attachment_size_bytes == 0
+
+
+def test_future_system_retry_prevents_claiming_another_message(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    retry_uuid = UUID("00000000-0000-0000-0000-000000000121")
+    pending_uuid = UUID("00000000-0000-0000-0000-000000000122")
+
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        repository.add_discovered(
+            _discovered(retry_uuid, "immutable-retry", minutes_ago=2),
+            now=NOW,
+        )
+        repository.add_discovered(
+            _discovered(pending_uuid, "immutable-pending", minutes_ago=1),
+            now=NOW,
+        )
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        acquisition = repository.resume_or_claim_next(NOW)
+        assert acquisition is not None
+        assert acquisition.ingestion.uuid == retry_uuid
+        repository.schedule_retry(
+            retry_uuid,
+            stage=MailIngestionStage.VALIDATION,
+            error_scope=MailIngestionErrorScope.SYSTEM,
+            error_category="unavailable",
+            error_code="graph_unavailable",
+            next_attempt_at=NOW + timedelta(minutes=1),
+            now=NOW,
+        )
+    with session_factory.begin() as session:
+        assert (
+            MailIngestionRepository(session).resume_or_claim_next(
+                NOW + timedelta(seconds=30)
+            )
+            is None
+        )
+
+    with session_factory() as session:
+        pending = session.get(MailIngestion, pending_uuid)
+        assert pending is not None
+        assert pending.status == MailIngestionStatus.PENDING.value
+
+
+def _discovered(
+    ingestion_uuid: UUID,
+    message_id: str,
+    *,
+    minutes_ago: int = 1,
+) -> DiscoveredMail:
+    return DiscoveredMail(
+        uuid=ingestion_uuid,
+        mailbox_id=MAILBOX_UUID,
+        message_id=message_id,
+        received_at=NOW - timedelta(minutes=minutes_ago),
+    )

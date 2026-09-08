@@ -127,6 +127,24 @@ def test_operator_retry_event_is_a_typed_append_contract() -> None:
     assert event.event_type == "operator_retry_requested"
 
 
+def test_publisher_can_append_the_job_created_event_without_creating_a_job() -> None:
+    session = create_autospec(Session, instance=True)
+
+    TicketCreationJobEventRepository(session).append(
+        uuid4(),
+        occurred_at=NOW,
+        status=JobStatus.PENDING,
+        stage=None,
+        event_type=JobEventType.JOB_CREATED,
+        actor=JobEventActor.WORKER_PUBLISHER,
+    )
+
+    event = session.add.call_args.args[0]
+    assert event.actor == "worker_publisher"
+    assert event.event_type == "job_created"
+    session.commit.assert_not_called()
+
+
 def test_append_rejects_partial_error_fields_before_mutating_session() -> None:
     session = create_autospec(Session, instance=True)
 

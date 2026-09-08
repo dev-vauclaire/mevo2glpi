@@ -15,11 +15,18 @@ from .enums import (
     JobEventType,
     JobStage,
     JobStatus,
+    MailIngestionDisposition,
+    MailIngestionErrorScope,
+    MailIngestionEventType,
+    MailIngestionStage,
+    MailIngestionStatus,
     RetentionPolicy,
     RetentionStatus,
     WorkerRuntimeState,
     WorkerServiceName,
 )
+from .mail_ingestion import MailIngestion
+from .mail_ingestion_event import MailIngestionEvent
 from .ticket_creation_job import TicketCreationJob
 from .ticket_creation_job_event import TicketCreationJobEvent
 from .worker_runtime_status import WorkerRuntimeStatus
@@ -34,6 +41,13 @@ __all__ = [
     "JobEventType",
     "JobStage",
     "JobStatus",
+    "MailIngestion",
+    "MailIngestionDisposition",
+    "MailIngestionErrorScope",
+    "MailIngestionEvent",
+    "MailIngestionEventType",
+    "MailIngestionStage",
+    "MailIngestionStatus",
     "NAMING_CONVENTION",
     "RetentionPolicy",
     "RetentionStatus",

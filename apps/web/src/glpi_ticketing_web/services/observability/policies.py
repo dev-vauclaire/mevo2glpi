@@ -96,7 +96,10 @@ class ObservabilityPolicy:
             if not isinstance(runtime, WorkerRuntimeSnapshot):
                 raise TypeError("runtime must be a WorkerRuntimeSnapshot")
             if runtime.service_name not in _EXPECTED_SERVICES:
-                raise ValueError("unexpected worker service")
+                # A migration may introduce a worker heartbeat before its
+                # dashboard projection is deployed. Ignore that known future
+                # service instead of making observability unavailable.
+                continue
             if runtime.service_name in indexed:
                 raise ValueError("duplicate worker runtime")
             indexed[runtime.service_name] = runtime

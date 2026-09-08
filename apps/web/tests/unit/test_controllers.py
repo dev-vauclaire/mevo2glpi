@@ -66,16 +66,21 @@ class FakeListService:
 
 
 @pytest.mark.parametrize(
-    "event_type",
+    ("event_type", "actor"),
     [
-        JobEventType.RETENTION_RETRY_SCHEDULED,
-        JobEventType.RETENTION_BLOCKED,
-        JobEventType.AUDIO_DELETION_STARTED,
-        JobEventType.AUDIO_DELETED,
+        (
+            JobEventType.RETENTION_RETRY_SCHEDULED,
+            JobEventActor.WORKER_RETENTION,
+        ),
+        (JobEventType.RETENTION_BLOCKED, JobEventActor.WORKER_RETENTION),
+        (JobEventType.AUDIO_DELETION_STARTED, JobEventActor.WORKER_RETENTION),
+        (JobEventType.AUDIO_DELETED, JobEventActor.WORKER_RETENTION),
+        (JobEventType.JOB_CREATED, JobEventActor.WORKER_PUBLISHER),
     ],
 )
-def test_event_history_exposes_retention_lifecycle_events(
+def test_event_history_serializes_supported_event_actors(
     event_type: JobEventType,
+    actor: JobEventActor,
 ) -> None:
     event = JobEventView(
         event_id=1,
@@ -83,7 +88,7 @@ def test_event_history_exposes_retention_lifecycle_events(
         occurred_at=datetime(2026, 8, 29, tzinfo=UTC),
         state=JobStatus.COMPLETED,
         stage=JobStage.FINALIZATION,
-        actor=JobEventActor.WORKER_RETENTION,
+        actor=actor,
         error_scope=None,
         error_category=None,
         technical_code=None,
@@ -113,7 +118,7 @@ def test_event_history_exposes_retention_lifecycle_events(
                 "occurred_at": "2026-08-29T00:00:00Z",
                 "state": "completed",
                 "stage": "finalization",
-                "actor": "worker_retention",
+                "actor": actor.value,
                 "error_scope": None,
                 "error_category": None,
                 "technical_code": None,

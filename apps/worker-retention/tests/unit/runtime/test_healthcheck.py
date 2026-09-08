@@ -78,6 +78,7 @@ def test_reader_selects_only_retention_heartbeat(
             state=WorkerRuntimeState.RUNNING,
             last_heartbeat_at=NOW,
             current_job_uuid=None,
+            current_ingestion_uuid=None,
             last_error_category=None,
             last_error_code=None,
             updated_at=NOW,

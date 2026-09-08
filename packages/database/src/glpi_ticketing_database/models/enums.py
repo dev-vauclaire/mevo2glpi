@@ -38,6 +38,56 @@ class ErrorScope(StrEnum):
     SYSTEM = "system"
 
 
+class MailIngestionStatus(StrEnum):
+    """Persisted state of one Exchange message ingestion."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    RETRY_SCHEDULED = "retry_scheduled"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+
+
+class MailIngestionStage(StrEnum):
+    """Last publisher stage reached while ingesting a message."""
+
+    DISCOVERY = "discovery"
+    VALIDATION = "validation"
+    PUBLICATION = "publication"
+    ACKNOWLEDGEMENT = "acknowledgement"
+
+
+class MailIngestionDisposition(StrEnum):
+    """Durable local decision made before acknowledging a message."""
+
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class MailIngestionErrorScope(StrEnum):
+    """Scope of a sanitized publisher error."""
+
+    MESSAGE = "message"
+    SYSTEM = "system"
+
+
+class MailIngestionEventType(StrEnum):
+    """Stable audit events emitted by the publisher lifecycle."""
+
+    MESSAGE_DISCOVERED = "message_discovered"
+    PROCESSING_STARTED = "processing_started"
+    PROCESSING_RESUMED = "processing_resumed"
+    ATTACHMENT_VALIDATED = "attachment_validated"
+    AUDIO_PUBLISHED = "audio_published"
+    MESSAGE_REJECTED = "message_rejected"
+    RETRY_SCHEDULED = "retry_scheduled"
+    MESSAGE_MOVED = "message_moved"
+    INGESTION_COMPLETED = "ingestion_completed"
+    INGESTION_FAILED = "ingestion_failed"
+    INGESTION_BLOCKED = "ingestion_blocked"
+
+
 class RetentionPolicy(StrEnum):
     """Strategy used to decide when an audio may be deleted."""
 
@@ -72,6 +122,7 @@ class JobEventActor(StrEnum):
     WEB = "web"
     WORKER_AUTOMATION = "worker_automation"
     WORKER_RETENTION = "worker_retention"
+    WORKER_PUBLISHER = "worker_publisher"
 
 
 class JobEventType(StrEnum):
@@ -99,6 +150,7 @@ class WorkerServiceName(StrEnum):
 
     AUTOMATION = "worker_automation"
     RETENTION = "worker_retention"
+    PUBLISHER = "worker_publisher"
 
 
 class WorkerRuntimeState(StrEnum):
@@ -125,6 +177,11 @@ __all__ = [
     "JobEventType",
     "JobStage",
     "JobStatus",
+    "MailIngestionDisposition",
+    "MailIngestionErrorScope",
+    "MailIngestionEventType",
+    "MailIngestionStage",
+    "MailIngestionStatus",
     "RetentionPolicy",
     "RetentionStatus",
     "WorkerRuntimeState",

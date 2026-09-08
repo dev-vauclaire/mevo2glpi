@@ -22,6 +22,10 @@ from glpi_ticketing_web.services import (
 
 NOW = datetime(2026, 8, 29, 12, tzinfo=UTC)
 INSTANCE_ID = UUID("e4b68965-df78-4d98-9c99-7ae9b32056a4")
+DEPLOYED_WORKER_SERVICES = (
+    WorkerServiceName.AUTOMATION,
+    WorkerServiceName.RETENTION,
+)
 
 
 class FakeSession:
@@ -44,7 +48,7 @@ def test_observability_query_uses_one_clock_tick_and_strict_cutoffs(
 
         def list_all(self) -> tuple[WorkerRuntimeSnapshot, ...]:
             return tuple(
-                _runtime(service_name, NOW) for service_name in WorkerServiceName
+                _runtime(service_name, NOW) for service_name in DEPLOYED_WORKER_SERVICES
             )
 
     class JobRepository:
@@ -208,6 +212,7 @@ def _runtime(
         state=WorkerRuntimeState.RUNNING,
         last_heartbeat_at=heartbeat_at,
         current_job_uuid=None,
+        current_ingestion_uuid=None,
         last_error_category=None,
         last_error_code=None,
         updated_at=heartbeat_at,

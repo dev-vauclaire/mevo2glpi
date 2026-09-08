@@ -51,6 +51,7 @@ const ACTOR_LABELS = new Map([
   ["web", "Interface web"],
   ["worker_automation", "Worker d’automatisation"],
   ["worker_retention", "Worker de rétention"],
+  ["worker_publisher", "Worker de publication"],
 ]);
 
 function textOrDash(value) {

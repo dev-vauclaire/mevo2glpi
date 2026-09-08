@@ -58,6 +58,7 @@ def test_runtime_repository_rejects_a_superseded_instance() -> None:
         state=WorkerRuntimeState.RUNNING.value,
         last_heartbeat_at=NOW,
         current_job_uuid=None,
+        current_ingestion_uuid=None,
         last_error_category=None,
         last_error_code=None,
         updated_at=NOW,
@@ -77,6 +78,53 @@ def test_runtime_repository_rejects_a_superseded_instance() -> None:
     session.flush.assert_not_called()
 
 
+def test_publisher_heartbeat_uses_the_generic_runtime_contract() -> None:
+    session = _session()
+    session.get.return_value = None
+    instance_id = uuid4()
+    ingestion_uuid = uuid4()
+
+    snapshot = WorkerRuntimeStatusRepository(session).record_heartbeat(
+        service_name=WorkerServiceName.PUBLISHER,
+        instance_id=instance_id,
+        state=WorkerRuntimeState.STARTING,
+        now=NOW,
+        current_ingestion_uuid=ingestion_uuid,
+    )
+
+    assert snapshot.service_name is WorkerServiceName.PUBLISHER
+    assert snapshot.current_job_uuid is None
+    assert snapshot.current_ingestion_uuid == ingestion_uuid
+    assert snapshot.instance_id == instance_id
+    session.flush.assert_called_once_with()
+    session.commit.assert_not_called()
+
+
+def test_runtime_repository_restricts_current_work_to_its_service() -> None:
+    session = _session()
+    repository = WorkerRuntimeStatusRepository(session)
+
+    with pytest.raises(ValueError, match="publisher.*job"):
+        repository.record_heartbeat(
+            service_name=WorkerServiceName.PUBLISHER,
+            instance_id=uuid4(),
+            state=WorkerRuntimeState.RUNNING,
+            now=NOW,
+            current_job_uuid=uuid4(),
+        )
+    with pytest.raises(ValueError, match="only publisher"):
+        repository.record_heartbeat(
+            service_name=WorkerServiceName.AUTOMATION,
+            instance_id=uuid4(),
+            state=WorkerRuntimeState.RUNNING,
+            now=NOW,
+            current_ingestion_uuid=uuid4(),
+        )
+
+    session.get.assert_not_called()
+    session.flush.assert_not_called()
+
+
 def test_starting_heartbeat_can_fence_the_previous_instance() -> None:
     session = _session()
     replacement_instance_id = uuid4()
@@ -86,6 +134,7 @@ def test_starting_heartbeat_can_fence_the_previous_instance() -> None:
         state=WorkerRuntimeState.RUNNING.value,
         last_heartbeat_at=NOW,
         current_job_uuid=None,
+        current_ingestion_uuid=None,
         last_error_category=None,
         last_error_code=None,
         updated_at=NOW,
@@ -117,6 +166,7 @@ def test_runtime_repository_lists_typed_snapshots_without_commit() -> None:
         state=WorkerRuntimeState.RUNNING.value,
         last_heartbeat_at=NOW,
         current_job_uuid=None,
+        current_ingestion_uuid=None,
         last_error_category=None,
         last_error_code=None,
         updated_at=NOW,
@@ -127,6 +177,7 @@ def test_runtime_repository_lists_typed_snapshots_without_commit() -> None:
         state=WorkerRuntimeState.DEGRADED.value,
         last_heartbeat_at=NOW - timedelta(seconds=1),
         current_job_uuid=uuid4(),
+        current_ingestion_uuid=None,
         last_error_category="unavailable",
         last_error_code="http_503",
         updated_at=NOW - timedelta(seconds=1),

@@ -17,6 +17,7 @@ from .models import WorkerServiceName
 _LOCK_KEYS: dict[WorkerServiceName, int] = {
     WorkerServiceName.AUTOMATION: 0x4754415F4155544F,  # ``GTA_AUTO``
     WorkerServiceName.RETENTION: 0x4754415F5245544E,  # ``GTA_RETN``
+    WorkerServiceName.PUBLISHER: 0x4754415F5055424C,  # ``GTA_PUBL``
 }
 
 _TRY_LOCK = text("SELECT pg_try_advisory_lock(:lock_key)")

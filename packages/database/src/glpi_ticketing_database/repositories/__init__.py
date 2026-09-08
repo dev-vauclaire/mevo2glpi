@@ -10,6 +10,20 @@ from .audio_retention import (
     RetentionCandidateKind,
     RetentionNotFoundError,
 )
+from .mail_ingestion import (
+    DiscoveredMail,
+    InvalidMailIngestionTransitionError,
+    MailIngestionAcquisition,
+    MailIngestionNotFoundError,
+    MailIngestionRepository,
+    MailIngestionSnapshot,
+)
+from .mail_ingestion_event import (
+    MailIngestionEventCursor,
+    MailIngestionEventPage,
+    MailIngestionEventRepository,
+    MailIngestionEventSnapshot,
+)
 from .ticket_creation_job import (
     InvalidJobTransitionError,
     JobAcquisition,
@@ -39,6 +53,7 @@ __all__ = [
     "AudioRetentionRepository",
     "AudioRetentionSnapshot",
     "InvalidJobTransitionError",
+    "InvalidMailIngestionTransitionError",
     "InvalidRetentionTransitionError",
     "JobAcquisition",
     "JobAlertSummary",
@@ -50,6 +65,14 @@ __all__ = [
     "JobNotFoundError",
     "JobPage",
     "JobSnapshot",
+    "MailIngestionAcquisition",
+    "MailIngestionEventCursor",
+    "MailIngestionEventPage",
+    "MailIngestionEventRepository",
+    "MailIngestionEventSnapshot",
+    "MailIngestionNotFoundError",
+    "MailIngestionRepository",
+    "MailIngestionSnapshot",
     "PendingJob",
     "RetentionCandidate",
     "RetentionCandidateKind",
@@ -60,4 +83,5 @@ __all__ = [
     "TicketCreationJobRepository",
     "WorkerRuntimeSnapshot",
     "WorkerRuntimeStatusRepository",
+    "DiscoveredMail",
 ]

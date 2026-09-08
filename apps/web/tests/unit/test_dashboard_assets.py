@@ -59,6 +59,12 @@ def test_dashboard_names_every_retention_lifecycle_event() -> None:
     assert '["audio_deleted",' in dashboard
 
 
+def test_dashboard_names_the_publisher_event_actor() -> None:
+    dashboard = (JAVASCRIPT_ROOT / "dashboard.js").read_text(encoding="utf-8")
+
+    assert '["worker_publisher", "Worker de publication"]' in dashboard
+
+
 def test_application_serializes_polling_and_stale_detail_requests() -> None:
     app = (JAVASCRIPT_ROOT / "app.js").read_text(encoding="utf-8")
     dashboard = (JAVASCRIPT_ROOT / "dashboard.js").read_text(encoding="utf-8")

@@ -42,6 +42,10 @@ class WorkerRuntimeStatus(Base):
         Uuid(native_uuid=True),
         ForeignKey("ticket_creation_jobs.uuid", ondelete="SET NULL"),
     )
+    current_ingestion_uuid: Mapped[UUID | None] = mapped_column(
+        Uuid(native_uuid=True),
+        ForeignKey("mail_ingestions.uuid", ondelete="SET NULL"),
+    )
     last_error_category: Mapped[str | None] = mapped_column(String(64))
     last_error_code: Mapped[str | None] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(
@@ -70,6 +74,12 @@ class WorkerRuntimeStatus(Base):
             "(state NOT IN ('degraded', 'blocked') "
             "AND last_error_category IS NULL)",
             name="error_for_state",
+        ),
+        CheckConstraint(
+            "(service_name = 'worker_publisher' AND current_job_uuid IS NULL) OR "
+            "(service_name <> 'worker_publisher' "
+            "AND current_ingestion_uuid IS NULL)",
+            name="current_work_for_service",
         ),
         Index("ix_worker_runtime_status_heartbeat", last_heartbeat_at),
     )

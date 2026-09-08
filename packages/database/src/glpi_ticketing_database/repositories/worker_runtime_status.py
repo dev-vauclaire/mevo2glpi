@@ -34,6 +34,7 @@ class WorkerRuntimeSnapshot:
     state: WorkerRuntimeState
     last_heartbeat_at: datetime
     current_job_uuid: UUID | None
+    current_ingestion_uuid: UUID | None
     last_error_category: str | None
     last_error_code: str | None
     updated_at: datetime
@@ -55,6 +56,7 @@ class WorkerRuntimeStatusRepository:
         state: WorkerRuntimeState,
         now: datetime,
         current_job_uuid: UUID | None = None,
+        current_ingestion_uuid: UUID | None = None,
         error_category: str | None = None,
         error_code: str | None = None,
     ) -> WorkerRuntimeSnapshot:
@@ -67,6 +69,13 @@ class WorkerRuntimeStatusRepository:
         now = validate_aware_datetime(now, "now")
         if current_job_uuid is not None:
             validate_uuid(current_job_uuid, "current_job_uuid")
+        if current_ingestion_uuid is not None:
+            validate_uuid(current_ingestion_uuid, "current_ingestion_uuid")
+        if service_name is WorkerServiceName.PUBLISHER:
+            if current_job_uuid is not None:
+                raise ValueError("publisher heartbeats cannot reference a job")
+        elif current_ingestion_uuid is not None:
+            raise ValueError("only publisher heartbeats may reference an ingestion")
         error_category, error_code = validate_optional_error(
             error_category,
             error_code,
@@ -91,6 +100,7 @@ class WorkerRuntimeStatusRepository:
                 state=state.value,
                 last_heartbeat_at=now,
                 current_job_uuid=current_job_uuid,
+                current_ingestion_uuid=current_ingestion_uuid,
                 last_error_category=error_category,
                 last_error_code=error_code,
                 updated_at=now,
@@ -108,6 +118,7 @@ class WorkerRuntimeStatusRepository:
             runtime.state = state.value
             runtime.last_heartbeat_at = now
             runtime.current_job_uuid = current_job_uuid
+            runtime.current_ingestion_uuid = current_ingestion_uuid
             runtime.last_error_category = error_category
             runtime.last_error_code = error_code
             runtime.updated_at = now
@@ -130,6 +141,7 @@ def _to_snapshot(runtime: WorkerRuntimeStatus) -> WorkerRuntimeSnapshot:
         state=WorkerRuntimeState(runtime.state),
         last_heartbeat_at=runtime.last_heartbeat_at,
         current_job_uuid=runtime.current_job_uuid,
+        current_ingestion_uuid=runtime.current_ingestion_uuid,
         last_error_category=runtime.last_error_category,
         last_error_code=runtime.last_error_code,
         updated_at=runtime.updated_at,

@@ -24,6 +24,10 @@ from glpi_ticketing_web.services import (
 NOW = datetime(2026, 8, 29, 12, tzinfo=UTC)
 INSTANCE_ID = UUID("e4b68965-df78-4d98-9c99-7ae9b32056a4")
 JOB_UUID = UUID("e53683a9-f884-402c-acf8-e9ed5d9fe07c")
+DEPLOYED_WORKER_SERVICES = (
+    WorkerServiceName.AUTOMATION,
+    WorkerServiceName.RETENTION,
+)
 
 
 @pytest.fixture
@@ -54,6 +58,35 @@ def test_absent_workers_are_always_projected_once(
     ]
     assert all(alert.kind is AlertKind.WORKER_ABSENT for alert in snapshot.alerts)
     assert all(alert.condition_since is None for alert in snapshot.alerts)
+
+
+def test_future_publisher_heartbeat_does_not_break_current_dashboard(
+    policy: ObservabilityPolicy,
+) -> None:
+    publisher = WorkerRuntimeSnapshot(
+        service_name=WorkerServiceName.PUBLISHER,
+        instance_id=INSTANCE_ID,
+        state=WorkerRuntimeState.RUNNING,
+        last_heartbeat_at=NOW,
+        current_job_uuid=None,
+        current_ingestion_uuid=JOB_UUID,
+        last_error_category=None,
+        last_error_code=None,
+        updated_at=NOW,
+    )
+
+    snapshot = policy.evaluate(
+        observed_at=NOW,
+        runtimes=(*_healthy_runtimes(), publisher),
+        jobs=_empty_jobs(),
+        retentions=_empty_retentions(),
+    )
+
+    assert tuple(worker.service_name for worker in snapshot.workers) == (
+        WorkerServiceName.AUTOMATION,
+        WorkerServiceName.RETENTION,
+    )
+    assert snapshot.alerts == ()
 
 
 def test_heartbeat_is_fresh_at_exact_threshold_and_stale_after_it(
@@ -240,7 +273,7 @@ def _healthy_runtimes() -> tuple[WorkerRuntimeSnapshot, ...]:
             state=WorkerRuntimeState.RUNNING,
             heartbeat_at=NOW,
         )
-        for service_name in WorkerServiceName
+        for service_name in DEPLOYED_WORKER_SERVICES
     )
 
 
@@ -257,6 +290,7 @@ def _runtime(
         state=state,
         last_heartbeat_at=heartbeat_at,
         current_job_uuid=JOB_UUID,
+        current_ingestion_uuid=None,
         last_error_category=error[0] if error is not None else None,
         last_error_code=error[1] if error is not None else None,
         updated_at=heartbeat_at,

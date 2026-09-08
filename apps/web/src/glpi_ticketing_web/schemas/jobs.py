@@ -60,6 +60,7 @@ class JobEventActor(StrEnum):
     WEB = "web"
     WORKER_AUTOMATION = "worker_automation"
     WORKER_RETENTION = "worker_retention"
+    WORKER_PUBLISHER = "worker_publisher"
 
 
 class JobEventName(StrEnum):
