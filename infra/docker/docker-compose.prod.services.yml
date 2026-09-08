@@ -6,6 +6,22 @@ x-ca-bundle: &ca-bundle
   bind:
     create_host_path: false
 
+x-publisher-private-key: &publisher-private-key
+  type: bind
+  source: ${PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH:?Set PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH}
+  target: /run/secrets/publisher-entra-private-key.pem
+  read_only: true
+  bind:
+    create_host_path: false
+
+x-publisher-certificate: &publisher-certificate
+  type: bind
+  source: ${PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH:?Set PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH}
+  target: /run/secrets/publisher-entra-certificate.pem
+  read_only: true
+  bind:
+    create_host_path: false
+
 x-application-runtime: &application-runtime
   init: true
   read_only: true
@@ -63,7 +79,6 @@ services:
       WEB_HOST: 0.0.0.0
       WEB_PORT: "8000"
       WEB_TRUST_PROXY_HEADERS: "false"
-      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
       WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-10}
       DASHBOARD_WORKER_STALE_AFTER_SECONDS: ${DASHBOARD_WORKER_STALE_AFTER_SECONDS:-45}
       DASHBOARD_PENDING_ALERT_AFTER_SECONDS: ${DASHBOARD_PENDING_ALERT_AFTER_SECONDS:-900}
@@ -75,7 +90,7 @@ services:
     expose:
       - "8000"
     volumes:
-      - audio-data:/data/audios
+      - audio-data:/data/audios:ro
       - *ca-bundle
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
@@ -120,6 +135,47 @@ services:
     volumes:
       - audio-data:/data/audios:ro
       - *ca-bundle
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    networks:
+      - database
+    restart: "on-failure:5"
+
+  worker-publisher:
+    <<: *application-runtime
+    build:
+      context: ../..
+      dockerfile: infra/docker/worker-publisher/Dockerfile
+    environment:
+      <<: *database-environment
+      AUDIO_ROOT: /data/audios
+      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+      PUBLISHER_LOG_LEVEL: ${PUBLISHER_LOG_LEVEL:-INFO}
+      PUBLISHER_ENTRA_TENANT_ID: ${PUBLISHER_ENTRA_TENANT_ID:?Set PUBLISHER_ENTRA_TENANT_ID}
+      PUBLISHER_ENTRA_CLIENT_ID: ${PUBLISHER_ENTRA_CLIENT_ID:?Set PUBLISHER_ENTRA_CLIENT_ID}
+      PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH: /run/secrets/publisher-entra-private-key.pem
+      PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH: /run/secrets/publisher-entra-certificate.pem
+      PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE: ${PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE:-}
+      PUBLISHER_MAILBOX_ID: ${PUBLISHER_MAILBOX_ID:?Set PUBLISHER_MAILBOX_ID}
+      PUBLISHER_GRAPH_PAGE_SIZE: ${PUBLISHER_GRAPH_PAGE_SIZE:-50}
+      PUBLISHER_MAX_ATTACHMENT_BYTES: ${PUBLISHER_MAX_ATTACHMENT_BYTES:-26214400}
+      PUBLISHER_HTTP_TIMEOUT_SECONDS: ${PUBLISHER_HTTP_TIMEOUT_SECONDS:-10}
+      PUBLISHER_POLL_INTERVAL_SECONDS: ${PUBLISHER_POLL_INTERVAL_SECONDS:-30}
+      PUBLISHER_HEARTBEAT_INTERVAL_SECONDS: ${PUBLISHER_HEARTBEAT_INTERVAL_SECONDS:-10}
+      WORKER_HEALTHCHECK_STALE_AFTER_SECONDS: ${WORKER_HEALTHCHECK_STALE_AFTER_SECONDS:-45}
+      PUBLISHER_RETRY_INITIAL_SECONDS: ${PUBLISHER_RETRY_INITIAL_SECONDS:-5}
+      PUBLISHER_RETRY_MAX_SECONDS: ${PUBLISHER_RETRY_MAX_SECONDS:-300}
+      PUBLISHER_SYSTEM_PROBE_INTERVAL_SECONDS: ${PUBLISHER_SYSTEM_PROBE_INTERVAL_SECONDS:-60}
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/gta-ca-bundle.pem
+      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
+    depends_on:
+      database-migrations:
+        condition: service_completed_successfully
+    volumes:
+      - audio-data:/data/audios
+      - *ca-bundle
+      - *publisher-private-key
+      - *publisher-certificate
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     networks:

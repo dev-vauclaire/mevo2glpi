@@ -17,6 +17,10 @@
 !apps/worker-automation/pyproject.toml
 !apps/worker-automation/src/
 !apps/worker-automation/src/**
+!apps/worker-publisher/
+!apps/worker-publisher/pyproject.toml
+!apps/worker-publisher/src/
+!apps/worker-publisher/src/**
 !apps/worker-retention/
 !apps/worker-retention/pyproject.toml
 !apps/worker-retention/src/

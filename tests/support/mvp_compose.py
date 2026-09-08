@@ -22,11 +22,29 @@ CUSTOM_SERVICES = (
     "database-migrations",
     "web",
     "worker-automation",
+    "worker-publisher",
     "worker-retention",
 )
-ALL_SERVICES = ("postgres", *CUSTOM_SERVICES)
+# The historical disposable stack does not start the publisher until a local
+# Microsoft Graph double is available. Static deployment tests still validate
+# its production image and Compose contract.
+ALL_SERVICES = (
+    "postgres",
+    "database-migrations",
+    "web",
+    "worker-automation",
+    "worker-retention",
+)
 CONTROLLABLE_MVP_SERVICES = frozenset({"worker-automation", "worker-retention"})
 POLL_INTERVAL_SECONDS = 0.25
+_SYNTHETIC_PUBLISHER_PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
+c3ludGhldGljLXRlc3Qtb25seS1wcml2YXRlLWtleQ==
+-----END PRIVATE KEY-----
+"""
+_SYNTHETIC_PUBLISHER_CERTIFICATE_PEM = """-----BEGIN CERTIFICATE-----
+c3ludGhldGljLXRlc3Qtb25seS1jZXJ0aWZpY2F0ZQ==
+-----END CERTIFICATE-----
+"""
 
 
 def _deployment_environment_names() -> frozenset[str]:
@@ -94,6 +112,7 @@ def run_command(
     command: Sequence[str],
     *,
     environment: Mapping[str, str],
+    input_text: str | None = None,
     check: bool = True,
     timeout_seconds: float = 180.0,
     secrets_to_redact: Sequence[str] = (),
@@ -104,6 +123,7 @@ def run_command(
             command,
             cwd=REPOSITORY_ROOT,
             env=environment,
+            input=input_text,
             text=True,
             capture_output=True,
             timeout=timeout_seconds,
@@ -140,6 +160,7 @@ class MvpComposeEnvironment:
         *arguments: str,
         project_name: str | None = None,
         extra_files: Sequence[Path] = (),
+        input_text: str | None = None,
         check: bool = True,
         timeout_seconds: float = 180.0,
     ) -> subprocess.CompletedProcess[str]:
@@ -160,6 +181,7 @@ class MvpComposeEnvironment:
         return run_command(
             command,
             environment=clean_environment(),
+            input_text=input_text,
             check=check,
             timeout_seconds=timeout_seconds,
             secrets_to_redact=self._runtime_secrets,
@@ -206,10 +228,18 @@ class MvpComposeEnvironment:
 
     def assert_image_contains_no_runtime_secret(self, service_name: str) -> None:
         """Scan image metadata and history without rendering a leaked value."""
-        image_id = str(self.inspect_service(service_name)["Image"])
-        metadata = json.dumps(self.inspect_image_for_service(service_name))
+        image_reference = f"{self.project_name}-{service_name}"
+        image_result = run_command(
+            ["docker", "image", "inspect", image_reference],
+            environment=clean_environment(),
+            secrets_to_redact=self._runtime_secrets,
+        )
+        image_payload = json.loads(image_result.stdout)
+        if not isinstance(image_payload, list) or len(image_payload) != 1:
+            raise RuntimeError("Docker image inspect returned an invalid payload")
+        metadata = json.dumps(image_payload[0])
         history = run_command(
-            ["docker", "history", "--no-trunc", image_id],
+            ["docker", "history", "--no-trunc", image_reference],
             environment=clean_environment(),
             secrets_to_redact=self._runtime_secrets,
         ).stdout
@@ -376,11 +406,11 @@ class MvpComposeEnvironment:
         )
 
     def build(self, timeout_seconds: float = 10 * 60) -> None:
-        """Build the four application images once for this test project."""
-        self.compose("build", timeout_seconds=timeout_seconds)
+        """Build only the applications exercised by the historical E2E suite."""
+        self.compose("build", *CUSTOM_SERVICES, timeout_seconds=timeout_seconds)
 
     def start(self) -> None:
-        """Start the complete stack and require all long-lived services healthy."""
+        """Start the downstream stack without requiring real Exchange credentials."""
         self._release_port_reservations()
         for network_name in self._external_network_names:
             run_command(
@@ -394,6 +424,7 @@ class MvpComposeEnvironment:
             "--wait",
             "--wait-timeout",
             "120",
+            *ALL_SERVICES,
             timeout_seconds=240,
         )
         self.wait_for_migration()
@@ -503,6 +534,9 @@ def create_mvp_compose_environment(
     postgres_password = runtime_root / "postgres.password"
     postgres_password.write_text(f"{database_password}\n", encoding="utf-8")
     postgres_password.chmod(0o640)
+    publisher_private_key, publisher_certificate = _write_synthetic_publisher_pem_files(
+        runtime_root
+    )
     project_name = f"{project_prefix}{secrets.token_hex(5)}"
     proxy_network_name = f"{project_name}-dokploy"
     database_network_name = f"{project_name}-database"
@@ -529,7 +563,20 @@ def create_mvp_compose_environment(
         "DATABASE_READY_TIMEOUT_SECONDS": "60",
         "DATABASE_READY_INTERVAL_SECONDS": "0.25",
         "PUBLIC_BASE_URL": effective_public_base_url,
-        "MAX_UPLOAD_BYTES": "1048576",
+        "PUBLISHER_ENTRA_TENANT_ID": "00000000-0000-4000-8000-000000000001",
+        "PUBLISHER_ENTRA_CLIENT_ID": "00000000-0000-4000-8000-000000000002",
+        "PUBLISHER_MAILBOX_ID": "00000000-0000-4000-8000-000000000003",
+        "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH": str(publisher_private_key),
+        "PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH": str(publisher_certificate),
+        "PUBLISHER_LOG_LEVEL": "INFO",
+        "PUBLISHER_GRAPH_PAGE_SIZE": "50",
+        "PUBLISHER_MAX_ATTACHMENT_BYTES": "26214400",
+        "PUBLISHER_HTTP_TIMEOUT_SECONDS": "10",
+        "PUBLISHER_POLL_INTERVAL_SECONDS": "30",
+        "PUBLISHER_HEARTBEAT_INTERVAL_SECONDS": "1",
+        "PUBLISHER_RETRY_INITIAL_SECONDS": "30",
+        "PUBLISHER_RETRY_MAX_SECONDS": "30",
+        "PUBLISHER_SYSTEM_PROBE_INTERVAL_SECONDS": "30",
         "WORKER_IDLE_INTERVAL_SECONDS": "0.2",
         "WORKER_HEARTBEAT_INTERVAL_SECONDS": "1",
         "WORKER_HEALTHCHECK_STALE_AFTER_SECONDS": "8",
@@ -602,6 +649,23 @@ def create_mvp_compose_environment(
 def _require_controllable_mvp_service(service_name: str) -> None:
     if service_name not in CONTROLLABLE_MVP_SERVICES:
         raise ValueError("service_name is not controllable by the MVP test harness")
+
+
+def _write_synthetic_publisher_pem_files(runtime_root: Path) -> tuple[Path, Path]:
+    """Create non-functional PEM bind sources for downstream-only Compose tests."""
+    private_key = runtime_root / "publisher-private-key.pem"
+    certificate = runtime_root / "publisher-certificate.pem"
+    private_key.write_text(
+        _SYNTHETIC_PUBLISHER_PRIVATE_KEY_PEM,
+        encoding="ascii",
+    )
+    certificate.write_text(
+        _SYNTHETIC_PUBLISHER_CERTIFICATE_PEM,
+        encoding="ascii",
+    )
+    private_key.chmod(0o600)
+    certificate.chmod(0o644)
+    return private_key.resolve(strict=True), certificate.resolve(strict=True)
 
 
 def _reserve_loopback_ports(count: int) -> tuple[socket.socket, ...]:

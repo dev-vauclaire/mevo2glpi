@@ -39,7 +39,7 @@ def _volume_for(service: dict[str, Any], target: str) -> dict[str, Any] | None:
     return None
 
 
-def test_production_manifest_contains_only_the_four_applications() -> None:
+def test_production_manifest_contains_only_the_five_applications() -> None:
     assert BASE_COMPOSE_FILE == DOCKER_ROOT / "docker-compose.prod.yml"
     assert BASE_COMPOSE_FILE.is_file()
     assert PRODUCTION_COMPOSE_SERVICES_FILE == (
@@ -64,6 +64,7 @@ def test_production_entrypoint_exposes_services_to_dokploy() -> None:
   database-migrations: {}
   web: {}
   worker-automation: {}
+  worker-publisher: {}
   worker-retention: {}
 """
 
@@ -160,7 +161,7 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     )
 
 
-def test_production_manifest_builds_the_four_expected_images(
+def test_production_manifest_builds_the_five_expected_images(
     render_compose: Callable[[], dict[str, object]],
 ) -> None:
     services = _services(render_compose())
@@ -172,6 +173,7 @@ def test_production_manifest_builds_the_four_expected_images(
         "database-migrations": "infra/docker/database-migrations/Dockerfile",
         "web": "infra/docker/web/Dockerfile",
         "worker-automation": "infra/docker/worker-automation/Dockerfile",
+        "worker-publisher": "infra/docker/worker-publisher/Dockerfile",
         "worker-retention": "infra/docker/worker-retention/Dockerfile",
     }
     for service_name, dockerfile in expected_dockerfiles.items():
@@ -195,6 +197,7 @@ def test_production_manifest_separates_proxy_and_database_networks(
     for service_name in (
         "database-migrations",
         "worker-automation",
+        "worker-publisher",
         "worker-retention",
     ):
         assert set(services[service_name]["networks"]) == {"database"}
@@ -205,7 +208,12 @@ def test_migration_gates_all_long_lived_applications(
 ) -> None:
     services = _services(render_compose())
     assert "depends_on" not in services["database-migrations"]
-    for service_name in ("web", "worker-automation", "worker-retention"):
+    for service_name in (
+        "web",
+        "worker-automation",
+        "worker-publisher",
+        "worker-retention",
+    ):
         assert services[service_name]["depends_on"] == {
             "database-migrations": {
                 "condition": "service_completed_successfully",
@@ -221,15 +229,20 @@ def test_audio_access_follows_least_privilege(
     assert _volume_for(services["database-migrations"], "/data/audios") is None
     web_audio = _volume_for(services["web"], "/data/audios")
     automation_audio = _volume_for(services["worker-automation"], "/data/audios")
+    publisher_audio = _volume_for(services["worker-publisher"], "/data/audios")
     retention_audio = _volume_for(services["worker-retention"], "/data/audios")
-    assert web_audio is not None and web_audio.get("read_only", False) is False
+    assert web_audio is not None and web_audio["read_only"] is True
     assert automation_audio is not None and automation_audio["read_only"] is True
+    assert (
+        publisher_audio is not None and publisher_audio.get("read_only", False) is False
+    )
     assert (
         retention_audio is not None and retention_audio.get("read_only", False) is False
     )
     assert {
         web_audio["source"],
         automation_audio["source"],
+        publisher_audio["source"],
         retention_audio["source"],
     } == {"audio-data"}
 
@@ -242,6 +255,7 @@ def test_runtime_hardening_and_restart_policies_are_explicit(
         "database-migrations": "no",
         "web": "unless-stopped",
         "worker-automation": "on-failure:5",
+        "worker-publisher": "on-failure:5",
         "worker-retention": "on-failure:5",
     }
     for service_name, service in services.items():
@@ -270,6 +284,13 @@ def test_web_receives_no_provider_credentials(
         not in services["worker-retention"]["environment"]
     )
     assert web_environment["WEB_TRUST_PROXY_HEADERS"] == "false"
+    publisher_environment = services["worker-publisher"]["environment"]
+    assert "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH" in publisher_environment
+    assert "PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH" in publisher_environment
+    assert not any(
+        name.startswith(("GLPI_", "LEGACY_TRANSCRIPTION_"))
+        for name in publisher_environment
+    )
 
 
 def test_ca_bundle_is_read_only_and_used_without_disabling_tls(
@@ -284,8 +305,40 @@ def test_ca_bundle_is_read_only_and_used_without_disabling_tls(
         assert bundle["read_only"] is True
         assert service["environment"]["PGSSLROOTCERT"] == target
 
-    for worker_name in ("worker-automation", "worker-retention"):
+    for worker_name in (
+        "worker-automation",
+        "worker-publisher",
+        "worker-retention",
+    ):
         assert services[worker_name]["environment"]["SSL_CERT_FILE"] == target
+    assert services["worker-publisher"]["environment"]["REQUESTS_CA_BUNDLE"] == target
+
+
+def test_publisher_pem_credentials_are_separate_read_only_bind_mounts(
+    render_compose: Callable[[], dict[str, object]],
+) -> None:
+    publisher = _services(render_compose())["worker-publisher"]
+    private_key = _volume_for(
+        publisher,
+        "/run/secrets/publisher-entra-private-key.pem",
+    )
+    certificate = _volume_for(
+        publisher,
+        "/run/secrets/publisher-entra-certificate.pem",
+    )
+
+    assert private_key is not None and private_key["read_only"] is True
+    assert certificate is not None and certificate["read_only"] is True
+    assert private_key["type"] == certificate["type"] == "bind"
+    assert private_key["source"] != certificate["source"]
+    assert (
+        publisher["environment"]["PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH"]
+        == (private_key["target"])
+    )
+    assert (
+        publisher["environment"]["PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH"]
+        == (certificate["target"])
+    )
 
 
 def test_disposable_stack_reports_fresh_workers_over_direct_http(
@@ -300,8 +353,16 @@ def test_disposable_stack_reports_fresh_workers_over_direct_http(
             response = client.get("/api/observability")
             response.raise_for_status()
             candidate = response.json()
+            workers_by_service = {
+                worker["service_name"]: worker for worker in candidate["workers"]
+            }
             if all(
-                worker["heartbeat_status"] == "fresh" for worker in candidate["workers"]
+                workers_by_service.get(service_name, {}).get("heartbeat_status")
+                == "fresh"
+                for service_name in ("worker_automation", "worker_retention")
+            ) and (
+                workers_by_service.get("worker_publisher", {}).get("heartbeat_status")
+                == "absent"
             ):
                 observed = candidate
                 break
@@ -310,6 +371,7 @@ def test_disposable_stack_reports_fresh_workers_over_direct_http(
     assert health.json() == {"status": "ok"}
     assert observed is not None
     assert {worker["service_name"] for worker in observed["workers"]} == {
+        "worker_publisher",
         "worker_automation",
         "worker_retention",
     }

@@ -49,6 +49,15 @@ def render_compose() -> Callable[[], dict[str, object]]:
             "GLPI_PASSWORD": providers.glpi_password,
             "GLPI_CLIENT_ID": providers.glpi_client_id,
             "GLPI_CLIENT_SECRET": providers.glpi_client_secret,
+            "PUBLISHER_ENTRA_TENANT_ID": "00000000-0000-4000-8000-000000000001",
+            "PUBLISHER_ENTRA_CLIENT_ID": "00000000-0000-4000-8000-000000000002",
+            "PUBLISHER_MAILBOX_ID": "00000000-0000-4000-8000-000000000003",
+            "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH": (
+                "/tmp/synthetic-publisher-private-key.pem"
+            ),
+            "PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH": (
+                "/tmp/synthetic-publisher-certificate.pem"
+            ),
         }
         result = run_command(
             [
@@ -77,7 +86,7 @@ def render_compose() -> Callable[[], dict[str, object]]:
 def deployment_environment(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[DeploymentEnvironment]:
-    """Build and run the four apps with test-only PostgreSQL and direct web HTTP."""
+    """Build five apps and run the downstream stack with disposable PostgreSQL."""
     if os.environ.get("PYTEST_XDIST_WORKER") is not None:
         pytest.fail("Deployment tests must not be parallelized")
 
