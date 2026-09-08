@@ -1,24 +1,28 @@
 # GLPI Ticketing Automation
 
-GLPI Ticketing Automation est un MVP qui transforme des fichiers audio en
-tickets GLPI. L'application web reçoit les audios et permet de suivre les
-traitements ; un worker demande leur transcription à Transcribe AI puis crée le
-ticket GLPI ; un second worker applique la politique de rétention.
+GLPI Ticketing Automation est un MVP qui transforme les messages vocaux d'une
+boîte Exchange Online dédiée en tickets GLPI. Le worker publisher ingère leur
+pièce jointe WAV, le worker d'automatisation demande la transcription à
+Transcribe AI puis crée le ticket GLPI, et le worker de rétention applique la
+politique de conservation. L'application web est une interface de consultation
+et d'action opérateur ; elle ne dépose plus d'audio.
 
 PostgreSQL est l'unique source de vérité du cycle de vie. Les octets audio sont
 conservés dans un volume partagé sous une clé canonique immuable. Le projet est
 prévu pour un déploiement mono-serveur avec Docker Compose et Dokploy.
 
-La branche stable est `main`. La première version du MVP est archivée par le
-tag `mvp-v0.1.0`. L'ancien POC à quatre répertoires reste consultable sous le
+La branche stable est `main`. Les versions du MVP sont archivées par les tags
+`mvp-vX.Y.Z` ; la dernière baseline publiée est `mvp-v0.1.1`. L'ancien POC à
+quatre répertoires reste consultable sous le
 tag `poc-v0.1.0`, mais il ne décrit plus le code courant. Le passage du POC au
 MVP suppose une base PostgreSQL et un volume audio neufs ; aucune migration des
 anciens répertoires n'est fournie.
 
 ## Fonctionnalités du MVP
 
-- dépôt de plusieurs fichiers `wav`, `mp3`, `ogg` ou `m4a`, avec trois
-  uploads simultanés au maximum dans le navigateur ;
+- ingestion dédiée des messages vocaux Exchange Online par le worker publisher,
+  avec identifiants Graph immuables, contrôle du WAV et acquittement dans les
+  dossiers `Processed` ou `Rejected` ;
 - suivi paginé des jobs, consultation de leur historique expurgé et relance
   opérateur d'un job `failed` ou `blocked` ;
 - persistance PostgreSQL des transitions, tentatives, identifiants distants,
@@ -33,19 +37,25 @@ anciens répertoires n'est fournie.
   jusqu'à leur deadline absolue ;
 - dashboard interne présentant l'état des workers et les alertes
   opérationnelles ;
-- déploiement Dokploy composé uniquement de la migration, du web et des deux
+- déploiement Dokploy composé de la migration one-shot, du web et des trois
   workers.
 
 ## Architecture d'exécution
 
 ```mermaid
 flowchart LR
-    U[Utilisateur] --> T[Traefik Dokploy]
+    U[Opérateur] --> T[Traefik Dokploy]
     T --> W[Application web]
+
+    B[Boîte Exchange Online] --> WP[Worker publisher]
+    WP -->|client_credentials| E[Entra ID]
+    WP -->|Graph v1.0| B
 
     M[Migration Alembic one-shot] --> DB[(PostgreSQL externe)]
     W --> DB
-    W --> A[(Volume audio)]
+    W -->|lecture| A[(Volume audio)]
+    WP --> DB
+    WP -->|publication| A
 
     WA[Worker automation] --> DB
     WA -->|lecture| A
@@ -58,15 +68,15 @@ flowchart LR
 ```
 
 Au démarrage du Compose, `database-migrations` attend PostgreSQL, exécute
-`alembic upgrade head`, puis s'arrête. Le web et les deux workers démarrent
+`alembic upgrade head`, puis s'arrête. Le web et les trois workers démarrent
 après le succès de cette migration ; aucun ordre supplémentaire n'est requis
-entre ces trois services.
+entre ces quatre services persistants.
 
 PostgreSQL, GLPI, Transcribe AI et Traefik ne sont pas embarqués dans le
 Compose de production :
 
 - PostgreSQL est provisionné séparément et rejoint par un réseau Docker privé ;
-- GLPI et Transcribe AI sont des services externes accessibles par le worker ;
+- GLPI, Transcribe AI, Entra ID et Graph sont accessibles par les workers ;
 - Traefik est fourni et configuré par Dokploy ;
 - le volume nommé des audios est le seul stockage persistant créé par le
   Compose.
@@ -80,7 +90,8 @@ développement et la configuration de Pytest et Ruff.
 | Membre | Distribution Python | Responsabilité | Documentation |
 | --- | --- | --- | --- |
 | `apps/database-migrations` | `glpi-ticketing-database-migrations` | Migration Alembic one-shot et historique du schéma | [Migrations](apps/database-migrations/README.md) |
-| `apps/web` | `glpi-ticketing-web` | Uploads, API de consultation, dashboard, retry opérateur et téléchargement | [Application web](apps/web/README.md) |
+| `apps/web` | `glpi-ticketing-web` | API de consultation, dashboard, retry opérateur et téléchargement | [Application web](apps/web/README.md) |
+| `apps/worker-publisher` | `glpi-ticketing-worker-publisher` | Ingestion Exchange Online, validation WAV, publication atomique et acquittement Graph | [Worker publisher](apps/worker-publisher/README.md) |
 | `apps/worker-automation` | `glpi-ticketing-worker-automation` | Transcription, création GLPI et finalisation des jobs | [Worker d'automatisation](apps/worker-automation/README.md) |
 | `apps/worker-retention` | `glpi-ticketing-worker-retention` | Contrôle GLPI, deadlines et purge crash-safe | [Worker de rétention](apps/worker-retention/README.md) |
 | `packages/common` | `glpi-ticketing-common` | Stockage audio canonique, attente coopérative, backoff et healthchecks | [Package commun](packages/common/README.md) |
@@ -96,8 +107,9 @@ dans `packages`.
 
 ```mermaid
 flowchart TD
-    Upload[POST /api/jobs] --> Publish[Publier l'audio canonique]
-    Publish --> Pending[(pending + job_created)]
+    Exchange[Message Exchange + WAV] --> Publish[Worker publisher]
+    Publish --> Audio[Publier l'audio canonique]
+    Audio --> Pending[(pending + job_created)]
     Pending --> Select[Sélection PostgreSQL]
     RetryDue[(retry_scheduled dû)] --> Select
     Resume[(processing abandonné)] --> Select
@@ -120,21 +132,24 @@ flowchart TD
     Ticket -->|ambiguïté du job| Blocked
 ```
 
-### Ingestion web
+### Ingestion Exchange
 
-Le web valide l'extension, l'absence de fichier vide et la taille maximale,
-écrit le flux dans un fichier temporaire `.part`, le synchronise puis le
-publie en mode create-only. Le nom fourni par l'utilisateur n'est pas conservé :
-la clé persistée vaut `{audio_uuid}.{extension}`.
+Le web n'accepte plus de création de job. Le worker publisher demande un jeton
+applicatif Entra ID, pagine l'Inbox avec Microsoft Graph et persiste les
+messages en utilisant `Prefer: IdType="ImmutableId"`. Il reprend toujours un
+traitement durable avant de découvrir de nouveaux messages.
 
-Une transaction crée ensuite le job `pending` et son événement
-`job_created`. La réponse est un `202 Accepted` avec l'UUID et un en-tête
-`Location`. En cas de résultat de commit incertain, le service relit le job
-dans une nouvelle session avant de répondre.
+Un message doit contenir exactement une pièce jointe WAV non vide, valide et
+d'au plus 25 Mio. Le worker la télécharge dans un fichier temporaire, publie la
+clé canonique `{ingestion_uuid}.wav`, puis crée le job `pending` et son
+événement dans une transaction. Le message est déplacé dans `Processed`
+uniquement après cette frontière durable. Un message invalide est enregistré
+avec un motif expurgé avant son déplacement dans `Rejected`.
 
-L'audio est donc complet avant de devenir consommable. Un crash entre la
-publication du fichier et la transaction peut toutefois laisser un fichier
-orphelin ; le MVP ne nettoie pas encore automatiquement ces orphelins.
+Les appels temporaires en échec sont rejoués avec backoff. Une réponse perdue
+pendant un déplacement Graph est réconciliée en relisant le dossier courant du
+message. Les identifiants opaques Exchange, jetons, noms de pièces jointes et
+contenus audio ne sont jamais journalisés.
 
 ### Worker d'automatisation
 
@@ -218,16 +233,15 @@ retourne alors `410 Gone`.
 
 ## Interface web et API
 
-L'interface `GET /` propose le dépôt multiple, des filtres par état et UUID,
-la pagination, un détail avec événements, le téléchargement, la relance
-opérateur et les alertes. Elle actualise les jobs et l'observabilité toutes les
-dix secondes lorsque l'onglet est visible.
+L'interface `GET /` propose des filtres par état et UUID, la pagination, un
+détail avec événements, le téléchargement, la relance opérateur et les alertes.
+Elle actualise les jobs et l'observabilité toutes les dix secondes lorsque
+l'onglet est visible.
 
 | Route | Rôle |
 | --- | --- |
 | `GET /health` | Liveness du processus web, sans sonder PostgreSQL |
 | `GET /` | Dashboard interne |
-| `POST /api/jobs` | Reçoit un multipart `audio_file`, retourne `202` et `Location` |
 | `GET /api/jobs` | Pagination par curseur, filtre d'état et recherche UUID exacte |
 | `GET /api/jobs/{audio_uuid}` | Détail persistant et état de rétention |
 | `GET /api/jobs/{audio_uuid}/events` | Historique expurgé, paginé séparément |
@@ -251,13 +265,14 @@ Les contraintes des `pyproject.toml` sont la source de vérité et `uv.lock`
 
 | Technologie | Utilisation |
 | --- | --- |
-| Python 3.12+ | Langage des sept membres du workspace |
+| Python 3.12+ | Langage des huit membres du workspace |
 | uv | Workspace, verrouillage, exécution et build |
 | FastAPI, Uvicorn, Jinja2 | API HTTP, serveur ASGI et dashboard |
 | Pydantic Settings | Configuration typée par variables d'environnement |
 | SQLAlchemy 2, Psycopg 3 | Modèles, repositories et accès PostgreSQL synchrone |
 | Alembic | Migrations one-shot du schéma |
-| HTTPX | Clients Transcribe AI et GLPI |
+| HTTPX, HTTPX2 | Clients Transcribe AI, GLPI et Microsoft Graph |
+| MSAL | Authentification applicative Entra ID du publisher par clé privée et certificat X.509 |
 | Pytest, Testcontainers | Tests unitaires et stacks d'intégration jetables |
 | Ruff | Formatage et analyse statique |
 | Docker Compose, Dokploy, Traefik | Packaging et déploiement mono-serveur |
@@ -271,7 +286,10 @@ Pour développer ou lancer les applications localement :
 - une base PostgreSQL joignable ;
 - une racine audio existante et inscriptible ;
 - une instance Transcribe AI et une instance GLPI pour exécuter le pipeline
-  complet.
+  complet ;
+- une application Entra ID autorisée par administrateur, limitée à la boîte
+  Exchange dédiée, ainsi que sa clé privée PEM et son certificat public X.509
+  PEM dans deux fichiers distincts pour lancer le publisher réel.
 
 Pour les suites marquées `database`, `deployment`, `glpi`,
 `transcribe_ai` ou `e2e`, Docker Engine et le plugin Compose sont requis.
@@ -311,10 +329,15 @@ Appliquez d'abord le schéma :
 uv run glpi-ticketing-database-migrations
 ```
 
-Lancez ensuite les trois processus persistants dans des terminaux séparés :
+Lancez ensuite les quatre processus persistants dans des terminaux séparés :
 
 ```bash
 uv run glpi-ticketing-web
+```
+
+```bash
+uv run --package glpi-ticketing-worker-publisher \
+  glpi-ticketing-publisher
 ```
 
 ```bash
@@ -333,6 +356,7 @@ curl --fail http://127.0.0.1:8000/health
 ```
 
 Les formes `python -m glpi_ticketing_web`,
+`python -m glpi_ticketing_worker_publisher`,
 `python -m glpi_ticketing_worker_automation` et
 `python -m glpi_ticketing_worker_retention` sont également prises en charge
 dans leur environnement uv.
@@ -353,7 +377,8 @@ Les principales variables sont :
 | Groupe | Variables structurantes |
 | --- | --- |
 | PostgreSQL | `DATABASE_URL`, `DATABASE_CONNECT_TIMEOUT_SECONDS` |
-| Stockage et web | `AUDIO_ROOT`, `PUBLIC_BASE_URL`, `MAX_UPLOAD_BYTES`, `WEB_HOST`, `WEB_PORT` |
+| Stockage et web | `AUDIO_ROOT`, `PUBLIC_BASE_URL`, `WEB_HOST`, `WEB_PORT` |
+| Publisher | `PUBLISHER_ENTRA_*`, `PUBLISHER_MAILBOX_ID`, `PUBLISHER_GRAPH_*`, `PUBLISHER_*_INTERVAL_SECONDS` |
 | Transcribe AI | `LEGACY_TRANSCRIPTION_BASE_URL`, `LEGACY_TRANSCRIPTION_API_KEY`, timeouts et polling `TRANSCRIPTION_*` |
 | GLPI | `GLPI_BASE_URL`, `GLPI_USERNAME`, `GLPI_PASSWORD`, `GLPI_CLIENT_ID`, `GLPI_CLIENT_SECRET`, valeurs `GLPI_TICKET_*` |
 | Worker | `WORKER_LOG_LEVEL`, intervalles `WORKER_*` et durées `*_RETENTION_DAYS` |
@@ -366,18 +391,20 @@ expurgés pour GLPI ; il ne journalise ni secret, ni transcription, ni réponse
 HTTP brute.
 
 Les fichiers `.env` réels sont ignorés par Git et ne doivent jamais être
-commités. Les secrets de production doivent être stockés dans l'environnement
-Dokploy ou, dans une évolution future, dans un coffre de secrets.
+commités. Les secrets de production sont fournis par l'environnement Dokploy ;
+la clé privée et le certificat du publisher restent des fichiers hôte montés en
+lecture seule.
 
 ## Déploiement Dokploy
 
 Le seul manifeste à donner à Dokploy est
 [infra/docker/docker-compose.prod.yml](infra/docker/docker-compose.prod.yml).
-Il rend les quatre services découvrables puis inclut
+Il rend les cinq services découvrables puis inclut
 `docker-compose.prod.services.yml`, où se trouve leur configuration complète :
 
 - `database-migrations` ;
 - `web` ;
+- `worker-publisher` ;
 - `worker-automation` ;
 - `worker-retention`.
 
@@ -391,19 +418,25 @@ stubs et des services inclus requiert Docker Compose 5.0 ou supérieur.
 
 1. Provisionner un PostgreSQL et sa base vide.
 2. Créer un réseau Docker privé partagé avec PostgreSQL, par exemple
-   `gta-database-network`.
+   `gta-database-network`. Ne pas utiliser l'option Docker `--internal` : le
+   publisher doit résoudre le DNS et sortir en HTTPS vers Entra ID et Graph.
 3. Vérifier l'existence du réseau Dokploy, généralement
    `dokploy-network`.
-4. Préparer sur l'hôte un bundle de CA lisible par Docker. Il doit contenir les
+4. Préparer sur l'hôte un bundle de CA lisible par l'UID/GID `10001` des
+   conteneurs, typiquement en mode `0644`. Il doit contenir les
    autorités publiques usuelles et les CA internes requises par PostgreSQL,
-   GLPI ou Transcribe AI.
-5. Créer dans Dokploy un service **Docker Compose** depuis ce dépôt et utiliser
+   GLPI, Transcribe AI, Entra ID ou Graph.
+5. Déposer sur l'hôte deux fichiers distincts et lisibles par l'UID/GID `10001` :
+   la clé privée PEM du publisher et son certificat public X.509 PEM. Charger
+   ce certificat public exact dans **Certificates & secrets** de l'application
+   Entra ; la clé privée ne doit jamais être intégrée à l'image ou au dépôt.
+6. Créer dans Dokploy un service **Docker Compose** depuis ce dépôt et utiliser
    le chemin `./infra/docker/docker-compose.prod.yml`.
-6. Copier toutes les variables de
+7. Copier toutes les variables de
    [infra/docker/.env.example](infra/docker/.env.example) dans l'onglet
    **Environment**, puis remplacer les valeurs `CHANGE_ME`.
-7. Attacher PostgreSQL au réseau indiqué par `DATABASE_NETWORK_NAME`.
-8. Ajouter au service `web` un domaine Dokploy pointant vers le port
+8. Attacher PostgreSQL au réseau indiqué par `DATABASE_NETWORK_NAME`.
+9. Ajouter au service `web` un domaine Dokploy pointant vers le port
    conteneur `8000`, puis limiter son accès au réseau interne.
 
 `DATABASE_URL` doit utiliser le nom ou l'adresse joignable depuis le réseau
@@ -416,9 +449,25 @@ conteneur. Le fichier est monté en lecture seule dans les applications sous
 `/etc/ssl/certs/gta-ca-bundle.pem`, puis utilisé par HTTPX et Psycopg. Ne
 désactivez pas la vérification TLS.
 
+`PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH` et
+`PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH` sont eux aussi des chemins absolus
+sur l'hôte. Le second fichier doit contenir un certificat X.509
+`BEGIN CERTIFICATE`, pas une clé publique brute. Une passphrase éventuelle est
+fournie séparément par `PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE`.
+
+Le publisher doit pouvoir joindre `login.microsoftonline.com` et
+`graph.microsoft.com` en HTTPS. Côté Microsoft 365, configurez Exchange Online
+Application RBAC avec `Application Mail.ReadWrite`, limité à la boîte dédiée,
+puis validez le scope avec `Test-ServicePrincipalAuthorization`. La procédure
+complète est décrite dans le
+[guide Microsoft](https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac).
+`PUBLISHER_MAILBOX_ID` attend l'Object ID Entra de l'utilisateur boîte, et non
+son Exchange GUID.
+
 Le web n'expose aucun port hôte : Dokploy configure son Traefik sur le port
-interne `8000`. Le volume audio est monté en lecture-écriture dans le web et
-le worker de rétention, et en lecture seule dans le worker d'automatisation.
+interne `8000`. Le volume audio est monté en lecture-écriture dans le publisher
+et le worker de rétention, et en lecture seule dans le web et le worker
+d'automatisation.
 
 Le contrat Compose peut être vérifié sans démarrer les services :
 
@@ -438,22 +487,29 @@ l'application.
 
 La suite locale est déterministe et n'appelle aucun service externe. Les
 horloges, fonctions de sommeil, clients et repositories sont injectés lorsque
-c'est nécessaire ; les tests ne dorment pas réellement.
+c'est nécessaire ; les tests ne dorment pas réellement. Les contrats Graph et
+le publisher utilisent un faux serveur HTTP stateful lié à `127.0.0.1`.
 
 Les suites d'intégration sont opt-in :
 
 | Marqueur | Environnement |
 | --- | --- |
 | `database` | PostgreSQL 16 jetable : migrations, schéma, repositories, verrous et cycles applicatifs |
-| `deployment` | Construction et validation du Compose et des quatre images |
+| `deployment` | Construction et validation du Compose et des cinq images |
 | `glpi` | GLPI 11.0.8 et MySQL 8.4.11 jetables, OAuth et contrats réels |
 | `transcribe_ai` | Stack Transcribe AI v1 jetable, CPU par défaut ou GPU explicite |
-| `e2e` | Stack complète avec web, workers, PostgreSQL, GLPI et Transcribe AI |
+| `e2e` | Pipeline aval avec frontière publisher synthétique, web, automation, retention, PostgreSQL, GLPI et Transcribe AI |
 
 Les suites Docker sont séquentielles : n'utilisez pas `pytest-xdist`, l'option
 `-n` ou plusieurs suites lourdes en parallèle. Les fixtures attendent les
 services par polling et détruisent leurs conteneurs, réseaux et volumes
 jetables après la session.
+
+L'E2E aval ne démarre pas le publisher réel et ne nécessite donc aucun tenant
+Entra ID. Un helper test-only produit sa frontière durable — audio atomique,
+job et événement `job_created` attribué à `worker_publisher` — tandis que les
+tests du publisher couvrent séparément l'authentification injectée, Graph, les
+dossiers `Processed`/`Rejected` et la reprise.
 
 ### Commandes de validation depuis la racine
 
@@ -519,9 +575,9 @@ topologie, les prérequis et le nettoyage.
 
 ## Release
 
-Le dépôt utilise des tags Git immuables `mvp-vX.Y.Z`. Le tag
-`mvp-v0.1.0` correspond à la première baseline MVP ; `poc-v0.1.0` reste une
-archive historique et ne doit pas être redéployé comme MVP.
+Le dépôt utilise des tags Git immuables `mvp-vX.Y.Z`. Le tag `mvp-v0.1.1` est
+la dernière baseline publiée ; `poc-v0.1.0` reste une archive historique et ne
+doit pas être redéployé comme MVP.
 
 Avant une release, fusionnez les changements validés dans `main`, puis
 synchronisez votre copie locale :
@@ -549,16 +605,15 @@ limites connues.
 ## Limites connues avant une production renforcée
 
 - aucune authentification ni autorisation applicative sur le web ;
-- contrôle d'upload limité à l'extension, à la taille et au fichier non vide,
-  sans inspection réelle du MIME ; une limite de corps doit aussi être
-  configurée dans Traefik ;
-- aucune clé d'idempotence sur l'upload HTTP : un retry client crée un nouvel
-  UUID ;
+- les rejets d'ingestion Exchange sont conservés en base mais n'ont pas encore
+  de liste ou de détail dédiés dans le dashboard ;
 - transcription non persistée et absence d'idempotence Transcribe AI, avec
   risque de retranscription ou de job distant orphelin ;
 - unicité de `external_id` non garantie à distance par GLPI ; une création au
   résultat inconnu peut encore nécessiter une décision opérateur ;
 - un seul worker de chaque type, sans haute disponibilité ni parallélisation ;
+- ingestion Exchange par polling paginé, sans abonnement Graph ni delta query ;
+- exactement une pièce jointe WAV d'au plus 25 Mio acceptée par message ;
 - alertes limitées au dashboard, sans historique, acquittement ou notification
   externe ;
 - fichiers audio orphelins d'une ingestion interrompue non nettoyés ;
@@ -573,5 +628,5 @@ limites connues.
   SBOM ;
 - aucune migration automatique des données ou volumes du POC.
 
-La conception détaillée et l'historique des décisions restent disponibles dans
+La conception détaillée du système courant est disponible dans
 [docs/mvp-architecture.md](docs/mvp-architecture.md).

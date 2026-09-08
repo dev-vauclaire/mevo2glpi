@@ -149,7 +149,7 @@ sont réduites à un code technique expurgé.
 La fermeture suit l'ordre heartbeat `stopped`, client HTTP, verrou advisory,
 puis moteur SQLAlchemy.
 
-Les codes de sortie sont communs aux deux workers :
+Les codes de sortie sont communs aux trois workers :
 
 | Code | Signification |
 | --- | --- |
@@ -237,7 +237,7 @@ installe l'application sans dépendances de développement et l'exécute en
 non-root. Dans Compose, `/data/audios` est monté en lecture-écriture car ce
 worker est l'unique application chargée de la quarantaine et de la suppression
 des octets après ingestion. Le
-[déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp) centralise sa
+[déploiement Dokploy](../../README.md#déploiement-dokploy) centralise sa
 configuration et monte le bundle de confiance interne en lecture seule.
 
 ## Tests

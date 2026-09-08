@@ -2,7 +2,7 @@
 
 `glpi-ticketing-common` contient les primitives de stockage audio, de backoff,
 d'attente coopérative et de healthcheck runtime partagées par le web et les
-deux workers. Il ne connaît ni PostgreSQL, ni FastAPI, ni GLPI, ni Transcribe AI
+trois workers. Il ne connaît ni PostgreSQL, ni FastAPI, ni GLPI, ni Transcribe AI
 et ne porte aucune politique métier.
 
 ## Stockage canonique unique
@@ -31,7 +31,7 @@ flowchart LR
     UUID[UUID + extension] --> Key[Clé canonique]
     Key --> Database[(PostgreSQL<br/>storage_key)]
     Key --> Path[/data/audios/clé]
-    Stream[Flux upload] --> Part[Fichier .part unique]
+    Stream[Flux audio entrant] --> Part[Fichier .part unique]
     Part --> Sync[flush + fsync]
     Sync --> Publish[Lien create-only atomique]
     Publish --> Path
@@ -44,7 +44,7 @@ Les primitives de stockage courant se trouvent dans
 
 | Primitive | Responsabilité |
 | --- | --- |
-| `build_audio_storage_key()` | Normaliser l'extension à la frontière d'upload et construire la clé |
+| `build_audio_storage_key()` | Normaliser l'extension à la frontière d'ingestion et construire la clé |
 | `parse_audio_storage_key()` | Refuser toute clé persistée non canonique ou traversée de chemin |
 | `resolve_audio_storage_path()` | Résoudre un chemin exact, confiné à la racine et non symbolique |
 | `publish_audio()` | Publier un flux sans écrasement, avec mémoire bornée et durabilité disque |
@@ -81,14 +81,15 @@ heartbeat et propage toute erreur du checkpoint afin que l'application puisse
 sondes conteneur sans importer SQLAlchemy : configuration minimale, fraîcheur
 du heartbeat, codes d'erreur expurgés et vérification du mode d'accès au volume
 audio. Chaque worker fournit son propre adaptateur PostgreSQL et choisit le
-contrat attendu : lecture seule pour l'automatisation, lecture-écriture pour la
-rétention. Le seuil `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS` vaut `45` secondes
+contrat attendu : lecture seule pour l'automatisation, lecture-écriture pour le
+publisher et la rétention. Le seuil `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS`
+vaut `45` secondes
 par défaut et doit rester strictement supérieur à
 `WORKER_HEARTBEAT_INTERVAL_SECONDS`.
 
-Le volume Docker canonique est monté en lecture-écriture par le web et le
-worker de rétention, et en lecture seule par le worker d'automatisation. Le
-[déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp) décrit son
+Le volume Docker canonique est monté en lecture-écriture par le publisher et le
+worker de rétention, et en lecture seule par le web et le worker d'automatisation. Le
+[déploiement Dokploy](../../README.md#déploiement-dokploy) décrit son
 volume persistant et sa configuration.
 
 `parse_audio_filename()` accepte une extension en majuscules à la frontière du

@@ -1,8 +1,10 @@
 # Application web
 
-`glpi-ticketing-web` reçoit les audios, crée leur état persistant et expose le
-dashboard interne du MVP. PostgreSQL est l'unique source de vérité : le web ne
-déduit jamais l'état d'un job en parcourant le volume audio.
+`glpi-ticketing-web` expose le tableau de bord interne du MVP. L'ingestion des
+messages Exchange et la publication des audios appartiennent au
+`worker-publisher` : le web ne crée plus de job par upload. PostgreSQL est
+l'unique source de vérité et le web ne déduit jamais l'état d'un job en
+parcourant le volume audio.
 
 Le tag `poc-v0.1.0` conserve l'ancienne application fondée sur `pending` et
 `completed`. La branche courante utilise le stockage canonique et PostgreSQL ;
@@ -13,38 +15,23 @@ elle est assemblée dans la stack Docker Compose du MVP.
 | Route | Entrée | Sortie nominale |
 | --- | --- | --- |
 | `GET /health` | aucune | `200`, liveness du processus uniquement |
-| `GET /` | aucune | dépôt multiple et dashboard interne |
-| `POST /api/jobs` | multipart `audio_file` | `202`, UUID, `state=pending` et `Location` |
+| `GET /` | aucune | dashboard interne en consultation |
 | `GET /api/jobs` | `state`, UUID exact, `limit`, curseur optionnels | page triée par dernière transition décroissante |
 | `GET /api/jobs/{uuid}` | UUID canonique | détail persistant et rétention, ou `404` |
 | `GET /api/jobs/{uuid}/events` | `limit` et curseur optionnels | historique expurgé, paginé séparément |
 | `POST /api/jobs/{uuid}/retry` | UUID d'un job `failed` ou `blocked` | `202`, état `pending` et `Location` |
-| `GET /api/observability` | aucune | état des deux workers et alertes opérationnelles agrégées |
+| `GET /api/observability` | aucune | état des trois workers et alertes opérationnelles agrégées |
 | `GET /audios/{uuid}` | UUID canonique | audio `completed`, `410` si purgé, sinon `404` |
 
-Exemple de réponse :
-
-```json
-{
-  "audio_uuid": "8ce23f5b-4e31-49f1-ae23-4eacdbba48f8",
-  "state": "pending"
-}
-```
-
-`Location` vaut `/api/jobs/{audio_uuid}` et désigne donc immédiatement une
-ressource consultable. Les extensions acceptées sont `wav`, `mp3`, `ogg` et
-`m4a`. L'extension du nom est validée, mais le contenu binaire et le type MIME
-ne sont pas encore inspectés.
-
-Le navigateur émet une requête par fichier et limite le lot à trois requêtes
-simultanées. Chaque résultat reste indépendant, le formulaire est remis à zéro
-après le lot et le tableau se rafraîchit sans recharger la page. La pagination
-utilise un curseur opaque fondé sur `(updated_at, uuid)` ; le client ne doit ni
-l'interpréter ni le fabriquer.
+La collection `/api/jobs` est volontairement en lecture seule : un `POST`
+retourne `405 Method Not Allowed`. La pagination utilise un curseur opaque fondé
+sur `(updated_at, uuid)` ; le client ne doit ni l'interpréter ni le fabriquer.
 
 Le dashboard lit séparément l'état des jobs et l'instantané d'observabilité.
-Il affiche toujours une carte par worker attendu, même si aucun heartbeat n'a
-encore été publié. Les alertes jobs et rétentions sont agrégées par condition :
+Il affiche toujours une carte pour chacun des workers `publisher`, `automation`
+et `retention`, même si aucun heartbeat n'a encore été publié. La carte du
+publisher expose son UUID d'ingestion mail courant, lorsqu'il existe. Les
+alertes jobs et rétentions sont agrégées par condition :
 leur compteur donne le nombre de lignes concernées et un bouton applique le
 filtre d'état correspondant lorsque celui-ci existe. Le navigateur remplace
 l'instantané à chaque lecture ; il ne conserve ni historique d'alerte ni
@@ -65,12 +52,9 @@ réarmement aveugle.
 
 Erreurs principales :
 
-- `413` : limite de taille dépassée ;
-- `415` : extension inconnue ;
-- `422` : champ absent, fichier vide, filtre ou curseur invalide ;
+- `422` : filtre ou curseur invalide ;
 - `404` : job inconnu ou audio non terminé ;
-- `409` : collision de destination, ou état/audio incompatible avec une
-  relance opérateur ;
+- `409` : état ou audio incompatible avec une relance opérateur ;
 - `410` : audio terminé déjà en suppression ou supprimé ;
 - `500` : ligne `completed` incohérente avec sa rétention ou son stockage ;
 - `503` : stockage ou PostgreSQL temporairement indisponible.
@@ -86,51 +70,33 @@ HTTP partagé ou par le navigateur.
 Le [Dockerfile web](../../infra/docker/web/Dockerfile) produit une image
 multi-stage non-root contenant uniquement l'environnement Python installé
 depuis `uv.lock`. Dans Compose, le web monte le volume canonique
-`/data/audios` en lecture-écriture : il publie les uploads et sert les audios
-terminés, sans déduire leur état depuis ce volume.
+`/data/audios` uniquement pour valider les retries et servir les audios
+terminés, sans déduire leur état depuis ce volume. Le code web ne requiert plus
+de droit d'écriture pour une ingestion.
 
 Le healthcheck de l'image appelle `/health`, qui reste une liveness locale et
 ne transforme pas PostgreSQL en dépendance de disponibilité HTTP. Le service
 web ne publie aucun port hôte ; le Traefik fourni par Dokploy route son port
 interne `8000`. Le contrat de démarrage est décrit dans la section
-[déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp).
+[déploiement Dokploy](../../README.md#déploiement-dokploy).
 
-## Flux d'ingestion
+## Flux de consultation
 
 ```mermaid
 flowchart LR
-    Client[Client] --> Validate[Valider extension et taille]
-    Validate --> Part[Écrire un .part par blocs]
-    Part --> Publish[fsync puis publication create-only]
-    Publish --> Audio[(Volume /data/audios)]
-    Audio --> Tx[Transaction PostgreSQL]
-    Tx --> Job[Job pending]
-    Tx --> Event[Événement job_created / web]
-    Tx --> Commit[Commit]
-    Commit --> Accepted[202 + Location]
-    Tx -->|échec confirmé| Delete[Compensation de l'audio]
-    Commit -->|résultat incertain| Reconcile[Relire le job par UUID]
+    Browser[Navigateur interne] -->|GET| Routes[Routes FastAPI]
+    Routes --> Queries[Services de lecture]
+    Queries --> Database[(PostgreSQL)]
+    Queries --> Dashboard[Jobs, événements et alertes expurgés]
+    Browser -->|GET audio completed| Storage[(Volume /data/audios)]
+    Browser -->|POST retry opérateur| Retry[Transaction de réarmement]
 ```
 
-L'audio est publié et synchronisé avant le premier `INSERT`. Le worker ne
-consommera que des lignes PostgreSQL : un crash entre le fichier et la
-transaction peut produire un orphelin, mais jamais un job pointant vers un
-fichier encore partiel.
-
-Une erreur pendant `commit()` est ambiguë : le serveur peut avoir validé la
-transaction alors que la connexion a été perdue avant l'accusé de réception.
-Le web ouvre donc une nouvelle session et relit l'UUID :
-
-- ligne cohérente : le dépôt est accepté et l'audio reste en place ;
-- ligne absente ou PostgreSQL toujours indisponible : l'issue reste ambiguë et
-  l'audio est conservé comme orphelin non consommable. Une lecture négative
-  immédiate ne prouve pas que le serveur n'achèvera pas encore le `COMMIT`.
-
-Seule une erreur obtenue avant l'envoi du `COMMIT`, suivie d'un rollback, permet
-une compensation immédiate. Cette politique privilégie un orphelin réconciliable
-à un job `pending` dont les octets auraient été supprimés.
-
-La maintenance différée de ces orphelins appartient au worker de rétention.
+Les lectures ne modifient ni PostgreSQL ni le volume. L'unique commande métier
+conservée est la relance opérateur d'un job `failed` ou `blocked`; elle est
+auditée par l'événement `operator_retry_requested`. Les lignes
+`mail_ingestions`, notamment les messages rejetés, restent persistées pour une
+future vue dédiée ; cette itération n'expose pas encore leur liste.
 
 ## Architecture
 
@@ -152,7 +118,7 @@ flowchart LR
 | `routes` | Associer méthode, URL, paramètres FastAPI et controller, sans règle ni accès aux données |
 | `middlewares` | Réserver les traitements HTTP transversaux ; aucun middleware applicatif n'est nécessaire actuellement |
 | `schemas` | Définir uniquement les contrats Pydantic exposés par HTTP |
-| `controllers` | Prévalider le transport, traduire les erreurs, puis construire statut, en-têtes, corps ou template |
+| `controllers` | Traduire le protocole HTTP et les erreurs, puis construire statut, en-têtes, corps ou template |
 | `services` | Porter les use cases et orchestrer stockage, règles et transactions PostgreSQL |
 | `templates` / `static` | Fournir les pages HTML et leurs assets CSS/JavaScript, sans accès aux services |
 
@@ -169,7 +135,7 @@ apps/web/
 │   ├── routes/              # déclarations URL/méthode et délégation pure
 │   ├── controllers/         # adaptation du protocole HTTP
 │   ├── services/
-│   │   ├── jobs/            # ingestion, requêtes, download, retry et DTO internes
+│   │   ├── jobs/            # requêtes, download, retry et DTO internes
 │   │   └── observability/   # seuils, priorités et projection opérationnelle
 │   ├── schemas/             # contrats HTTP Pydantic
 │   ├── middlewares/         # traitements HTTP transversaux futurs
@@ -179,7 +145,7 @@ apps/web/
 │       └── js/              # interactions strictement côté navigateur
 └── tests/
     ├── unit/                # couches, dépendances, contrats et configuration
-    └── integration/         # Uvicorn et ingestion PostgreSQL réelle
+    └── integration/         # Uvicorn et API sur PostgreSQL réel
 ```
 
 Conventions :
@@ -200,8 +166,8 @@ Conventions :
 - aucun accès fichier n'est exécuté pendant la transaction SQL ;
 - le nom original n'entre jamais dans `storage_key`.
 
-L'interface utilise du JavaScript natif segmenté en `api.js`, `uploads.js`,
-`dashboard.js`, `observability.js` et `app.js`. `app.js` possède l'unique
+L'interface utilise du JavaScript natif segmenté en `api.js`, `dashboard.js`,
+`observability.js` et `app.js`. `app.js` possède l'unique
 ordonnanceur de rafraîchissement : les lectures jobs et observabilité sont
 attendues indépendamment, sans `setInterval`, et le polling est suspendu lorsque
 l'onglet est masqué. Les valeurs venant de l'API sont ajoutées au DOM avec
@@ -218,7 +184,6 @@ d'authentification applicative.
 | `WEB_HOST` | `127.0.0.1` | adresse IP d'écoute |
 | `WEB_PORT` | `8000` | port Uvicorn |
 | `WEB_TRUST_PROXY_HEADERS` | `false` | confiance explicite dans le reverse proxy |
-| `MAX_UPLOAD_BYTES` | `26214400` | limite par fichier |
 | `WORKER_HEARTBEAT_INTERVAL_SECONDS` | `10` | cadence attendue des checkpoints, utilisée pour valider le seuil stale |
 | `DASHBOARD_WORKER_STALE_AFTER_SECONDS` | `45` | absence de checkpoint avant alerte worker |
 | `DASHBOARD_PENDING_ALERT_AFTER_SECONDS` | `900` | durée depuis la dernière entrée en `pending` avant alerte |
@@ -270,12 +235,9 @@ uv run ruff check apps/web
 - un heartbeat `stale` indique seulement l'absence récente de checkpoint : un
   appel HTTP synchrone long peut rendre un processus vivant potentiellement non
   réactif dans le dashboard ;
-- pas de détection du format réel de l'audio ;
-- la limite applicative est vérifiée pendant la lecture de `UploadFile`, donc
-  après le parsing multipart de Starlette ; une exposition réseau doit imposer
-  aussi une limite de corps dans Traefik ;
-- pas d'idempotence HTTP : un retry après perte de la réponse peut créer un
-  second UUID ;
 - pas encore de suppression des orphelins ;
+- pas encore de liste ni de détail HTTP pour `mail_ingestions` ; les rejets du
+  publisher sont conservés en base mais ne sont visibles qu'indirectement via
+  l'état et les alertes du worker ;
 - pas encore de test E2E dans un navigateur réel ; les contrats JavaScript sont
   vérifiés statiquement et l'API est testée avec FastAPI.

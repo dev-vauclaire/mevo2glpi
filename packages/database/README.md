@@ -1,9 +1,9 @@
 # Package `glpi-ticketing-database`
 
 `glpi-ticketing-database` porte les contrats SQLAlchemy partagés par le web,
-les workers et l'application de migration du MVP. Le jalon P0 y ajoute le
-socle persistant destiné au futur worker publisher ; l'accès à Exchange et le
-pipeline Microsoft Graph ne font pas partie de ce package.
+les workers et l'application de migration du MVP. Il conserve le cycle de vie
+durable des messages Exchange sans dépendre du client Microsoft Graph ni de la
+validation WAV, qui appartiennent au worker publisher.
 
 Le package ne contient ni point d'entrée ni historique Alembic. L'application
 one-shot `apps/database-migrations` est seule responsable de l'exécution des
@@ -143,9 +143,9 @@ stocke que les UUID, états, étapes, dispositions et erreurs expurgées : ni
 sujet, ni expéditeur, ni corps du message, ni contenu audio, ni réponse HTTP
 brute. Son repository n'altère jamais `MailIngestion`.
 
-Ces modèles constituent uniquement le contrat de persistance P0. Le client
-Microsoft Graph, la validation WAV, le déplacement des messages et
-l'application `worker-publisher` seront ajoutés dans les jalons suivants.
+Ces modèles constituent le contrat de persistance utilisé par le client
+Microsoft Graph, la validation WAV et l'acquittement Exchange orchestrés dans
+l'application `worker-publisher`.
 
 ## Cycle de vie du worker d'automatisation
 
@@ -251,10 +251,9 @@ Le travail courant est typé par service : `worker_automation` et
 `worker_retention` peuvent référencer `current_job_uuid`, tandis que
 `worker_publisher` peut référencer `current_ingestion_uuid`. Les deux clés sont
 nullables et utilisent `ON DELETE SET NULL`, mais PostgreSQL interdit qu'un
-service renseigne la mauvaise clé. Le dashboard actuel ignore explicitement le
-heartbeat publisher tant que sa projection dédiée n'est pas livrée ; cela
-permet de déployer la migration avant le futur worker sans rendre
-l'observabilité des deux workers existants indisponible.
+service renseigne la mauvaise clé. Le dashboard projette les trois heartbeats,
+dont le travail publisher via `current_ingestion_uuid`, sans charger de donnée
+métier Exchange sensible.
 
 ## Transactions
 

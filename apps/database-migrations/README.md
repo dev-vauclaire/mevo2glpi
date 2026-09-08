@@ -49,7 +49,7 @@ Cette application accède seulement à PostgreSQL. Elle ne monte pas le volume
 audio `/data/audios`. Elle attend elle-même la base externe dans un délai borné
 et sa réussite conditionne le démarrage des applications persistantes du MVP.
 Le contrat est décrit dans la section
-[déploiement Dokploy](../../README.md#déploiement-dokploy-du-mvp).
+[déploiement Dokploy](../../README.md#déploiement-dokploy).
 
 ## Historique courant
 
@@ -65,7 +65,7 @@ Le contrat est décrit dans la section
   `mail_ingestion_events`, puis autorise `worker_publisher` comme acteur des
   jobs et comme service de runtime. Le runtime peut référencer l'ingestion
   courante via `current_ingestion_uuid`, sans détourner la clé de job utilisée
-  par les deux workers existants.
+  par les deux workers en aval.
 
 `0005` est compatible avec les deux situations de déploiement attendues :
 

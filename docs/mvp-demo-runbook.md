@@ -1,47 +1,54 @@
 # Runbook de démonstration et de recette du MVP
 
-Ce runbook décrit la preuve fonctionnelle du MVP avant déploiement. Il ne
-remplace pas le contrat de déploiement Dokploy décrit dans le
-[`README`](../README.md#déploiement-dokploy-du-mvp).
+Ce runbook décrit une preuve fonctionnelle bornée avant déploiement. Il ne
+remplace pas le contrat de déploiement Dokploy du [`README`](../README.md).
+Utilisez uniquement des messages et audios synthétiques, sans donnée réelle de
+patient.
 
 ## Périmètre démontré
 
-La recette utilise les vraies images du web, des deux workers et de la
-migration. PostgreSQL, GLPI 11 et Transcribe AI sont jetables. Le web est
-joignable uniquement sur loopback pendant le test ; Traefik reste une
-responsabilité de Dokploy. Les identifiants, réseaux, volumes et bases sont
-propres à la session.
+Le parcours de production comporte la migration one-shot, le web en lecture
+seule et trois workers : publisher, automation et retention. Le publisher lit
+une boîte Exchange Online dédiée avec Microsoft Graph, publie le WAV et crée le
+job ; les deux autres workers transcrivent, créent le ticket et appliquent sa
+rétention.
 
-Elle prouve les invariants suivants :
+La recette E2E automatisée valide neuf scénarios aval :
 
 | Parcours | Preuve attendue |
-|---|---|
-| Lot nominal | Trois WAV envoyés simultanément deviennent `completed`, avec événements ordonnés, audio identique et un ticket GLPI corrélé par UUID. |
+| --- | --- |
+| Lot nominal | Trois sorties publisher synthétiques deviennent `completed`, avec événements ordonnés, audio identique et ticket GLPI corrélé par UUID. |
 | Erreur de stockage | Une taille audio incohérente produit `blocked` et une alerte ; après réparation, le retry opérateur termine le job. |
 | Erreur terminale | Un job `failed` et son alerte sont visibles ; le retry opérateur réarme le même UUID. |
 | Panne Transcribe AI | Un seul job porte le retry système et les jobs suivants restent `pending` ; tous repartent après rétablissement. |
 | Panne GLPI | Le job reste récupérable, redemande une transcription et ne crée qu'un ticket. |
-| Crash du worker | Un `processing` abandonné est repris après `SIGKILL` et redémarrage, sans doublon GLPI. |
+| Crash automation | Un `processing` abandonné est repris après `SIGKILL`, sans doublon GLPI. |
 | Rétention GLPI | `SOLVED` conserve l'audio ; `CLOSED` le purge et le téléchargement répond `410 Gone`. |
 | Deadline | Une échéance dépassée purge l'audio même lorsque GLPI est indisponible. |
 
-Le contrat de la fixture Transcribe AI vérifie séparément les quatre formats
-acceptés par le produit : WAV, MP3, OGG et M4A. Le scénario E2E nominal utilise
-un WAV synthétique unique afin de limiter le coût CPU et de rendre la comparaison
-des octets déterministe.
+L'E2E ne contacte pas Microsoft 365 et ne démarre pas le publisher réel, car il
+ne possède ni tenant Entra ID ni boîte Exchange de test. Un helper réservé aux
+tests reproduit exclusivement sa frontière durable : publication atomique du
+WAV, création du job et événement `job_created` avec l'acteur
+`worker_publisher`. Les contrats Graph, le streaming, les dossiers
+`Processed`/`Rejected` et l'orchestration du publisher sont testés séparément
+avec un faux serveur Graph stateful lié à `127.0.0.1`.
 
-## Prérequis
+GLPI 11, MySQL, PostgreSQL et Transcribe AI sont jetables pendant l'E2E. Le web
+est exposé uniquement sur loopback ; le Traefik et le TLS de Dokploy ne font pas
+partie de cette recette.
+
+## Prérequis de l'E2E
 
 - Docker Engine et Docker Compose fonctionnels ;
 - `uv` installé ;
-- capacité à réserver deux ports loopback éphémères pour le web et PostgreSQL ;
-- capacité à télécharger ou à réutiliser les images épinglées et le modèle
+- capacité à réserver des ports loopback éphémères ;
+- capacité à télécharger ou réutiliser les images épinglées et le modèle
   Whisper `tiny` ;
-- mémoire et espace disque suffisants pour GLPI, MySQL, PostgreSQL et
-  Transcribe AI ;
-- aucune autre suite Docker de ce dépôt en cours d'exécution.
+- mémoire et espace disque suffisants pour les stacks jetables ;
+- aucune autre suite Docker lourde de ce dépôt en cours d'exécution.
 
-La validation de référence est obligatoirement CPU et séquentielle :
+La validation de référence est CPU et strictement séquentielle :
 
 ```bash
 TRANSCRIBE_AI_TEST_DEVICE=cpu \
@@ -49,69 +56,96 @@ uv run pytest -m e2e tests/e2e -vv --maxfail=1
 ```
 
 Le résultat attendu est `9 passed`. N'utilisez ni `pytest-xdist`, ni `-n`.
-Une validation GPU peut compléter cette preuve, mais ne la remplace pas :
+Une validation GPU peut compléter la preuve, mais ne la remplace pas :
 
 ```bash
 TRANSCRIBE_AI_TEST_DEVICE=gpu \
 uv run pytest -m e2e tests/e2e -vv --maxfail=1
 ```
 
-Les fixtures attendent chaque service par une sonde bornée et détruisent les
-ressources créées, y compris après un échec. Elles ne nettoient jamais les
-autres projets du daemon Docker.
+Les fixtures attendent chaque service avec une sonde bornée et détruisent les
+ressources de leur session, y compris après un échec. Elles ne nettoient jamais
+les autres projets du daemon Docker.
 
 ## Démonstration manuelle sur un environnement isolé
 
-1. Déployer la stack avec une base PostgreSQL et un volume audio neufs selon le
-   guide Docker.
-2. Ouvrir l'URL HTTPS configurée par Dokploy sur le réseau interne.
-3. Déposer jusqu'à trois fichiers parmi WAV, MP3, OGG et M4A. Vérifier que
-   chaque dépôt reçoit son propre UUID et que l'interface permet immédiatement
-   un nouveau dépôt.
-4. Suivre les transitions `pending`, `processing`, puis `completed` dans le
-   tableau. Ouvrir le détail et vérifier l'historique d'événements.
-5. Dans GLPI, contrôler que le ticket contient l'UUID dans `external_id`, la
-   transcription et le lien HTTPS vers l'audio. L'ID GLPI affiché dans le
-   dashboard doit correspondre.
-6. Télécharger l'audio terminé depuis le dashboard.
-7. Facultatif, sur cet environnement isolé uniquement : passer le ticket à
-   `SOLVED`, attendre l'intervalle de contrôle configuré et confirmer que
-   l'audio reste disponible ; passer ensuite le ticket à `CLOSED`, attendre le
-   contrôle suivant et confirmer sa suppression et la réponse `410 Gone`.
+### Préparer l'environnement
 
-Les injections de panne et les changements artificiels d'horodatage sont
-réservés à la suite jetable. Ne stoppez jamais GLPI ou Transcribe AI de
-production pour une démonstration.
+1. Déployer la stack avec une base PostgreSQL et un volume audio neufs selon le
+   guide Dokploy.
+2. Vérifier que le dashboard affiche les trois workers avec un heartbeat frais.
+3. Confirmer que l'identité applicative est limitée à la boîte dédiée. Les
+   dossiers `Processed` et `Rejected` sont créés de manière idempotente au
+   premier besoin ; aucune création manuelle n'est requise.
+4. Ouvrir l'URL HTTPS du web depuis le réseau interne. L'interface ne doit
+   proposer aucun dépôt de fichier.
+
+### Parcours nominal
+
+1. Envoyer vers la boîte dédiée jusqu'à trois messages de test. Chaque message
+   doit contenir exactement un WAV synthétique, non vide et inférieur ou égal à
+   25 Mio.
+2. Vérifier que les messages quittent l'Inbox pour `Processed` après leur
+   publication durable.
+3. Dans le dashboard, suivre chaque job de `pending` à `processing`, puis
+   `completed`. Le détail doit présenter les événements expurgés et l'UUID du
+   job.
+4. Dans GLPI, vérifier que le ticket contient le même UUID dans `external_id`,
+   la transcription et le lien HTTPS vers l'audio. L'identifiant GLPI affiché
+   dans le dashboard doit correspondre.
+5. Télécharger l'audio terminé depuis le dashboard et vérifier qu'il correspond
+   au WAV synthétique envoyé.
+
+### Rejet contrôlé
+
+1. Envoyer un message synthétique sans WAV exploitable, avec un WAV vide,
+   corrompu ou supérieur à 25 Mio.
+2. Vérifier que le message est déplacé dans `Rejected` seulement après
+   l'enregistrement durable de son motif expurgé en base.
+3. Vérifier que le publisher reste sain et continue de traiter les messages
+   suivants. Le MVP ne fournit pas encore de liste web dédiée à ces ingestions
+   rejetées.
+
+### Rétention facultative
+
+Sur cet environnement isolé uniquement, passer un ticket à `SOLVED`, attendre
+le contrôle de rétention et confirmer que l'audio reste disponible. Passer
+ensuite le ticket à `CLOSED`, attendre le contrôle suivant et confirmer la
+suppression des octets et la réponse `410 Gone` au téléchargement.
+
+Les injections de panne et les changements artificiels d'horodatage restent
+réservés à la suite jetable. Ne stoppez jamais GLPI, Transcribe AI, Exchange ou
+Microsoft Graph de production pour une démonstration.
 
 ## Diagnostic borné
 
-En cas d'échec, identifier d'abord la frontière concernée : bootstrap de stack,
-pipeline métier, fournisseur ou rétention. Les messages pytest sont expurgés :
-ils donnent le statut, l'UUID ou le type d'événement utile sans afficher de clé,
-de réponse HTTP brute ni de transcription.
+Commencez par identifier la frontière en défaut :
 
-Ne publiez pas la sortie complète de `docker compose config`, car elle peut
-résoudre des chemins et des valeurs d'environnement sensibles. Ne lancez jamais
-de nettoyage Docker global ; les fixtures ne possèdent que les ressources dont
-le nom de projet est généré pour leur session.
+- acquisition Entra ID ou Graph et ingestion publisher ;
+- publication PostgreSQL/volume ;
+- Transcribe AI ;
+- création GLPI ;
+- rétention ;
+- dashboard.
 
-## Limites résiduelles du MVP
+Les logs donnent les UUID, étapes, catégories et codes techniques nécessaires
+sans exposer de clé, de jeton, d'identifiant opaque de message, de réponse HTTP
+brute ni de transcription. Ne publiez pas la sortie complète de
+`docker compose config`, car elle peut résoudre des chemins et valeurs
+d'environnement sensibles. Ne lancez jamais de nettoyage Docker global.
 
-- un seul worker d'automatisation et un seul worker de rétention sont supportés ;
-- Transcribe AI v1 n'offre pas d'idempotence distante ni de conservation
-  garantie : un retry ou un crash redemande une transcription et peut laisser un
-  job fournisseur orphelin ;
-- la transcription reste uniquement en mémoire ;
-- l'auto-restart Docker est testé séparément par un processus qui échoue
-  naturellement, tandis que l'E2E redémarre explicitement le conteneur après le
-  `SIGKILL` afin d'isoler la preuve de reprise métier ;
-- les alertes sont consultables sur le dashboard mais ne sont pas encore
-  transmises à un système de notification externe ;
-- l'interface reste limitée au réseau interne ; une exposition Internet exige
-  un contrôle d'accès configuré au niveau de Dokploy/Traefik ;
-- la recette appelle FastAPI directement en HTTP sur loopback : elle ne valide
-  ni Traefik, ni le certificat TLS, ni un navigateur et son JavaScript ;
-- le pilotage temporel E2E ne change que des timestamps autorisés sur une
-  rétention déjà `scheduled` ; il ne fabrique aucune transition métier en SQL ;
-- le déploiement Dokploy construit les images sur le serveur ; il ne fournit
-  pas encore de promotion par digest ni de signature d'image.
+## Limites résiduelles
+
+- une seule instance de chacun des trois workers est supportée ;
+- le publisher fonctionne par polling et accepte exactement un WAV par message ;
+- les rejets d'ingestion sont persistés, mais n'ont pas de liste dédiée dans le
+  dashboard ;
+- Transcribe AI ne garantit ni idempotence ni conservation du résultat : un
+  retry peut redemander une transcription et laisser un job distant orphelin ;
+- les alertes sont visibles dans le dashboard sans notification externe ;
+- le web ne possède pas d'authentification applicative et doit rester limité au
+  réseau interne ;
+- l'E2E ne valide ni un tenant Entra ID réel, ni Traefik, ni le certificat TLS,
+  ni un navigateur et son JavaScript ;
+- le déploiement construit les images sur le serveur, sans promotion par digest,
+  signature d'image ou SBOM.

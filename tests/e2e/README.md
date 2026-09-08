@@ -12,6 +12,9 @@ flowchart LR
     Web --> PostgreSQL[(PostgreSQL jetable)]
     Web --> Audio[(volume audio jetable)]
 
+    Seed[Sortie publisher synthétique] -.->|compose exec test-only| PostgreSQL
+    Seed -.->|publication atomique test-only| Audio
+
     Migration[Migration Alembic one-shot] --> PostgreSQL
     Automation[Worker automation] --> PostgreSQL
     Automation --> Audio
@@ -23,11 +26,20 @@ flowchart LR
     Retention --> GLPI
 ```
 
-La stack reprend les quatre applications du Compose MVP et lui ajoute un
-PostgreSQL exclusivement réservé aux tests. GLPI, sa base MySQL, Transcribe AI
-et ses dépendances sont lancés comme services de test séparés. Le Traefik de
-Dokploy n'est pas simulé : la fixture publie directement FastAPI sur loopback.
-Les URLs et identifiants éphémères sont injectés dans la stack applicative.
+La stack démarre la migration, le web, le worker d'automatisation et le worker
+de rétention du Compose MVP, puis lui ajoute un PostgreSQL exclusivement réservé
+aux tests. Le vrai publisher n'est volontairement pas démarré : cette recette
+aval ne possède ni application Entra ID ni boîte Exchange. Un helper test-only
+exécuté dans le conteneur de rétention reproduit uniquement sa frontière
+durable : publication atomique de l'audio, création du job et évènement
+`job_created` avec l'acteur `worker_publisher` dans une même séquence compensée.
+Il ne simule ni Graph ni l'orchestration du publisher, couverts par leurs suites
+dédiées.
+
+GLPI, sa base MySQL, Transcribe AI et ses dépendances sont lancés comme services
+de test séparés. Le Traefik de Dokploy n'est pas simulé : la fixture publie
+directement FastAPI sur loopback. Les URLs et identifiants éphémères sont
+injectés dans la stack applicative.
 
 Aucun secret réel ni fichier d'environnement Dokploy ne doit être utilisé. Les
 ports publiés le sont uniquement sur loopback et les réseaux, volumes, bases
@@ -49,13 +61,14 @@ Le sous-jalon 8A valide uniquement le socle :
 
 Le sous-jalon 8B complète ce socle avec neuf scénarios :
 
-- `test_job_lifecycle.py` : trois uploads concurrents, pipeline nominal,
+- `test_job_lifecycle.py` : trois sorties publisher synthétiques, pipeline nominal,
   `blocked`, `failed`, alertes et retries opérateur ;
 - `test_resilience.py` : pannes Transcribe AI et GLPI, barrière anti-fan-out,
   retranscription, reprise après `SIGKILL` et unicité du ticket ;
 - `test_retention.py` : conservation `SOLVED`, purge `CLOSED` et purge par
   deadline sans GLPI ;
-- `test_stack.py` : disponibilité et topologie du socle complet.
+- `test_stack.py` : disponibilité et topologie du socle aval, avec publisher
+  explicitement absent et signalé par le dashboard.
 
 Le runbook de recette, les preuves attendues et les limites résiduelles sont
 documentés dans
