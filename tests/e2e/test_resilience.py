@@ -13,14 +13,14 @@ import pytest
 from pydantic import SecretStr
 from tests.e2e.support import (
     AcceptedJob,
-    AudioUpload,
     JobEvent,
+    SyntheticAudio,
     count_glpi_tickets,
     get_job_events,
     load_correlated_glpi_ticket,
     open_e2e_database,
     poll_until,
-    upload_audio,
+    seed_audio_job,
     wait_for_job_state,
     wait_for_jobs_state,
 )
@@ -73,13 +73,13 @@ def test_transcribe_outage_gates_pending_fan_out_then_recovers(
         try:
             e2e_environment.stop_service(AUTOMATION_SERVICE)
             transcribe_ai_environment.stop_service(TRANSCRIBE_API_SERVICE)
-            first = upload_audio(
-                client,
-                AudioUpload(filename="transcribe-outage-first.wav", content=audio),
+            first = seed_audio_job(
+                e2e_environment,
+                SyntheticAudio(filename="transcribe-outage-first.wav", content=audio),
             )
-            second = upload_audio(
-                client,
-                AudioUpload(filename="transcribe-outage-second.wav", content=audio),
+            second = seed_audio_job(
+                e2e_environment,
+                SyntheticAudio(filename="transcribe-outage-second.wav", content=audio),
             )
             e2e_environment.start_service(AUTOMATION_SERVICE)
 
@@ -158,9 +158,9 @@ def test_glpi_outage_after_transcription_retranscribes_before_recovery(
     with e2e_environment.client() as client:
         try:
             glpi_environment.stop_service("glpi")
-            accepted = upload_audio(
-                client,
-                AudioUpload(filename="glpi-outage.wav", content=audio),
+            accepted = seed_audio_job(
+                e2e_environment,
+                SyntheticAudio(filename="glpi-outage.wav", content=audio),
             )
             retry = wait_for_job_state(
                 client,
@@ -249,9 +249,9 @@ def test_sigkill_during_processing_resumes_and_reuses_precreated_glpi_ticket(
     with e2e_environment.client() as client:
         try:
             transcribe_ai_environment.stop_service(TRANSCRIBE_BATCH_WORKER_SERVICE)
-            accepted = upload_audio(
-                client,
-                AudioUpload(filename="worker-sigkill.wav", content=audio),
+            accepted = seed_audio_job(
+                e2e_environment,
+                SyntheticAudio(filename="worker-sigkill.wav", content=audio),
             )
             precreated_ticket_id = _precreate_glpi_ticket(
                 glpi_environment,

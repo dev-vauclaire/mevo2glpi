@@ -9,7 +9,6 @@ import psycopg
 import pytest
 from tests.support.mvp_compose import (
     ALL_SERVICES,
-    CUSTOM_SERVICES,
     MvpComposeEnvironment,
 )
 
@@ -33,9 +32,19 @@ def test_mvp_stack_is_healthy_and_connected_to_real_provider_networks(
             response = client.get("/api/observability")
             response.raise_for_status()
             candidate = response.json()
-            if all(
-                worker["heartbeat_status"] == "fresh" for worker in candidate["workers"]
-            ):
+            workers_by_service = {
+                worker["service_name"]: worker for worker in candidate["workers"]
+            }
+            downstream_workers_are_ready = all(
+                workers_by_service.get(service_name, {}).get("heartbeat_status")
+                == "fresh"
+                for service_name in ("worker_automation", "worker_retention")
+            )
+            publisher_is_intentionally_absent = (
+                workers_by_service.get("worker_publisher", {}).get("heartbeat_status")
+                == "absent"
+            )
+            if downstream_workers_are_ready and publisher_is_intentionally_absent:
                 observed = candidate
                 break
             time.sleep(0.25)
@@ -43,9 +52,24 @@ def test_mvp_stack_is_healthy_and_connected_to_real_provider_networks(
     assert health.json() == {"status": "ok"}
     assert observed is not None
     assert {worker["service_name"] for worker in observed["workers"]} == {
+        "worker_publisher",
         "worker_automation",
         "worker_retention",
     }
+    publisher = next(
+        worker
+        for worker in observed["workers"]
+        if worker["service_name"] == "worker_publisher"
+    )
+    assert publisher["heartbeat_status"] == "absent"
+    assert publisher["runtime_state"] is None
+    assert publisher["current_ingestion_uuid"] is None
+    assert any(
+        alert["key"] == "workers:worker_publisher"
+        and alert["kind"] == "worker_absent"
+        and alert["severity"] == "critical"
+        for alert in observed["alerts"]
+    )
 
     migration_state = environment.inspect_service("database-migrations")["State"]
     assert isinstance(migration_state, dict)
@@ -60,7 +84,7 @@ def test_mvp_stack_is_healthy_and_connected_to_real_provider_networks(
     glpi_network = glpi_environment.network_name
     transcribe_network = transcribe_ai_environment.network_name
     assert control_network in service_networks["postgres"]
-    for service_name in CUSTOM_SERVICES:
+    for service_name in ALL_SERVICES[1:]:
         assert control_network not in service_networks[service_name]
     assert {glpi_network, transcribe_network} <= service_networks["worker-automation"]
     assert glpi_network in service_networks["worker-retention"]

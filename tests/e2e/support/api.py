@@ -2,39 +2,44 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import base64
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
+from subprocess import CompletedProcess
 from typing import Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
 
-class _MvpEnvironment(Protocol):
-    def client(self) -> httpx.Client:
-        """Return one authenticated HTTPS client."""
+class _SeedEnvironment(Protocol):
+    def compose(
+        self,
+        *arguments: str,
+        input_text: str | None = None,
+        timeout_seconds: float = 180.0,
+    ) -> CompletedProcess[str]:
+        """Execute one bounded command in the disposable Compose project."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class AudioUpload:
-    """One synthetic audio submitted through the public HTTPS boundary."""
+class SyntheticAudio:
+    """One synthetic audio used to seed the downstream MVP pipeline."""
 
     filename: str
     content: bytes = field(repr=False)
-    media_type: str = "audio/wav"
 
     def __post_init__(self) -> None:
         if not isinstance(self.filename, str) or not self.filename:
             raise ValueError("filename must be a non-empty string")
         if not isinstance(self.content, bytes) or not self.content:
             raise ValueError("content must be non-empty bytes")
-        if not isinstance(self.media_type, str) or not self.media_type:
-            raise ValueError("media_type must be a non-empty string")
 
 
 @dataclass(frozen=True, slots=True)
 class AcceptedJob:
-    """Stable acknowledgement returned by upload and operator retry."""
+    """Stable acknowledgement returned by test seeding or operator retry."""
 
     audio_uuid: UUID
     state: str
@@ -107,44 +112,115 @@ class OperationalAlert:
     count: int
 
 
-def upload_audio(client: httpx.Client, upload: AudioUpload) -> AcceptedJob:
-    """Upload one complete audio and validate its durable acknowledgement."""
-    if not isinstance(client, httpx.Client):
-        raise TypeError("client must be an httpx.Client")
-    if not isinstance(upload, AudioUpload):
-        raise TypeError("upload must be an AudioUpload")
+_SEED_JOB_SCRIPT = r"""
+import base64
+import io
+import json
+import os
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import UUID
 
-    response = client.post(
-        "/api/jobs",
-        files={
-            "audio_file": (
-                upload.filename,
-                upload.content,
-                upload.media_type,
+from glpi_ticketing_common.audio_files import (
+    build_audio_storage_key,
+    delete_audio,
+    publish_audio,
+)
+from glpi_ticketing_database import (
+    AudioExtension,
+    JobEventActor,
+    JobEventType,
+    JobStatus,
+    PendingJob,
+    TicketCreationJobEventRepository,
+    TicketCreationJobRepository,
+    create_database_engine,
+    create_session_factory,
+)
+
+payload = json.loads(sys.stdin.read())
+audio_uuid = UUID(payload["audio_uuid"])
+extension = payload["extension"]
+storage_key = build_audio_storage_key(audio_uuid, extension)
+audio_root = Path(os.environ["AUDIO_ROOT"])
+content = base64.b64decode(payload["content_base64"], validate=True)
+published = publish_audio(audio_root, storage_key, io.BytesIO(content))
+engine = None
+try:
+    engine = create_database_engine(os.environ["DATABASE_URL"])
+    session_factory = create_session_factory(engine)
+    with session_factory.begin() as session:
+        TicketCreationJobRepository(session).add_pending(
+            PendingJob(
+                uuid=audio_uuid,
+                storage_key=storage_key,
+                audio_extension=AudioExtension(extension),
+                audio_size_bytes=published.size_bytes,
             )
-        },
+        )
+        TicketCreationJobEventRepository(session).append(
+            audio_uuid,
+            occurred_at=datetime.now(UTC),
+            status=JobStatus.PENDING,
+            stage=None,
+            event_type=JobEventType.JOB_CREATED,
+            actor=JobEventActor.WORKER_PUBLISHER,
+        )
+except BaseException:
+    delete_audio(audio_root, storage_key)
+    raise
+finally:
+    if engine is not None:
+        engine.dispose()
+
+print(json.dumps({"audio_uuid": str(audio_uuid), "state": "pending"}))
+"""
+
+
+def seed_audio_job(
+    environment: _SeedEnvironment,
+    audio: SyntheticAudio,
+) -> AcceptedJob:
+    """Seed the exact durable output produced by the publisher.
+
+    This helper is test-only. It executes inside the retention container so the
+    canonical audio is atomically published under the same UID and volume
+    permissions as the workers, then commits the job and its publisher event.
+    """
+    if not isinstance(audio, SyntheticAudio):
+        raise TypeError("audio must be a SyntheticAudio")
+
+    audio_uuid = uuid4()
+    extension = Path(audio.filename).suffix.removeprefix(".").lower()
+    payload = json.dumps(
+        {
+            "audio_uuid": str(audio_uuid),
+            "extension": extension,
+            "content_base64": base64.b64encode(audio.content).decode("ascii"),
+        }
     )
-    _require_status(response, httpx.codes.ACCEPTED, "audio upload")
-    return _accepted_job(response, expected_state="pending")
-
-
-def upload_audios_concurrently(
-    environment: _MvpEnvironment,
-    uploads: tuple[AudioUpload, ...],
-) -> tuple[AcceptedJob, ...]:
-    """Upload at most three audios concurrently using independent clients."""
-    if not uploads or len(uploads) > 3:
-        raise ValueError("uploads must contain between one and three audios")
-    if any(not isinstance(upload, AudioUpload) for upload in uploads):
-        raise TypeError("uploads must contain only AudioUpload values")
-
-    def submit(upload: AudioUpload) -> AcceptedJob:
-        with environment.client() as client:
-            return upload_audio(client, upload)
-
-    with ThreadPoolExecutor(max_workers=len(uploads)) as executor:
-        futures = tuple(executor.submit(submit, upload) for upload in uploads)
-        return tuple(future.result() for future in futures)
+    result = environment.compose(
+        "exec",
+        "-T",
+        "worker-retention",
+        "python",
+        "-c",
+        _SEED_JOB_SCRIPT,
+        input_text=payload,
+        timeout_seconds=60,
+    )
+    try:
+        response = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise AssertionError("test job seed returned an invalid response") from error
+    if response != {"audio_uuid": str(audio_uuid), "state": "pending"}:
+        raise AssertionError("test job seed returned an inconsistent response")
+    return AcceptedJob(
+        audio_uuid=audio_uuid,
+        state="pending",
+        location=f"/api/jobs/{audio_uuid}",
+    )
 
 
 def get_job(client: httpx.Client, audio_uuid: UUID) -> JobDetail:
@@ -417,7 +493,7 @@ def _require_uuid(value: object) -> None:
 __all__ = [
     "AcceptedJob",
     "AudioDownload",
-    "AudioUpload",
+    "SyntheticAudio",
     "JobDetail",
     "JobEvent",
     "JobSummary",
@@ -428,6 +504,5 @@ __all__ = [
     "get_observability_alerts",
     "list_jobs",
     "retry_job",
-    "upload_audio",
-    "upload_audios_concurrently",
+    "seed_audio_job",
 ]

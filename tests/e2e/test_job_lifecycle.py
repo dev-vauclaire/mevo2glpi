@@ -12,17 +12,16 @@ import httpx
 import pytest
 from tests.e2e.support import (
     AcceptedJob,
-    AudioUpload,
     JobDetail,
     JobEvent,
+    SyntheticAudio,
     download_audio,
     get_job_events,
     list_jobs,
     load_correlated_glpi_ticket,
     open_e2e_database,
     retry_job,
-    upload_audio,
-    upload_audios_concurrently,
+    seed_audio_job,
     wait_for_alert,
     wait_for_alert_absent,
     wait_for_job_state,
@@ -39,7 +38,7 @@ PIPELINE_TIMEOUT_SECONDS = 20 * 60.0
 AUTOMATION_SERVICE = "worker-automation"
 EXPECTED_TICKET_TITLE = "Synthetic audio request"
 NOMINAL_EVENTS = (
-    ("job_created", "pending", None, "web"),
+    ("job_created", "pending", None, "worker_publisher"),
     ("processing_started", "processing", "transcription", "worker_automation"),
     (
         "transcription_submitted",
@@ -58,23 +57,23 @@ NOMINAL_EVENTS = (
 )
 
 
-def test_three_concurrent_uploads_complete_with_exact_artifacts(
+def test_three_publisher_seeded_jobs_complete_with_exact_artifacts(
     e2e_environment: MvpComposeEnvironment,
     glpi_environment,
     transcribe_ai_environment,
 ) -> None:
-    """Process the browser concurrency limit through every real application."""
+    """Process three durable publisher outputs through every downstream app."""
     assert httpx.URL(e2e_environment.base_url).scheme == "http"
     expected_audio = transcribe_ai_environment.audio_path.read_bytes()
-    uploads = tuple(
-        AudioUpload(
+    audios = tuple(
+        SyntheticAudio(
             filename=f"batch-{index}.wav",
             content=expected_audio,
         )
         for index in range(1, 4)
     )
 
-    accepted = upload_audios_concurrently(e2e_environment, uploads)
+    accepted = tuple(seed_audio_job(e2e_environment, audio) for audio in audios)
     audio_uuids = tuple(job.audio_uuid for job in accepted)
     assert len(set(audio_uuids)) == 3
     assert all(job.state == "pending" for job in accepted)
@@ -117,11 +116,10 @@ def test_audio_size_mismatch_blocks_then_operator_retry_completes(
     """Expose a storage invariant, repair only the bytes, then rearm via HTTP."""
     expected_audio = transcribe_ai_environment.audio_path.read_bytes()
     with _automation_stopped(e2e_environment):
-        with e2e_environment.client() as client:
-            accepted = upload_audio(
-                client,
-                AudioUpload(filename="blocked-size.wav", content=expected_audio),
-            )
+        accepted = seed_audio_job(
+            e2e_environment,
+            SyntheticAudio(filename="blocked-size.wav", content=expected_audio),
+        )
         _change_audio_size(e2e_environment, accepted.audio_uuid, delta=1)
 
     try:
@@ -204,11 +202,10 @@ def test_application_failed_transition_alerts_then_operator_retry_completes(
     """Materialize one terminal job error through the real lifecycle service."""
     expected_audio = transcribe_ai_environment.audio_path.read_bytes()
     with _automation_stopped(e2e_environment):
-        with e2e_environment.client() as client:
-            accepted = upload_audio(
-                client,
-                AudioUpload(filename="terminal-failure.wav", content=expected_audio),
-            )
+        accepted = seed_audio_job(
+            e2e_environment,
+            SyntheticAudio(filename="terminal-failure.wav", content=expected_audio),
+        )
 
         with open_e2e_database(e2e_environment.sqlalchemy_database_url) as database:
             started_at = datetime.now(UTC)
@@ -327,7 +324,7 @@ def _change_audio_size(
     environment.compose(
         "exec",
         "-T",
-        "web",
+        "worker-retention",
         "python",
         "-c",
         f"from pathlib import Path; {operation}",

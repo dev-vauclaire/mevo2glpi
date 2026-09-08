@@ -3,19 +3,18 @@
 from .api import (
     AcceptedJob,
     AudioDownload,
-    AudioUpload,
     JobDetail,
     JobEvent,
     JobSummary,
     OperationalAlert,
+    SyntheticAudio,
     download_audio,
     get_job,
     get_job_events,
     get_observability_alerts,
     list_jobs,
     retry_job,
-    upload_audio,
-    upload_audios_concurrently,
+    seed_audio_job,
 )
 from .database import E2eDatabase, open_e2e_database
 from .glpi import (
@@ -34,7 +33,7 @@ from .polling import (
 __all__ = [
     "AcceptedJob",
     "AudioDownload",
-    "AudioUpload",
+    "SyntheticAudio",
     "E2eDatabase",
     "GlpiTicketRecord",
     "JobDetail",
@@ -51,8 +50,7 @@ __all__ = [
     "open_e2e_database",
     "poll_until",
     "retry_job",
-    "upload_audio",
-    "upload_audios_concurrently",
+    "seed_audio_job",
     "wait_for_alert",
     "wait_for_alert_absent",
     "wait_for_job_state",

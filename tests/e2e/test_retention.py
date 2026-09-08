@@ -11,13 +11,13 @@ from uuid import UUID
 import httpx
 import pytest
 from tests.e2e.support import (
-    AudioUpload,
+    SyntheticAudio,
     download_audio,
     get_job,
     get_job_events,
     open_e2e_database,
     poll_until,
-    upload_audio,
+    seed_audio_job,
     wait_for_job_state,
 )
 from tests.integration.glpi.plugin import GlpiTestEnvironment
@@ -42,7 +42,7 @@ GLPI_SERVICE = "glpi"
 
 
 class TranscribeAiEnvironment(Protocol):
-    """Narrow fixture contract needed to upload one valid audio."""
+    """Narrow fixture contract needed to seed one valid synthetic audio."""
 
     audio_path: Path
 
@@ -57,11 +57,11 @@ def test_solved_ticket_keeps_audio_then_closed_ticket_purges_it(
     retention_stopped = False
     primary_error: BaseException | None = None
 
+    accepted = seed_audio_job(
+        e2e_environment,
+        SyntheticAudio(filename="retention-ticket.wav", content=audio),
+    )
     with e2e_environment.client() as client:
-        accepted = upload_audio(
-            client,
-            AudioUpload(filename="retention-ticket.wav", content=audio),
-        )
         completed = wait_for_job_state(
             client,
             accepted.audio_uuid,
@@ -145,11 +145,11 @@ def test_expired_deadline_purges_audio_without_glpi(
     glpi_stopped = False
     primary_error: BaseException | None = None
 
+    accepted = seed_audio_job(
+        e2e_environment,
+        SyntheticAudio(filename="retention-deadline.wav", content=audio),
+    )
     with e2e_environment.client() as client:
-        accepted = upload_audio(
-            client,
-            AudioUpload(filename="retention-deadline.wav", content=audio),
-        )
         wait_for_job_state(
             client,
             accepted.audio_uuid,
