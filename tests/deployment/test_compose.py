@@ -283,7 +283,7 @@ def test_web_receives_no_provider_credentials(
         "LEGACY_TRANSCRIPTION_API_KEY"
         not in services["worker-retention"]["environment"]
     )
-    assert web_environment["WEB_TRUST_PROXY_HEADERS"] == "false"
+    assert web_environment["WEB_TRUST_PROXY_HEADERS"] == "true"
     publisher_environment = services["worker-publisher"]["environment"]
     assert "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH" in publisher_environment
     assert "PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH" in publisher_environment
