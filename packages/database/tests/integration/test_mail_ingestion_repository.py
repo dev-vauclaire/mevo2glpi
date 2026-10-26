@@ -18,6 +18,7 @@ from glpi_ticketing_database.models import (
 )
 from glpi_ticketing_database.repositories import (
     DiscoveredMail,
+    MailIngestionReplayFilter,
     MailIngestionRepository,
     PendingJob,
     TicketCreationJobRepository,
@@ -92,6 +93,7 @@ def test_claim_priority_and_both_terminal_dispositions(
         repository.record_attachment_validated(
             accepted_uuid,
             attachment_id="attachment-a",
+            audio_extension=AudioExtension.WAV,
             attachment_size_bytes=128,
             now=NOW + timedelta(seconds=1),
         )
@@ -184,6 +186,71 @@ def test_future_system_retry_prevents_claiming_another_message(
         pending = session.get(MailIngestion, pending_uuid)
         assert pending is not None
         assert pending.status == MailIngestionStatus.PENDING.value
+
+
+def test_operator_replay_filters_and_rearms_one_rejected_ingestion(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    ingestion_uuid = UUID("00000000-0000-0000-0000-000000000131")
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        repository.add_discovered(
+            _discovered(ingestion_uuid, "immutable-rejected-ogg"),
+            now=NOW,
+        )
+        repository.resume_or_claim_next(NOW + timedelta(seconds=1))
+        repository.record_rejected(
+            ingestion_uuid,
+            rejection_category="invalid_attachment",
+            rejection_code="wav_attachment_missing",
+            attachment_id="opaque-ogg-attachment",
+            attachment_size_bytes=2048,
+            now=NOW + timedelta(seconds=2),
+        )
+        repository.record_failed(
+            ingestion_uuid,
+            now=NOW + timedelta(seconds=3),
+        )
+
+    replay_filter = MailIngestionReplayFilter(
+        status=MailIngestionStatus.FAILED,
+        disposition=MailIngestionDisposition.REJECTED,
+        rejection_category="invalid_attachment",
+        rejection_code="wav_attachment_missing",
+        received_after=NOW - timedelta(days=1),
+        received_before=NOW + timedelta(days=1),
+        limit=100,
+        job_uuid_is_null=True,
+        attachment_id_is_not_null=True,
+    )
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        candidates = repository.list_replay_candidates(replay_filter)
+        assert [candidate.uuid for candidate in candidates] == [ingestion_uuid]
+        original_attempt_count = candidates[0].attempt_count
+        original_first_started_at = candidates[0].first_started_at
+        replayed = repository.rearm_for_operator_replay(
+            ingestion_uuid,
+            expected=replay_filter,
+            now=NOW + timedelta(seconds=4),
+        )
+
+    assert replayed.status is MailIngestionStatus.PENDING
+    assert replayed.stage is MailIngestionStage.DISCOVERY
+    assert replayed.disposition is None
+    assert replayed.attachment_id is None
+    assert replayed.audio_extension is None
+    assert replayed.attachment_size_bytes is None
+    assert replayed.rejection_category is None
+    assert replayed.rejection_code is None
+    assert replayed.attempt_count == original_attempt_count
+    assert replayed.first_started_at == original_first_started_at
+
+    with session_factory() as session:
+        assert not MailIngestionRepository(session).list_replay_candidates(
+            replay_filter
+        )
 
 
 def _discovered(

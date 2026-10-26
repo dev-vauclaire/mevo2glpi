@@ -144,16 +144,20 @@ class PublisherLifecycleService:
         self,
         ingestion_uuid: UUID,
         attachment: GraphAttachment,
+        audio_extension: AudioExtension,
         now: datetime,
     ) -> MailIngestionSnapshot:
-        """Advance a validated WAV to publication and append its event."""
+        """Advance a validated audio attachment and append its event."""
         if not isinstance(attachment, GraphAttachment):
             raise TypeError("attachment must be a GraphAttachment")
+        if not isinstance(audio_extension, AudioExtension):
+            raise TypeError("audio_extension must be an AudioExtension")
 
         def operation(session: Session) -> MailIngestionSnapshot:
             snapshot = MailIngestionRepository(session).record_attachment_validated(
                 ingestion_uuid,
                 attachment_id=str(attachment.attachment_id),
+                audio_extension=audio_extension,
                 attachment_size_bytes=attachment.size_bytes,
                 now=now,
             )
@@ -224,20 +228,39 @@ class PublisherLifecycleService:
             ingestion_repository = MailIngestionRepository(session)
             job_repository = TicketCreationJobRepository(session)
             job_event_repository = TicketCreationJobEventRepository(session)
+            current = ingestion_repository.get_by_uuid(ingestion_uuid)
+            if current is None:
+                raise PublisherPersistenceConflictError("ingestion no longer exists")
+            if current.audio_extension is None:
+                raise PublisherPersistenceConflictError(
+                    "ingestion has no persisted audio extension"
+                )
+            if not (
+                current.stage is MailIngestionStage.PUBLICATION
+                or (
+                    current.stage is MailIngestionStage.ACKNOWLEDGEMENT
+                    and current.disposition is MailIngestionDisposition.ACCEPTED
+                    and current.job_uuid == ingestion_uuid
+                )
+            ):
+                raise PublisherPersistenceConflictError(
+                    "ingestion does not match published job"
+                )
+
             existing_job = job_repository.get_by_uuid(ingestion_uuid)
             if existing_job is None:
                 job = job_repository.add_pending(
                     PendingJob(
                         uuid=ingestion_uuid,
                         storage_key=storage_key,
-                        audio_extension=AudioExtension.WAV,
+                        audio_extension=current.audio_extension,
                         audio_size_bytes=size_bytes,
                     )
                 )
             else:
                 if (
                     existing_job.storage_key != storage_key
-                    or existing_job.audio_extension is not AudioExtension.WAV
+                    or existing_job.audio_extension is not current.audio_extension
                     or existing_job.audio_size_bytes != size_bytes
                 ):
                     raise PublisherPersistenceConflictError(
@@ -259,9 +282,6 @@ class PublisherLifecycleService:
                     actor=JobEventActor.WORKER_PUBLISHER,
                 )
 
-            current = ingestion_repository.get_by_uuid(ingestion_uuid)
-            if current is None:
-                raise PublisherPersistenceConflictError("ingestion no longer exists")
             if current.stage is MailIngestionStage.PUBLICATION:
                 snapshot = ingestion_repository.record_accepted(
                     ingestion_uuid,
@@ -427,8 +447,9 @@ class PublisherLifecycleService:
                 or ingestion.stage is not MailIngestionStage.ACKNOWLEDGEMENT
                 or ingestion.disposition is not MailIngestionDisposition.ACCEPTED
                 or ingestion.job_uuid != ingestion_uuid
+                or ingestion.audio_extension is None
                 or job.storage_key != storage_key
-                or job.audio_extension is not AudioExtension.WAV
+                or job.audio_extension is not ingestion.audio_extension
                 or job.audio_size_bytes != size_bytes
             ):
                 return None

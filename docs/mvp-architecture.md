@@ -58,7 +58,7 @@ Principes structurants :
 | --- | --- | --- |
 | `database-migrations` | one-shot | Attendre PostgreSQL puis exécuter `alembic upgrade head`. |
 | `web` | HTTP persistant | Afficher les jobs, événements, workers et alertes ; permettre le téléchargement contrôlé et le retry opérateur. |
-| `worker-publisher` | worker persistant | Transformer les messages Exchange contenant un WAV valide en jobs durables. |
+| `worker-publisher` | worker persistant | Transformer les messages Exchange contenant un WAV ou OGG valide en jobs durables. |
 | `worker-automation` | worker persistant | Transcrire l'audio, créer le ticket GLPI et finaliser le job. |
 | `worker-retention` | worker persistant | Contrôler le ticket et supprimer l'audio conformément à sa politique. |
 
@@ -113,6 +113,8 @@ PostgreSQL natifs. Tous les timestamps sont des `TIMESTAMPTZ` en UTC.
 - clé primaire `uuid` ;
 - couple unique `(mailbox_id, message_id)` ;
 - `attachment_id` et `job_uuid` lorsqu'ils sont connus ;
+- l'extension audio sélectionnée, persistée avant le téléchargement afin que
+  la reprise après crash conserve le même contrat de validation ;
 - état `pending`, `processing`, `retry_scheduled`, `completed`, `failed` ou
   `blocked` ;
 - étape `discovery`, `validation`, `publication` ou `acknowledgement` ;
@@ -138,7 +140,7 @@ cohérence avec le singleton publisher.
 | `status` | `pending`, `processing`, `retry_scheduled`, `completed`, `failed` ou `blocked`. |
 | `stage` | `transcription`, `glpi_creation` ou `finalization`, nullable avant le traitement. |
 | `storage_key` | Clé relative canonique unique `{uuid}.{extension}`. |
-| `audio_extension` | Extension validée ; le publisher produit actuellement `wav`. |
+| `audio_extension` | Extension validée ; le publisher produit `wav` ou `ogg`. |
 | `audio_size_bytes` | Taille positive vérifiée avant traitement et téléchargement. |
 | `glpi_ticket_id` | Identifiant positif, persisté dès confirmation de la création GLPI. |
 | `transcription_provider_job_id` | Identifiant du job Transcribe AI, distinct de l'UUID métier. |
@@ -247,12 +249,12 @@ flowchart TD
     List --> Persist[SQL : persister les nouveaux messages]
     Persist --> Claim[Réclamer le plus ancien éligible]
     Claim --> Attachments[HTTP Graph : lister les pièces jointes]
-    Attachments --> Validate{Une seule pièce WAV valide et ≤ 25 Mio ?}
+    Attachments --> Validate{Une seule pièce WAV/OGG valide et ≤ 25 Mio ?}
     Validate -->|non| Reject[SQL : décision rejected]
     Validate -->|oui| Download[HTTP Graph : télécharger vers fichier temporaire]
-    Download --> Inspect[Valider RIFF/WAVE, fmt et data]
+    Download --> Inspect[Valider RIFF/WAVE ou pages Ogg]
     Inspect -->|invalide| Reject
-    Inspect -->|valide| Publish[Système : publication atomique UUID.wav]
+    Inspect -->|valide| Publish[Système : publication atomique UUID.extension]
     Publish --> Job[SQL : job pending + événements + lien ingestion]
     Job --> Accept[Décision accepted]
     Accept --> MoveProcessed[HTTP Graph : déplacer vers Processed]
@@ -262,11 +264,14 @@ flowchart TD
 ```
 
 Le contrat exige exactement une pièce jointe visible, de type fichier, avec
-une extension `.wav`, non vide et ne dépassant pas 25 Mio. La structure
-RIFF/WAVE est contrôlée sans décoder le codec ; les codecs téléphoniques tels
-que G.711 A-law ou µ-law restent donc acceptables.
+une extension `.wav` ou `.ogg`, non vide et ne dépassant pas 25 Mio.
+L'extension retenue est persistée avant le téléchargement : une reprise utilise
+donc le même inspecteur et la même clé de stockage. La structure RIFF/WAVE ou le
+framing, les continuations, la fin de flux et le CRC des pages Ogg sont
+contrôlés sans décoder le codec ; les codecs
+téléphoniques tels que G.711 A-law ou µ-law restent donc acceptables.
 
-Une paire message/WAV produit un UUID d'ingestion. Cet UUID devient aussi
+Une paire message/audio produit un UUID d'ingestion. Cet UUID devient aussi
 l'UUID du job, le nom canonique de l'audio et l'`external_id` GLPI. Aucun
 dédupliquage par empreinte audio n'est effectué : deux messages distincts avec
 les mêmes octets produisent deux jobs distincts.
@@ -284,6 +289,16 @@ arrête le processus, que Docker relance, puis le dernier état commité est
 repris. `Retry-After` est respecté dans la limite du plafond configuré. Une
 erreur systémique non réessayable passe le heartbeat à `blocked` et verrouille
 la consommation jusqu'à l'arrêt ou à l'intervention d'un opérateur.
+
+Une commande de rejeu réservée à l'exploitation peut sélectionner un lot borné
+d'ingestions `failed/rejected` par code et fenêtre de réception. Elle ne parle
+qu'à PostgreSQL, partage le verrou singleton du publisher et propose un
+`dry-run` sans écriture. En application, chaque ligne est réarmée dans une
+transaction distincte et reçoit l'événement `operator_replay_requested`.
+Le message n'est pas déplacé par cette commande : le publisher le reprend par
+son Immutable ID, même depuis `Rejected`, puis applique le flux nominal jusqu'à
+`Processed`. Il n'est donc ni nécessaire ni souhaitable de le remettre
+manuellement dans Inbox.
 
 ## Pipeline du worker d'automatisation
 
@@ -472,7 +487,7 @@ La validation est répartie par frontière :
 
 La recette E2E n'utilise pas un tenant Microsoft réel et ne démarre pas le
 publisher de production. Elle injecte, par une commande réservée aux tests, la
-sortie durable exacte de sa frontière : fichier WAV canonique, job `pending`
+sortie durable exacte de sa frontière : fichier audio canonique, job `pending`
 et événement `job_created` avec l'acteur `worker_publisher`. Les échanges Entra
 et Graph restent couverts par les tests du publisher avec des doubles
 contrôlés. Cette séparation rend l'E2E reproductible sans secret ni boîte
@@ -484,8 +499,11 @@ Exchange externe.
   de lease par job ni de traitement parallèle ;
 - le publisher fait du polling paginé, adapté à la volumétrie visée d'environ
   50 messages par jour ;
-- seule une pièce jointe WAV est acceptée par le publisher ;
-- le contrôle RIFF/WAVE ne décode pas le codec ni ne mesure la qualité audio ;
+- une unique pièce jointe WAV ou OGG est acceptée par le publisher ; MP3 et M4A
+  restent refusés ;
+- les contrôles RIFF/WAVE et Ogg ne décodent pas le codec et ne mesurent pas la
+  qualité audio, même si le framing, les continuations, la fin de flux et le
+  CRC Ogg sont vérifiés ;
 - les rejets d'ingestion sont audités en base mais ne disposent pas d'un écran
   Exchange dédié dans le dashboard ;
 - les alertes restent internes au dashboard, sans notification mail ou Teams ;

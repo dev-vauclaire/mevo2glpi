@@ -86,6 +86,7 @@ class MailIngestionEventType(StrEnum):
     INGESTION_COMPLETED = "ingestion_completed"
     INGESTION_FAILED = "ingestion_failed"
     INGESTION_BLOCKED = "ingestion_blocked"
+    OPERATOR_REPLAY_REQUESTED = "operator_replay_requested"
 
 
 class RetentionPolicy(StrEnum):

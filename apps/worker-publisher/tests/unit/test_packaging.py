@@ -43,7 +43,12 @@ def test_publisher_declares_its_runtime_dependencies_and_entrypoint() -> None:
         "sqlalchemy>=2.0,<3",
     ]
     assert manifest["project"]["scripts"] == {
-        "glpi-ticketing-publisher": ("glpi_ticketing_worker_publisher.application:main")
+        "glpi-ticketing-publisher": (
+            "glpi_ticketing_worker_publisher.application:main"
+        ),
+        "glpi-ticketing-publisher-replay": (
+            "glpi_ticketing_worker_publisher.replay.application:main"
+        ),
     }
     assert manifest["tool"]["uv"]["sources"] == {
         "glpi-ticketing-common": {"workspace": True},

@@ -12,6 +12,7 @@ import pytest
 
 from glpi_ticketing_common.backoff import ExponentialBackoffPolicy
 from glpi_ticketing_database import (
+    AudioExtension,
     MailIngestionAcquisition,
     MailIngestionDisposition,
     MailIngestionErrorScope,
@@ -44,6 +45,8 @@ from glpi_ticketing_worker_publisher.publisher.service import PublisherWorker
 
 NOW = datetime(2026, 9, 8, 8, tzinfo=UTC)
 MAILBOX_ID = UUID("10000000-0000-4000-8000-000000000001")
+OGG_CRC_POLYNOMIAL = 0x04C11DB7
+UINT32_MASK = 0xFFFFFFFF
 
 
 def _wav_bytes() -> bytes:
@@ -54,6 +57,23 @@ def _wav_bytes() -> bytes:
     return b"RIFF" + struct.pack("<I", len(chunks) + 4) + b"WAVE" + chunks
 
 
+def _ogg_bytes() -> bytes:
+    payload = b"Opus"
+    header = b"OggS\x00\x06" + (b"\x00" * 20) + b"\x01"
+    page = bytearray(header + bytes((len(payload),)) + payload)
+    checksum = 0
+    for octet in page:
+        checksum ^= octet << 24
+        for _ in range(8):
+            if checksum & 0x80000000:
+                checksum = (checksum << 1) ^ OGG_CRC_POLYNOMIAL
+            else:
+                checksum <<= 1
+            checksum &= UINT32_MASK
+    page[22:26] = checksum.to_bytes(4, byteorder="little")
+    return bytes(page)
+
+
 def _snapshot(
     *,
     ingestion_uuid: UUID | None = None,
@@ -61,6 +81,7 @@ def _snapshot(
     stage: MailIngestionStage = MailIngestionStage.VALIDATION,
     disposition: MailIngestionDisposition | None = None,
     attachment_id: str | None = None,
+    audio_extension: AudioExtension | None = None,
     attachment_size_bytes: int | None = None,
     job_uuid: UUID | None = None,
     message_id: str = "immutable-message-secret",
@@ -77,6 +98,7 @@ def _snapshot(
         status=status,
         stage=stage,
         disposition=disposition,
+        audio_extension=audio_extension,
         attachment_size_bytes=attachment_size_bytes,
         attempt_count=1,
         consecutive_retry_count=0,
@@ -95,19 +117,31 @@ def _snapshot(
 
 
 class FakeGraph:
-    def __init__(self, *, content: bytes | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        content: bytes | None = None,
+        attachment_name: str = "voicemail-sensitive-name.wav",
+        content_type: str = "audio/wav",
+        parent_folder_id: str = "inbox-secret",
+        declared_size_bytes: int | None = None,
+    ) -> None:
         self.content = content if content is not None else _wav_bytes()
         self.message = GraphMessage(
             message_id=MessageId("immutable-message-secret"),
-            parent_folder_id=FolderId("inbox-secret"),
+            parent_folder_id=FolderId(parent_folder_id),
             received_at=NOW,
             has_attachments=True,
         )
         self.attachment = GraphAttachment(
             attachment_id=AttachmentId("attachment-secret"),
-            name="voicemail-sensitive-name.wav",
-            content_type="audio/wav",
-            size_bytes=len(self.content),
+            name=attachment_name,
+            content_type=content_type,
+            size_bytes=(
+                len(self.content)
+                if declared_size_bytes is None
+                else declared_size_bytes
+            ),
             is_inline=False,
         )
         self.list_messages_error: Exception | None = None
@@ -212,6 +246,7 @@ class FakeLifecycle:
         self,
         ingestion_uuid: UUID,
         attachment: GraphAttachment,
+        audio_extension: AudioExtension,
         _now: datetime,
     ) -> MailIngestionSnapshot:
         assert ingestion_uuid == self.ingestion.uuid
@@ -219,6 +254,7 @@ class FakeLifecycle:
             self.ingestion,
             stage=MailIngestionStage.PUBLICATION,
             attachment_id=str(attachment.attachment_id),
+            audio_extension=audio_extension,
             attachment_size_bytes=attachment.size_bytes,
         )
         return self.ingestion
@@ -343,6 +379,7 @@ def test_crash_recovery_is_prioritized_over_inbox_discovery(tmp_path: Path) -> N
         stage=MailIngestionStage.ACKNOWLEDGEMENT,
         disposition=MailIngestionDisposition.ACCEPTED,
         attachment_id="attachment-secret",
+        audio_extension=AudioExtension.WAV,
         attachment_size_bytes=100,
         job_uuid=ingestion_uuid,
     )
@@ -367,6 +404,42 @@ def test_corrupt_wav_is_failed_without_creating_an_audio_job(tmp_path: Path) -> 
     assert not lifecycle.published
     assert graph.destination_names == ["Rejected"]
     assert not tuple(tmp_path.iterdir())
+
+
+def test_empty_download_is_rejected_when_graph_metadata_was_nonempty(
+    tmp_path: Path,
+) -> None:
+    lifecycle = FakeLifecycle(ingestion=_snapshot())
+    graph = FakeGraph(content=b"", declared_size_bytes=128)
+
+    outcome = _worker(tmp_path, lifecycle, graph).run_once()
+
+    assert isinstance(outcome, RejectedOutcome)
+    assert outcome.failure.technical_code == "audio_empty"
+    assert lifecycle.ingestion.audio_extension is AudioExtension.WAV
+    assert not lifecycle.published
+
+
+def test_rearmed_ogg_in_rejected_is_processed_without_scanning_inbox(
+    tmp_path: Path,
+) -> None:
+    ingestion = _snapshot()
+    lifecycle = FakeLifecycle(ingestion=ingestion)
+    graph = FakeGraph(
+        content=_ogg_bytes(),
+        attachment_name="message.OGG",
+        content_type="application/octet-stream",
+        parent_folder_id="rejected-folder",
+    )
+    graph.list_messages_error = AssertionError("Inbox must not be scanned")
+
+    outcome = _worker(tmp_path, lifecycle, graph).run_once()
+
+    assert isinstance(outcome, CompletedOutcome)
+    assert graph.list_messages_calls == 0
+    assert lifecycle.published == [(f"{ingestion.uuid}.ogg", len(graph.content))]
+    assert (tmp_path / f"{ingestion.uuid}.ogg").read_bytes() == graph.content
+    assert graph.destination_names == ["Processed"]
 
 
 def test_retryable_graph_failure_is_scheduled_and_never_failed(
@@ -483,6 +556,7 @@ def test_existing_audio_from_crash_is_reconciled_without_overwrite(
     ingestion = _snapshot(
         stage=MailIngestionStage.PUBLICATION,
         attachment_id="attachment-secret",
+        audio_extension=AudioExtension.WAV,
         attachment_size_bytes=len(_wav_bytes()),
     )
     graph = FakeGraph()

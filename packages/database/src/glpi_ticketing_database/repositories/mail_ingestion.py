@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import (
+    AudioExtension,
     MailIngestion,
     MailIngestionDisposition,
     MailIngestionErrorScope,
@@ -56,6 +57,7 @@ class MailIngestionSnapshot:
     status: MailIngestionStatus
     stage: MailIngestionStage
     disposition: MailIngestionDisposition | None
+    audio_extension: AudioExtension | None
     attachment_size_bytes: int | None
     attempt_count: int
     consecutive_retry_count: int
@@ -79,6 +81,24 @@ class MailIngestionAcquisition:
     ingestion: MailIngestionSnapshot
     previous_status: MailIngestionStatus
     resumed: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MailIngestionReplayFilter:
+    """Typed, bounded selector for one operator-requested replay batch."""
+
+    status: MailIngestionStatus
+    disposition: MailIngestionDisposition
+    rejection_category: str
+    rejection_code: str
+    received_after: datetime
+    received_before: datetime
+    limit: int
+    job_uuid_is_null: bool = True
+    attachment_id_is_not_null: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_replay_filter(self)
 
 
 class MailIngestionRepository:
@@ -107,6 +127,7 @@ class MailIngestionRepository:
             status=MailIngestionStatus.PENDING.value,
             stage=MailIngestionStage.DISCOVERY.value,
             disposition=None,
+            audio_extension=None,
             attachment_size_bytes=None,
             attempt_count=0,
             consecutive_retry_count=0,
@@ -202,16 +223,87 @@ class MailIngestionRepository:
         )
         return self._session.scalar(statement)
 
+    def list_replay_candidates(
+        self,
+        replay_filter: MailIngestionReplayFilter,
+    ) -> tuple[MailIngestionSnapshot, ...]:
+        """Return one deterministic, read-only batch matching operator filters."""
+        replay_filter = _validate_replay_filter(replay_filter)
+        statement = select(MailIngestion).where(
+            MailIngestion.status == replay_filter.status.value,
+            MailIngestion.disposition == replay_filter.disposition.value,
+            MailIngestion.rejection_category == replay_filter.rejection_category,
+            MailIngestion.rejection_code == replay_filter.rejection_code,
+            MailIngestion.received_at >= replay_filter.received_after,
+            MailIngestion.received_at < replay_filter.received_before,
+            MailIngestion.job_uuid.is_(None),
+        )
+        if replay_filter.attachment_id_is_not_null:
+            statement = statement.where(MailIngestion.attachment_id.is_not(None))
+        statement = statement.order_by(
+            MailIngestion.received_at,
+            MailIngestion.uuid,
+        ).limit(replay_filter.limit)
+        return tuple(
+            _to_snapshot(ingestion)
+            for ingestion in self._session.scalars(statement).all()
+        )
+
+    def rearm_for_operator_replay(
+        self,
+        ingestion_uuid: UUID,
+        *,
+        expected: MailIngestionReplayFilter,
+        now: datetime,
+    ) -> MailIngestionSnapshot:
+        """Return one rejected ingestion to pending after locked revalidation."""
+        validate_uuid(ingestion_uuid, "ingestion_uuid")
+        expected = _validate_replay_filter(expected)
+        now = validate_utc_datetime(now, "now")
+        ingestion = self._session.get(
+            MailIngestion,
+            ingestion_uuid,
+            with_for_update=True,
+        )
+        if ingestion is None:
+            raise MailIngestionNotFoundError(
+                f"mail ingestion {ingestion_uuid} does not exist"
+            )
+        if not _matches_replay_filter(ingestion, expected):
+            raise InvalidMailIngestionTransitionError(
+                "mail ingestion no longer matches the replay filter"
+            )
+
+        ingestion.attachment_id = None
+        ingestion.job_uuid = None
+        ingestion.status = MailIngestionStatus.PENDING.value
+        ingestion.stage = MailIngestionStage.DISCOVERY.value
+        ingestion.disposition = None
+        ingestion.audio_extension = None
+        ingestion.attachment_size_bytes = None
+        ingestion.consecutive_retry_count = 0
+        ingestion.next_attempt_at = None
+        ingestion.rejection_category = None
+        ingestion.rejection_code = None
+        _clear_last_error(ingestion)
+        ingestion.updated_at = now
+        ingestion.finished_at = None
+        self._session.flush()
+        return _to_snapshot(ingestion)
+
     def record_attachment_validated(
         self,
         ingestion_uuid: UUID,
         *,
         attachment_id: str,
+        audio_extension: AudioExtension,
         attachment_size_bytes: int,
         now: datetime,
     ) -> MailIngestionSnapshot:
         """Persist validated attachment metadata and advance to publication."""
         attachment_id = _validate_graph_identifier(attachment_id, "attachment_id")
+        if not isinstance(audio_extension, AudioExtension):
+            raise TypeError("audio_extension must be an AudioExtension")
         attachment_size_bytes = validate_positive_integer(
             attachment_size_bytes,
             "attachment_size_bytes",
@@ -222,6 +314,7 @@ class MailIngestionRepository:
             MailIngestionStage.VALIDATION,
         )
         ingestion.attachment_id = attachment_id
+        ingestion.audio_extension = audio_extension.value
         ingestion.attachment_size_bytes = attachment_size_bytes
         ingestion.stage = MailIngestionStage.PUBLICATION.value
         ingestion.consecutive_retry_count = 0
@@ -245,6 +338,7 @@ class MailIngestionRepository:
         )
         if (
             ingestion.attachment_id is None
+            or ingestion.audio_extension is None
             or ingestion.attachment_size_bytes is None
             or ingestion.attachment_size_bytes <= 0
         ):
@@ -511,6 +605,62 @@ def _validate_discovered_mail(discovered_mail: DiscoveredMail) -> None:
     validate_utc_datetime(discovered_mail.received_at, "received_at")
 
 
+def _validate_replay_filter(
+    replay_filter: MailIngestionReplayFilter,
+) -> MailIngestionReplayFilter:
+    if not isinstance(replay_filter, MailIngestionReplayFilter):
+        raise TypeError("replay_filter must be a MailIngestionReplayFilter")
+    if replay_filter.status is not MailIngestionStatus.FAILED:
+        raise ValueError("replay status must be failed")
+    if replay_filter.disposition is not MailIngestionDisposition.REJECTED:
+        raise ValueError("replay disposition must be rejected")
+    validate_safe_identifier(
+        replay_filter.rejection_category,
+        "rejection_category",
+    )
+    validate_safe_identifier(replay_filter.rejection_code, "rejection_code")
+    received_after = validate_utc_datetime(
+        replay_filter.received_after,
+        "received_after",
+    )
+    received_before = validate_utc_datetime(
+        replay_filter.received_before,
+        "received_before",
+    )
+    if received_before <= received_after:
+        raise ValueError("received_before must be later than received_after")
+    if isinstance(replay_filter.limit, bool) or not isinstance(
+        replay_filter.limit, int
+    ):
+        raise TypeError("limit must be an integer")
+    if not 1 <= replay_filter.limit <= 1000:
+        raise ValueError("limit must be between 1 and 1000")
+    if replay_filter.job_uuid_is_null is not True:
+        raise ValueError("job_uuid_is_null must be true for a safe replay")
+    if not isinstance(replay_filter.attachment_id_is_not_null, bool):
+        raise TypeError("attachment_id_is_not_null must be a boolean")
+    return replay_filter
+
+
+def _matches_replay_filter(
+    ingestion: MailIngestion,
+    replay_filter: MailIngestionReplayFilter,
+) -> bool:
+    return bool(
+        ingestion.status == replay_filter.status.value
+        and ingestion.disposition == replay_filter.disposition.value
+        and ingestion.rejection_category == replay_filter.rejection_category
+        and ingestion.rejection_code == replay_filter.rejection_code
+        and ingestion.job_uuid is None
+        and ingestion.received_at >= replay_filter.received_after
+        and ingestion.received_at < replay_filter.received_before
+        and (
+            not replay_filter.attachment_id_is_not_null
+            or ingestion.attachment_id is not None
+        )
+    )
+
+
 def _validate_graph_identifier(value: str, field_name: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{field_name} must be a string")
@@ -584,6 +734,11 @@ def _to_snapshot(ingestion: MailIngestion) -> MailIngestionSnapshot:
             if ingestion.disposition is not None
             else None
         ),
+        audio_extension=(
+            AudioExtension(ingestion.audio_extension)
+            if ingestion.audio_extension is not None
+            else None
+        ),
         attachment_size_bytes=ingestion.attachment_size_bytes,
         attempt_count=ingestion.attempt_count,
         consecutive_retry_count=ingestion.consecutive_retry_count,
@@ -611,5 +766,6 @@ __all__ = [
     "MailIngestionAcquisition",
     "MailIngestionNotFoundError",
     "MailIngestionRepository",
+    "MailIngestionReplayFilter",
     "MailIngestionSnapshot",
 ]

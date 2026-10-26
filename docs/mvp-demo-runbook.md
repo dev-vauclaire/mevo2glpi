@@ -9,9 +9,9 @@ patient.
 
 Le parcours de production comporte la migration one-shot, le web en lecture
 seule et trois workers : publisher, automation et retention. Le publisher lit
-une boîte Exchange Online dédiée avec Microsoft Graph, publie le WAV et crée le
-job ; les deux autres workers transcrivent, créent le ticket et appliquent sa
-rétention.
+une boîte Exchange Online dédiée avec Microsoft Graph, publie le WAV ou l'OGG
+et crée le job ; les deux autres workers transcrivent, créent le ticket et
+appliquent sa rétention.
 
 La recette E2E automatisée valide neuf scénarios aval :
 
@@ -28,8 +28,8 @@ La recette E2E automatisée valide neuf scénarios aval :
 
 L'E2E ne contacte pas Microsoft 365 et ne démarre pas le publisher réel, car il
 ne possède ni tenant Entra ID ni boîte Exchange de test. Un helper réservé aux
-tests reproduit exclusivement sa frontière durable : publication atomique du
-WAV, création du job et événement `job_created` avec l'acteur
+tests reproduit exclusivement sa frontière durable : publication atomique de
+l'audio, création du job et événement `job_created` avec l'acteur
 `worker_publisher`. Les contrats Graph, le streaming, les dossiers
 `Processed`/`Rejected` et l'orchestration du publisher sont testés séparément
 avec un faux serveur Graph stateful lié à `127.0.0.1`.
@@ -83,8 +83,8 @@ les autres projets du daemon Docker.
 ### Parcours nominal
 
 1. Envoyer vers la boîte dédiée jusqu'à trois messages de test. Chaque message
-   doit contenir exactement un WAV synthétique, non vide et inférieur ou égal à
-   25 Mio.
+   doit contenir exactement un WAV ou OGG synthétique, non vide et inférieur ou
+   égal à 25 Mio.
 2. Vérifier que les messages quittent l'Inbox pour `Processed` après leur
    publication durable.
 3. Dans le dashboard, suivre chaque job de `pending` à `processing`, puis
@@ -94,12 +94,12 @@ les autres projets du daemon Docker.
    la transcription et le lien HTTPS vers l'audio. L'identifiant GLPI affiché
    dans le dashboard doit correspondre.
 5. Télécharger l'audio terminé depuis le dashboard et vérifier qu'il correspond
-   au WAV synthétique envoyé.
+   à l'audio synthétique envoyé.
 
 ### Rejet contrôlé
 
-1. Envoyer un message synthétique sans WAV exploitable, avec un WAV vide,
-   corrompu ou supérieur à 25 Mio.
+1. Envoyer un message synthétique sans audio WAV/OGG exploitable, avec un audio
+   vide, corrompu ou supérieur à 25 Mio.
 2. Vérifier que le message est déplacé dans `Rejected` seulement après
    l'enregistrement durable de son motif expurgé en base.
 3. Vérifier que le publisher reste sain et continue de traiter les messages
@@ -137,7 +137,8 @@ d'environnement sensibles. Ne lancez jamais de nettoyage Docker global.
 ## Limites résiduelles
 
 - une seule instance de chacun des trois workers est supportée ;
-- le publisher fonctionne par polling et accepte exactement un WAV par message ;
+- le publisher fonctionne par polling et accepte exactement un WAV ou OGG par
+  message ;
 - les rejets d'ingestion sont persistés, mais n'ont pas de liste dédiée dans le
   dashboard ;
 - Transcribe AI ne garantit ni idempotence ni conservation du résultat : un

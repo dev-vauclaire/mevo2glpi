@@ -32,9 +32,9 @@ from ..graph import (
 from .audio import (
     AudioPublicationError,
     classify_audio_io_error,
-    inspect_wav_structure,
+    inspect_audio_structure,
     publish_or_confirm_audio,
-    select_wav_attachment,
+    select_audio_attachment,
 )
 from .lifecycle import PublisherPersistenceConflictError
 from .outcomes import (
@@ -229,7 +229,7 @@ class PublisherWorker:
         except GraphClientError as error:
             return self._handle_graph_failure(ingestion, error)
 
-        validation = select_wav_attachment(
+        validation = select_audio_attachment(
             attachments,
             maximum_bytes=self._maximum_attachment_bytes,
         )
@@ -242,9 +242,11 @@ class PublisherWorker:
             )
             return self._acknowledge(rejected)
         assert validation.attachment is not None
+        assert validation.audio_extension is not None
         return self._lifecycle.record_attachment_validated(
             ingestion.uuid,
             validation.attachment,
+            validation.audio_extension,
             self._current_time(),
         )
 
@@ -254,6 +256,8 @@ class PublisherWorker:
     ) -> MailIngestionSnapshot | PublisherRunOutcome:
         if ingestion.attachment_id is None:
             return self._block_invariant(ingestion, "attachment_state_invalid")
+        if ingestion.audio_extension is None:
+            return self._block_invariant(ingestion, "audio_extension_state_invalid")
 
         try:
             with TemporaryFile(mode="w+b") as temporary_audio:
@@ -272,18 +276,22 @@ class PublisherWorker:
                         return self._reject_oversized_audio(ingestion)
                     return self._handle_graph_failure(ingestion, error)
 
-                wav_failure = inspect_wav_structure(
+                audio_failure = inspect_audio_structure(
                     temporary_audio,
+                    audio_extension=ingestion.audio_extension,
                     size_bytes=download.size_bytes,
                 )
-                if wav_failure is not None:
+                if audio_failure is not None:
                     return self._reject_downloaded_audio(
                         ingestion,
-                        wav_failure,
+                        audio_failure,
                         actual_size_bytes=download.size_bytes,
                     )
 
-                storage_key = build_audio_storage_key(ingestion.uuid, "wav")
+                storage_key = build_audio_storage_key(
+                    ingestion.uuid,
+                    ingestion.audio_extension.value,
+                )
                 self._ownership_guard()
                 published = publish_or_confirm_audio(
                     self._audio_root,

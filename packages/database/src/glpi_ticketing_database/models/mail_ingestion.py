@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 from .enums import (
+    AudioExtension,
     MailIngestionDisposition,
     MailIngestionErrorScope,
     MailIngestionStage,
@@ -59,6 +60,7 @@ class MailIngestion(Base):
         server_default=text("'discovery'"),
     )
     disposition: Mapped[str | None] = mapped_column(String(16))
+    audio_extension: Mapped[str | None] = mapped_column(String(4))
     attachment_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     attempt_count: Mapped[int] = mapped_column(
         BigInteger,
@@ -121,6 +123,11 @@ class MailIngestion(Base):
             name="disposition",
         ),
         CheckConstraint(
+            f"audio_extension IS NULL OR "
+            f"audio_extension IN ({sql_values(AudioExtension)})",
+            name="audio_extension",
+        ),
+        CheckConstraint(
             f"last_error_scope IS NULL OR "
             f"last_error_scope IN ({sql_values(MailIngestionErrorScope)})",
             name="last_error_scope",
@@ -155,11 +162,30 @@ class MailIngestion(Base):
         ),
         CheckConstraint(
             "(status = 'pending' AND stage = 'discovery' "
-            "AND attempt_count = 0 AND consecutive_retry_count = 0 "
-            "AND first_started_at IS NULL) OR "
+            "AND consecutive_retry_count = 0 "
+            "AND ((attempt_count = 0 AND first_started_at IS NULL) "
+            "OR (attempt_count > 0 AND first_started_at IS NOT NULL))) OR "
             "(status <> 'pending' AND attempt_count > 0 "
             "AND first_started_at IS NOT NULL)",
             name="attempt_state",
+        ),
+        CheckConstraint(
+            "status <> 'pending' OR "
+            "(attachment_id IS NULL AND audio_extension IS NULL "
+            "AND attachment_size_bytes IS NULL AND job_uuid IS NULL "
+            "AND disposition IS NULL AND rejection_category IS NULL "
+            "AND rejection_code IS NULL)",
+            name="pending_state",
+        ),
+        CheckConstraint(
+            "audio_extension IS NULL OR "
+            "(attachment_id IS NOT NULL AND attachment_size_bytes IS NOT NULL)",
+            name="audio_extension_has_attachment",
+        ),
+        CheckConstraint(
+            "stage <> 'publication' OR "
+            "(audio_extension IS NOT NULL AND attachment_size_bytes > 0)",
+            name="publication_has_audio_extension",
         ),
         CheckConstraint(
             "(stage = 'acknowledgement' AND disposition IS NOT NULL) OR "
@@ -169,6 +195,7 @@ class MailIngestion(Base):
         CheckConstraint(
             "disposition IS NULL OR disposition <> 'accepted' OR "
             "(job_uuid IS NOT NULL AND attachment_id IS NOT NULL "
+            "AND audio_extension IS NOT NULL "
             "AND attachment_size_bytes IS NOT NULL "
             "AND attachment_size_bytes > 0 "
             "AND rejection_category IS NULL AND rejection_code IS NULL)",

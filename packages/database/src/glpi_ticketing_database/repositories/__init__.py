@@ -15,6 +15,7 @@ from .mail_ingestion import (
     InvalidMailIngestionTransitionError,
     MailIngestionAcquisition,
     MailIngestionNotFoundError,
+    MailIngestionReplayFilter,
     MailIngestionRepository,
     MailIngestionSnapshot,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "MailIngestionEventRepository",
     "MailIngestionEventSnapshot",
     "MailIngestionNotFoundError",
+    "MailIngestionReplayFilter",
     "MailIngestionRepository",
     "MailIngestionSnapshot",
     "PendingJob",

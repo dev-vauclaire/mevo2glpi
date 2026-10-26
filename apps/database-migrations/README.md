@@ -66,14 +66,16 @@ Le contrat est décrit dans la section
   jobs et comme service de runtime. Le runtime peut référencer l'ingestion
   courante via `current_ingestion_uuid`, sans détourner la clé de job utilisée
   par les deux workers en aval.
+- `0006_add_ogg_replay_support` persiste l'extension audio de l'ingestion,
+  ajoute les invariants nécessaires au rejeu contrôlé d'un rejet et autorise
+  l'événement d'audit `operator_replay_requested`.
 
-`0005` est compatible avec les deux situations de déploiement attendues :
+L'historique est compatible avec les deux situations de déploiement attendues :
 
 - sur une base vide, `upgrade head` applique l'historique complet et crée les
   six tables du MVP ;
-- sur une base existante à la révision `0004`, la montée ajoute les deux tables
-  d'ingestion sans modifier les jobs, événements, rétentions et heartbeats déjà
-  présents.
+- sur une base existante à la révision `0004` ou `0005`, la montée conserve les
+  jobs, événements, rétentions, heartbeats et ingestions déjà présents.
 
 Relancer `upgrade head` après cette montée est un no-op Alembic et conserve les
 données existantes. La migration ajoute une identité de source unique composée
@@ -88,6 +90,13 @@ source Exchange fiable à reconstruire. Les nouvelles ingestions peuvent rester
 sans job lorsqu'un message est rejeté ; une ingestion acceptée lie au contraire
 un unique `TicketCreationJob` avant l'étape durable d'acquittement.
 
+`0006` recopie `audio_extension` depuis le job pour les ingestions acceptées et
+marque `wav` les anciennes lignes ayant déjà atteint une étape où seul ce format
+était accepté. Les rejets de métadonnées qui n'avaient jamais sélectionné de
+fichier conservent une extension nulle. La migration ne réarme aucun rejet : le
+choix du lot et l'audit restent une action explicite de l'opérateur via la
+commande du publisher.
+
 Les montées depuis `0001` et `0002` sont testées avec des données
 préexistantes. `0003` convertit explicitement les valeurs numériques de
 `last_glpi_status` vers un `SMALLINT` positif et son downgrade restaure leur
@@ -99,6 +108,12 @@ sécurité native de PostgreSQL : ils échouent si des événements plus récent
 existent encore, au lieu de supprimer silencieusement l'historique d'audit.
 De même, `0004` refuse une donnée runtime antérieure incohérente au lieu de
 masquer ou réécrire son erreur pendant la montée de version.
+
+Le downgrade de `0006` est également refusé tant qu'une ingestion non-WAV se
+trouve à l'étape `publication`. Supprimer alors `audio_extension` ferait
+reprendre ce fichier comme un WAV par l'ancienne version du publisher. Il faut
+d'abord laisser la version courante terminer ou isoler explicitement cette
+ingestion ; la migration ne dégrade jamais silencieusement son format.
 
 Le downgrade de `0005` supprime les tables propres à l'ingestion. Avant cette
 suppression, il restaure les contraintes d'acteurs et de services antérieures ;

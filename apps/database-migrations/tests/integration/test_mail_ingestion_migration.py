@@ -21,7 +21,8 @@ from glpi_ticketing_database_migrations.application import (
 pytestmark = pytest.mark.database
 
 PREVIOUS_REVISION = "0004_add_observability_queries"
-CURRENT_REVISION = "0005_add_mail_ingestions"
+MAIL_INGESTION_REVISION = "0005_add_mail_ingestions"
+CURRENT_REVISION = "0006_add_ogg_replay_support"
 
 
 @pytest.fixture
@@ -61,7 +62,7 @@ def _reflect_tables(engine: Engine) -> dict[str, Table]:
     return dict(metadata.tables)
 
 
-def test_fresh_database_upgrades_to_mail_ingestion_head(
+def test_fresh_database_upgrades_to_replay_aware_mail_ingestion_head(
     database_engine: Engine,
 ) -> None:
     assert inspect(database_engine).get_table_names() == []
@@ -71,6 +72,12 @@ def test_fresh_database_upgrades_to_mail_ingestion_head(
     assert {"mail_ingestions", "mail_ingestion_events"} <= set(
         inspect(database_engine).get_table_names()
     )
+    audio_extension = next(
+        column
+        for column in inspect(database_engine).get_columns("mail_ingestions")
+        if column["name"] == "audio_extension"
+    )
+    assert audio_extension["nullable"] is True
     assert _current_revision(database_engine) == _head_revision()
 
 
@@ -213,6 +220,113 @@ def test_existing_0004_database_preserves_data_and_enables_publisher(
     assert _current_revision(database_engine) == _head_revision()
 
 
+def test_existing_0005_database_backfills_only_known_audio_formats(
+    database_engine: Engine,
+) -> None:
+    _migrate(database_engine, MAIL_INGESTION_REVISION)
+    accepted_job_uuid = uuid4()
+    accepted_ingestion_uuid = uuid4()
+    publication_ingestion_uuid = uuid4()
+    rejected_ingestion_uuid = uuid4()
+    pending_ingestion_uuid = uuid4()
+    mailbox_id = uuid4()
+    started_at = datetime(2026, 9, 8, 9, tzinfo=UTC)
+    finished_at = datetime(2026, 9, 8, 10, tzinfo=UTC)
+
+    legacy_tables = _reflect_tables(database_engine)
+    jobs = legacy_tables["ticket_creation_jobs"]
+    ingestions = legacy_tables["mail_ingestions"]
+    with database_engine.begin() as connection:
+        connection.execute(
+            jobs.insert(),
+            {
+                "uuid": accepted_job_uuid,
+                "storage_key": f"{accepted_job_uuid}.ogg",
+                "audio_extension": "ogg",
+                "audio_size_bytes": 256,
+            },
+        )
+        for ingestion in (
+            {
+                "uuid": accepted_ingestion_uuid,
+                "mailbox_id": mailbox_id,
+                "message_id": "AAMkLegacyAccepted",
+                "attachment_id": "AAMkLegacyAcceptedAttachment",
+                "job_uuid": accepted_job_uuid,
+                "status": "completed",
+                "stage": "acknowledgement",
+                "disposition": "accepted",
+                "attachment_size_bytes": 256,
+                "attempt_count": 1,
+                "received_at": started_at,
+                "first_started_at": started_at,
+                "finished_at": finished_at,
+            },
+            {
+                "uuid": publication_ingestion_uuid,
+                "mailbox_id": mailbox_id,
+                "message_id": "AAMkLegacyPublication",
+                "attachment_id": "AAMkLegacyPublicationAttachment",
+                "status": "processing",
+                "stage": "publication",
+                "attachment_size_bytes": 128,
+                "attempt_count": 1,
+                "received_at": started_at,
+                "first_started_at": started_at,
+            },
+            {
+                "uuid": rejected_ingestion_uuid,
+                "mailbox_id": mailbox_id,
+                "message_id": "AAMkLegacyRejectedOgg",
+                "attachment_id": "AAMkLegacyRejectedOggAttachment",
+                "status": "failed",
+                "stage": "acknowledgement",
+                "disposition": "rejected",
+                "attachment_size_bytes": 192,
+                "attempt_count": 1,
+                "rejection_category": "invalid_attachment",
+                "rejection_code": "wav_attachment_missing",
+                "received_at": started_at,
+                "first_started_at": started_at,
+                "finished_at": finished_at,
+            },
+            {
+                "uuid": pending_ingestion_uuid,
+                "mailbox_id": mailbox_id,
+                "message_id": "AAMkLegacyPending",
+                "received_at": started_at,
+            },
+        ):
+            connection.execute(ingestions.insert(), ingestion)
+
+    upgrade_to_head(database_engine)
+
+    ingestions = _reflect_tables(database_engine)["mail_ingestions"]
+    with database_engine.connect() as connection:
+        formats = dict(
+            connection.execute(
+                select(ingestions.c.uuid, ingestions.c.audio_extension).where(
+                    ingestions.c.uuid.in_(
+                        (
+                            accepted_ingestion_uuid,
+                            publication_ingestion_uuid,
+                            rejected_ingestion_uuid,
+                            pending_ingestion_uuid,
+                        )
+                    )
+                )
+            ).all()
+        )
+
+    assert formats == {
+        accepted_ingestion_uuid: "ogg",
+        publication_ingestion_uuid: "wav",
+        rejected_ingestion_uuid: None,
+        pending_ingestion_uuid: None,
+    }
+    assert _current_revision(database_engine) == _head_revision()
+
+
 def test_downgrade_refuses_to_discard_publisher_audit_rows(
     database_engine: Engine,
 ) -> None:
@@ -270,3 +384,40 @@ def test_downgrade_refuses_to_discard_publisher_audit_rows(
     assert instance_id == publisher_instance_id
     assert {"mail_ingestions", "mail_ingestion_events"} <= tables.keys()
     assert _current_revision(database_engine) == _head_revision()
+
+
+def test_downgrade_refuses_to_forget_an_active_ogg_publication(
+    database_engine: Engine,
+) -> None:
+    upgrade_to_head(database_engine)
+    ingestion_uuid = uuid4()
+    tables = _reflect_tables(database_engine)
+    with database_engine.begin() as connection:
+        connection.execute(
+            tables["mail_ingestions"].insert(),
+            {
+                "uuid": ingestion_uuid,
+                "mailbox_id": uuid4(),
+                "message_id": "AAMkActiveOggPublication",
+                "attachment_id": "AAMkActiveOggAttachment",
+                "status": "processing",
+                "stage": "publication",
+                "audio_extension": "ogg",
+                "attachment_size_bytes": 128,
+                "attempt_count": 1,
+                "received_at": datetime(2026, 9, 8, tzinfo=UTC),
+                "first_started_at": datetime(2026, 9, 8, tzinfo=UTC),
+            },
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="non-WAV ingestion is at publication",
+    ):
+        _migrate(database_engine, MAIL_INGESTION_REVISION, downgrade=True)
+
+    assert _current_revision(database_engine) == _head_revision()
+    assert any(
+        column["name"] == "audio_extension"
+        for column in inspect(database_engine).get_columns("mail_ingestions")
+    )

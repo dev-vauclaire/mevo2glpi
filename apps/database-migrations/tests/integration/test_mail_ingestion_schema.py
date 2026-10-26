@@ -83,6 +83,7 @@ def _accepted_ingestion(job_uuid: UUID, **overrides: object) -> dict[str, object
         stage="acknowledgement",
         disposition="accepted",
         attachment_id="AAMkSyntheticAttachmentId",
+        audio_extension="wav",
         attachment_size_bytes=128,
         job_uuid=job_uuid,
         attempt_count=1,
@@ -192,11 +193,17 @@ def test_mail_source_identifiers_and_counters_are_database_enforced(
         ),
         (
             _pending_ingestion(attachment_id=" "),
-            "ck_mail_ingestions_attachment_id_not_empty",
+            {
+                "ck_mail_ingestions_attachment_id_not_empty",
+                "ck_mail_ingestions_pending_state",
+            },
         ),
         (
             _pending_ingestion(attachment_size_bytes=-1),
-            "ck_mail_ingestions_attachment_size_bytes_non_negative",
+            {
+                "ck_mail_ingestions_attachment_size_bytes_non_negative",
+                "ck_mail_ingestions_pending_state",
+            },
         ),
         (
             _pending_ingestion(attempt_count=-1),
@@ -309,6 +316,84 @@ def test_accepted_and_rejected_dispositions_have_distinct_invariants(
             "ck_mail_ingestions_disposition_at_acknowledgement",
             "ck_mail_ingestions_failed_disposition",
         },
+    )
+
+
+def test_audio_extension_and_operator_replay_state_are_database_enforced(
+    migrated_engine: Engine,
+) -> None:
+    replayed = _pending_ingestion(
+        message_id="AAMkReplayedMessage",
+        attempt_count=2,
+        first_started_at=NOW,
+    )
+    _insert(migrated_engine, INGESTIONS, replayed)
+    _insert(
+        migrated_engine,
+        INGESTIONS,
+        _rejected_ingestion(
+            message_id="AAMkEmptyOggMessage",
+            attachment_id="AAMkEmptyOggAttachment",
+            audio_extension="ogg",
+            attachment_size_bytes=0,
+            rejection_code="audio_empty",
+        ),
+    )
+
+    invalid_rows = (
+        (
+            _processing_ingestion(
+                stage="publication",
+                attachment_id="AAMkOggAttachment",
+                attachment_size_bytes=128,
+                audio_extension=None,
+            ),
+            "ck_mail_ingestions_publication_has_audio_extension",
+        ),
+        (
+            _processing_ingestion(
+                attachment_id="AAMkUnsupportedAttachment",
+                attachment_size_bytes=128,
+                audio_extension="flac",
+            ),
+            "ck_mail_ingestions_audio_extension",
+        ),
+        (
+            _processing_ingestion(audio_extension="ogg"),
+            "ck_mail_ingestions_audio_extension_has_attachment",
+        ),
+        (
+            _pending_ingestion(
+                attempt_count=1,
+                first_started_at=None,
+            ),
+            "ck_mail_ingestions_attempt_state",
+        ),
+        (
+            _pending_ingestion(
+                attempt_count=1,
+                first_started_at=NOW,
+                attachment_id="stale-attachment",
+            ),
+            "ck_mail_ingestions_pending_state",
+        ),
+    )
+    for values, constraint_name in invalid_rows:
+        _assert_rejected(
+            migrated_engine,
+            INGESTIONS,
+            values,
+            constraint_name,
+        )
+
+    ingestion_uuid = replayed["uuid"]
+    _insert(
+        migrated_engine,
+        INGESTION_EVENTS,
+        _event_values(
+            ingestion_uuid,
+            event_type="operator_replay_requested",
+        ),
     )
 
 

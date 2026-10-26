@@ -2,7 +2,7 @@
 
 GLPI Ticketing Automation est un MVP qui transforme les messages vocaux d'une
 boîte Exchange Online dédiée en tickets GLPI. Le worker publisher ingère leur
-pièce jointe WAV, le worker d'automatisation demande la transcription à
+pièce jointe WAV ou OGG, le worker d'automatisation demande la transcription à
 Transcribe AI puis crée le ticket GLPI, et le worker de rétention applique la
 politique de conservation. L'application web est une interface de consultation
 et d'action opérateur ; elle ne dépose plus d'audio.
@@ -21,7 +21,7 @@ anciens répertoires n'est fournie.
 ## Fonctionnalités du MVP
 
 - ingestion dédiée des messages vocaux Exchange Online par le worker publisher,
-  avec identifiants Graph immuables, contrôle du WAV et acquittement dans les
+  avec identifiants Graph immuables, contrôle WAV/OGG et acquittement dans les
   dossiers `Processed` ou `Rejected` ;
 - suivi paginé des jobs, consultation de leur historique expurgé et relance
   opérateur d'un job `failed` ou `blocked` ;
@@ -91,7 +91,7 @@ développement et la configuration de Pytest et Ruff.
 | --- | --- | --- | --- |
 | `apps/database-migrations` | `glpi-ticketing-database-migrations` | Migration Alembic one-shot et historique du schéma | [Migrations](apps/database-migrations/README.md) |
 | `apps/web` | `glpi-ticketing-web` | API de consultation, dashboard, retry opérateur et téléchargement | [Application web](apps/web/README.md) |
-| `apps/worker-publisher` | `glpi-ticketing-worker-publisher` | Ingestion Exchange Online, validation WAV, publication atomique et acquittement Graph | [Worker publisher](apps/worker-publisher/README.md) |
+| `apps/worker-publisher` | `glpi-ticketing-worker-publisher` | Ingestion Exchange Online, validation WAV/OGG, publication atomique et acquittement Graph | [Worker publisher](apps/worker-publisher/README.md) |
 | `apps/worker-automation` | `glpi-ticketing-worker-automation` | Transcription, création GLPI et finalisation des jobs | [Worker d'automatisation](apps/worker-automation/README.md) |
 | `apps/worker-retention` | `glpi-ticketing-worker-retention` | Contrôle GLPI, deadlines et purge crash-safe | [Worker de rétention](apps/worker-retention/README.md) |
 | `packages/common` | `glpi-ticketing-common` | Stockage audio canonique, attente coopérative, backoff et healthchecks | [Package commun](packages/common/README.md) |
@@ -107,7 +107,7 @@ dans `packages`.
 
 ```mermaid
 flowchart TD
-    Exchange[Message Exchange + WAV] --> Publish[Worker publisher]
+    Exchange[Message Exchange + WAV/OGG] --> Publish[Worker publisher]
     Publish --> Audio[Publier l'audio canonique]
     Audio --> Pending[(pending + job_created)]
     Pending --> Select[Sélection PostgreSQL]
@@ -139,10 +139,11 @@ applicatif Entra ID, pagine l'Inbox avec Microsoft Graph et persiste les
 messages en utilisant `Prefer: IdType="ImmutableId"`. Il reprend toujours un
 traitement durable avant de découvrir de nouveaux messages.
 
-Un message doit contenir exactement une pièce jointe WAV non vide, valide et
-d'au plus 25 Mio. Le worker la télécharge dans un fichier temporaire, publie la
-clé canonique `{ingestion_uuid}.wav`, puis crée le job `pending` et son
-événement dans une transaction. Le message est déplacé dans `Processed`
+Un message doit contenir exactement une pièce jointe WAV ou OGG non vide,
+structurellement valide et d'au plus 25 Mio. Le worker la télécharge dans un
+fichier temporaire, publie la clé canonique `{ingestion_uuid}.{extension}`, puis
+crée le job `pending` et son événement dans une transaction. Le message est
+déplacé dans `Processed`
 uniquement après cette frontière durable. Un message invalide est enregistré
 avec un motif expurgé avant son déplacement dans `Rejected`.
 
@@ -613,7 +614,7 @@ limites connues.
   résultat inconnu peut encore nécessiter une décision opérateur ;
 - un seul worker de chaque type, sans haute disponibilité ni parallélisation ;
 - ingestion Exchange par polling paginé, sans abonnement Graph ni delta query ;
-- exactement une pièce jointe WAV d'au plus 25 Mio acceptée par message ;
+- exactement une pièce jointe WAV ou OGG d'au plus 25 Mio acceptée par message ;
 - alertes limitées au dashboard, sans historique, acquittement ou notification
   externe ;
 - fichiers audio orphelins d'une ingestion interrompue non nettoyés ;

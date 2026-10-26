@@ -7,6 +7,7 @@ from typing import Protocol
 from uuid import UUID
 
 from glpi_ticketing_database import (
+    AudioExtension,
     MailIngestionAcquisition,
     MailIngestionSnapshot,
     MailIngestionStage,
@@ -38,6 +39,7 @@ class PublisherLifecycleProtocol(Protocol):
         self,
         ingestion_uuid: UUID,
         attachment: GraphAttachment,
+        audio_extension: AudioExtension,
         now: datetime,
     ) -> MailIngestionSnapshot: ...
 

@@ -3,7 +3,7 @@
 `glpi-ticketing-database` porte les contrats SQLAlchemy partagés par le web,
 les workers et l'application de migration du MVP. Il conserve le cycle de vie
 durable des messages Exchange sans dépendre du client Microsoft Graph ni de la
-validation WAV, qui appartiennent au worker publisher.
+validation WAV/OGG, qui appartiennent au worker publisher.
 
 Le package ne contient ni point d'entrée ni historique Alembic. L'application
 one-shot `apps/database-migrations` est seule responsable de l'exécution des
@@ -97,7 +97,7 @@ deadlines et retries continuent d'utiliser leurs index partiels dédiés.
 `MailIngestion` et `TicketCreationJob` décrivent deux réalités distinctes. Une
 ingestion représente un message source découvert dans une boîte Exchange ; un
 job représente uniquement un audio valide publié pour le pipeline de création
-de ticket. Un message rejeté, par exemple sans WAV valide, reste donc
+de ticket. Un message rejeté, par exemple sans WAV/OGG valide, reste donc
 observable dans `mail_ingestions` sans créer artificiellement de
 `ticket_creation_jobs`.
 
@@ -110,7 +110,7 @@ produire deux jobs même si leurs pièces jointes ont le même contenu. À
 l'inverse, redécouvrir le même message dans la même boîte ne peut pas créer une
 seconde ingestion. `attachment_id` utilise la même comparaison sensible à la
 casse, mais ne participe pas à l'identité puisque le contrat métier prévoit
-une seule pièce jointe WAV par message.
+une seule pièce jointe audio par message.
 
 La colonne `job_uuid` est nullable, unique et liée à
 `ticket_creation_jobs.uuid` :
@@ -120,6 +120,12 @@ La colonne `job_uuid` est nullable, unique et liée à
   interdit tout job ;
 - la disposition reste nulle tant qu'aucune décision locale durable n'a été
   prise.
+
+`audio_extension` mémorise le format retenu (`wav` ou `ogg` pour le publisher)
+dès la validation de la pièce jointe. Cette donnée permet de reprendre un
+téléchargement interrompu sans redéduire son format et impose la cohérence avec
+le job créé. Les extensions reconnues par le modèle partagé restent plus larges
+que celles acceptées par cette application.
 
 Une décision `accepted` ou `rejected` fait passer l'ingestion à l'étape
 `acknowledgement`. Cette séparation permet à l'application appelante de
@@ -144,8 +150,17 @@ sujet, ni expéditeur, ni corps du message, ni contenu audio, ni réponse HTTP
 brute. Son repository n'altère jamais `MailIngestion`.
 
 Ces modèles constituent le contrat de persistance utilisé par le client
-Microsoft Graph, la validation WAV et l'acquittement Exchange orchestrés dans
-l'application `worker-publisher`.
+Microsoft Graph, la validation WAV/OGG et l'acquittement Exchange orchestrés
+dans l'application `worker-publisher`.
+
+Le rejeu opérateur des ingestions est volontairement séparé du retry des jobs.
+`MailIngestionRepository.list_replay_candidates()` applique un filtre borné et
+`rearm_for_operator_replay()` verrouille puis revalide chaque ligne avant de la
+remettre à `pending/discovery`. Il conserve l'identité source, les compteurs et
+le premier démarrage, mais efface les métadonnées et décisions dérivées afin que
+le publisher refasse la validation depuis le message source. L'application
+ajoute séparément l'événement append-only `operator_replay_requested` dans la
+même transaction ; le repository ne crée jamais cet événement lui-même.
 
 ## Cycle de vie du worker d'automatisation
 

@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from glpi_ticketing_database.models import (
+    AudioExtension,
     MailIngestion,
     MailIngestionDisposition,
     MailIngestionErrorScope,
@@ -18,6 +19,7 @@ from glpi_ticketing_database.repositories import (
     DiscoveredMail,
     InvalidMailIngestionTransitionError,
     MailIngestionAcquisition,
+    MailIngestionReplayFilter,
     MailIngestionRepository,
 )
 
@@ -212,6 +214,7 @@ def test_accepted_lifecycle_links_but_never_creates_the_job() -> None:
     validated = repository.record_attachment_validated(
         INGESTION_UUID,
         attachment_id="opaque-attachment-id",
+        audio_extension=AudioExtension.WAV,
         attachment_size_bytes=2048,
         now=NOW,
     )
@@ -227,6 +230,7 @@ def test_accepted_lifecycle_links_but_never_creates_the_job() -> None:
     )
 
     assert validated.stage is MailIngestionStage.PUBLICATION
+    assert validated.audio_extension is AudioExtension.WAV
     assert accepted.stage is MailIngestionStage.ACKNOWLEDGEMENT
     assert accepted.disposition is MailIngestionDisposition.ACCEPTED
     assert accepted.job_uuid == job_uuid
@@ -315,6 +319,103 @@ def test_retry_and_blocked_transitions_keep_only_safe_diagnostics() -> None:
     assert blocked.finished_at == NOW + timedelta(seconds=1)
 
 
+def test_replay_candidates_use_typed_bounded_filters_without_mutation() -> None:
+    session = _session()
+    failed = _rejected_failed_ingestion()
+    session.scalars.return_value.all.return_value = [failed]
+    replay_filter = _replay_filter()
+
+    candidates = MailIngestionRepository(session).list_replay_candidates(replay_filter)
+
+    assert len(candidates) == 1
+    assert candidates[0].uuid == INGESTION_UUID
+    statement = session.scalars.call_args.args[0]
+    assert statement._limit_clause.value == replay_filter.limit
+    session.flush.assert_not_called()
+
+
+def test_operator_replay_rearms_rejected_ingestion_and_preserves_history() -> None:
+    session = _session()
+    failed = _rejected_failed_ingestion()
+    original_attempt_count = failed.attempt_count
+    original_first_started_at = failed.first_started_at
+    session.get.return_value = failed
+
+    replayed = MailIngestionRepository(session).rearm_for_operator_replay(
+        INGESTION_UUID,
+        expected=_replay_filter(),
+        now=NOW,
+    )
+
+    assert replayed.status is MailIngestionStatus.PENDING
+    assert replayed.stage is MailIngestionStage.DISCOVERY
+    assert replayed.disposition is None
+    assert replayed.attachment_id is None
+    assert replayed.audio_extension is None
+    assert replayed.attachment_size_bytes is None
+    assert replayed.rejection_category is None
+    assert replayed.rejection_code is None
+    assert replayed.finished_at is None
+    assert replayed.attempt_count == original_attempt_count
+    assert replayed.first_started_at == original_first_started_at
+    assert session.get.call_args.kwargs["with_for_update"] is True
+    session.flush.assert_called_once_with()
+
+
+def test_operator_replay_revalidates_filter_under_lock() -> None:
+    session = _session()
+    failed = _rejected_failed_ingestion()
+    failed.rejection_code = "another_failure"
+    session.get.return_value = failed
+
+    with pytest.raises(
+        InvalidMailIngestionTransitionError,
+        match="no longer matches",
+    ):
+        MailIngestionRepository(session).rearm_for_operator_replay(
+            INGESTION_UUID,
+            expected=_replay_filter(),
+            now=NOW,
+        )
+
+    session.flush.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"status": MailIngestionStatus.PROCESSING},
+        {"disposition": MailIngestionDisposition.ACCEPTED},
+        {"job_uuid_is_null": False},
+        {"attachment_id_is_not_null": 1},
+        {"limit": 0},
+        {"limit": True},
+        {"limit": 1001},
+        {"rejection_category": "unsafe value"},
+        {"received_after": NOW.replace(tzinfo=None)},
+        {"received_before": NOW - timedelta(days=40)},
+    ],
+)
+def test_replay_filter_rejects_unsafe_or_unbounded_values(
+    overrides: dict[str, object],
+) -> None:
+    values: dict[str, object] = {
+        "status": MailIngestionStatus.FAILED,
+        "disposition": MailIngestionDisposition.REJECTED,
+        "rejection_category": "invalid_attachment",
+        "rejection_code": "wav_attachment_missing",
+        "received_after": NOW - timedelta(days=30),
+        "received_before": NOW + timedelta(seconds=1),
+        "limit": 100,
+        "job_uuid_is_null": True,
+        "attachment_id_is_not_null": True,
+    }
+    values.update(overrides)
+
+    with pytest.raises((TypeError, ValueError)):
+        MailIngestionReplayFilter(**values)  # type: ignore[arg-type]
+
+
 def test_wrong_stage_and_unsafe_identifier_are_rejected_before_mutation() -> None:
     session = _session()
     ingestion = _ingestion(
@@ -385,6 +486,7 @@ def _ingestion(
         status=status.value,
         stage=stage.value,
         disposition=disposition.value if disposition is not None else None,
+        audio_extension=None,
         attachment_size_bytes=None,
         attempt_count=1,
         consecutive_retry_count=0,
@@ -399,4 +501,32 @@ def _ingestion(
         first_started_at=NOW - timedelta(seconds=30),
         updated_at=NOW - timedelta(seconds=1),
         finished_at=None,
+    )
+
+
+def _rejected_failed_ingestion() -> MailIngestion:
+    ingestion = _ingestion(
+        status=MailIngestionStatus.FAILED,
+        stage=MailIngestionStage.ACKNOWLEDGEMENT,
+        disposition=MailIngestionDisposition.REJECTED,
+    )
+    ingestion.attachment_id = "opaque-attachment-id"
+    ingestion.attachment_size_bytes = 2048
+    ingestion.rejection_category = "invalid_attachment"
+    ingestion.rejection_code = "wav_attachment_missing"
+    ingestion.finished_at = NOW - timedelta(seconds=1)
+    return ingestion
+
+
+def _replay_filter() -> MailIngestionReplayFilter:
+    return MailIngestionReplayFilter(
+        status=MailIngestionStatus.FAILED,
+        disposition=MailIngestionDisposition.REJECTED,
+        rejection_category="invalid_attachment",
+        rejection_code="wav_attachment_missing",
+        received_after=NOW - timedelta(days=30),
+        received_before=NOW + timedelta(seconds=1),
+        limit=100,
+        job_uuid_is_null=True,
+        attachment_id_is_not_null=True,
     )

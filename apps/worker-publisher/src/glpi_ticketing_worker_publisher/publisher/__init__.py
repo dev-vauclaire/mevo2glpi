@@ -3,9 +3,11 @@
 from .audio import (
     AttachmentValidation,
     AudioPublicationError,
+    inspect_audio_structure,
+    inspect_ogg_structure,
     inspect_wav_structure,
     publish_or_confirm_audio,
-    select_wav_attachment,
+    select_audio_attachment,
 )
 from .lifecycle import PublisherLifecycleService, PublisherPersistenceConflictError
 from .outcomes import (
@@ -44,8 +46,10 @@ __all__ = [
     "RejectedOutcome",
     "RetryScheduledOutcome",
     "SystemBlockedOutcome",
+    "inspect_audio_structure",
+    "inspect_ogg_structure",
     "inspect_wav_structure",
     "publish_or_confirm_audio",
     "run_forever",
-    "select_wav_attachment",
+    "select_audio_attachment",
 ]
