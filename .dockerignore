@@ -44,5 +44,18 @@
 !packages/glpi-client/src/
 !packages/glpi-client/src/**
 
+!providers/
+!providers/pyproject.toml
+!providers/uv.lock
+!providers/simulators/
+!providers/simulators/microsoft-graph-simulator/
+!providers/simulators/microsoft-graph-simulator/pyproject.toml
+!providers/simulators/microsoft-graph-simulator/src/
+!providers/simulators/microsoft-graph-simulator/src/**
+!providers/simulators/transcribe-ai-simulator/
+!providers/simulators/transcribe-ai-simulator/pyproject.toml
+!providers/simulators/transcribe-ai-simulator/src/
+!providers/simulators/transcribe-ai-simulator/src/**
+
 **/__pycache__/
 **/*.py[cod]

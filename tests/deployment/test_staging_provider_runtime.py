@@ -1,4 +1,4 @@
-"""Exercise the real clients against the containerized staging simulator."""
+"""Exercise real clients against the two containerized provider simulators."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ from glpi_ticketing_worker_publisher.graph import (
 )
 
 from .conftest import (
-    DOCKER_ROOT,
-    STAGING_COMPOSE_FILE,
+    PROVIDERS_COMPOSE_FILE,
+    PROVIDERS_ENV_FILE,
     clean_environment,
     run_command,
 )
@@ -42,7 +42,7 @@ pytestmark = [
 
 @dataclass(slots=True)
 class StagingProviderEnvironment:
-    """Own one isolated simulator container and its synthetic credentials."""
+    """Own two isolated simulator containers and synthetic credentials."""
 
     project_name: str
     environment_file: Path
@@ -50,7 +50,9 @@ class StagingProviderEnvironment:
     process_environment: Mapping[str, str] = field(repr=False)
     admin_token: str = field(repr=False)
     transcription_api_key: str = field(repr=False)
-    host_port: int
+    graph_host_port: int
+    transcription_host_port: int
+    providers_network_name: str
 
     def compose(
         self,
@@ -67,7 +69,7 @@ class StagingProviderEnvironment:
                 "--env-file",
                 str(self.environment_file),
                 "--file",
-                str(STAGING_COMPOSE_FILE),
+                str(PROVIDERS_COMPOSE_FILE),
                 "--file",
                 str(self.override_file),
                 *arguments,
@@ -79,7 +81,7 @@ class StagingProviderEnvironment:
 
 
 def _read_example_environment() -> dict[str, str]:
-    source = (DOCKER_ROOT / "staging.env.example").read_text(encoding="utf-8")
+    source = PROVIDERS_ENV_FILE.read_text(encoding="utf-8")
     return dict(re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", source, re.MULTILINE))
 
 
@@ -91,11 +93,29 @@ def _write_private_environment(path: Path, values: Mapping[str, str]) -> None:
     path.chmod(0o600)
 
 
+def _reserve_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        return int(reservation.getsockname()[1])
+
+
+def _docker_network(command: str, network_name: str, *, check: bool = True) -> None:
+    arguments = ["docker", "network", command]
+    if command == "create":
+        arguments.append("--internal")
+    arguments.append(network_name)
+    run_command(
+        arguments,
+        environment=clean_environment(),
+        check=check,
+    )
+
+
 @pytest.fixture(scope="session")
 def staging_provider_environment(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[StagingProviderEnvironment]:
-    """Build, start and remove one loopback-only provider simulator."""
+    """Build, start and remove two loopback-only provider simulators."""
     if os.environ.get("PYTEST_XDIST_WORKER") is not None:
         pytest.fail("The staging provider suite must not run with pytest-xdist")
 
@@ -106,30 +126,31 @@ def staging_provider_environment(
     override_file = runtime_root / "compose.override.yml"
     admin_token = secrets.token_urlsafe(32)
     transcription_api_key = secrets.token_urlsafe(32)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
-        reservation.bind(("127.0.0.1", 0))
-        host_port = int(reservation.getsockname()[1])
+    graph_host_port = _reserve_loopback_port()
+    transcription_host_port = _reserve_loopback_port()
+    while transcription_host_port == graph_host_port:
+        transcription_host_port = _reserve_loopback_port()
+    providers_network_name = f"{project_name}-providers"
     values = _read_example_environment()
     values.update(
         {
             "COMPOSE_PROJECT_NAME": project_name,
-            "AUDIO_VOLUME_NAME": f"{project_name}-audio",
+            "PROVIDERS_NETWORK_NAME": providers_network_name,
             "GLPI_DATA_VOLUME_NAME": f"{project_name}-glpi-data",
             "GLPI_DATABASE_VOLUME_NAME": f"{project_name}-mysql-data",
-            "PROVIDER_SIMULATOR_ADMIN_TOKEN": admin_token,
-            "PROVIDER_SIMULATOR_TRANSCRIPTION_API_KEY": transcription_api_key,
+            "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN": admin_token,
+            "TRANSCRIBE_AI_SIMULATOR_API_KEY": transcription_api_key,
         }
     )
     _write_private_environment(environment_file, values)
     override_file.write_text(
         "services:\n"
-        "  provider-simulator:\n"
+        "  microsoft-graph-simulator:\n"
         "    ports:\n"
-        f'      - "127.0.0.1:{host_port}:8080"\n'
-        "    networks:\n"
-        "      test-loopback: {}\n"
-        "networks:\n"
-        "  test-loopback: {}\n",
+        f'      - "127.0.0.1:{graph_host_port}:8080"\n'
+        "  transcribe-ai-simulator:\n"
+        "    ports:\n"
+        f'      - "127.0.0.1:{transcription_host_port}:8080"\n',
         encoding="utf-8",
     )
     process_environment = clean_environment()
@@ -140,12 +161,25 @@ def staging_provider_environment(
         process_environment=process_environment,
         admin_token=admin_token,
         transcription_api_key=transcription_api_key,
-        host_port=host_port,
+        graph_host_port=graph_host_port,
+        transcription_host_port=transcription_host_port,
+        providers_network_name=providers_network_name,
     )
 
     try:
-        environment.compose("build", "provider-simulator")
-        environment.compose("up", "--detach", "--wait", "provider-simulator")
+        _docker_network("create", providers_network_name)
+        environment.compose(
+            "build",
+            "microsoft-graph-simulator",
+            "transcribe-ai-simulator",
+        )
+        environment.compose(
+            "up",
+            "--detach",
+            "--wait",
+            "microsoft-graph-simulator",
+            "transcribe-ai-simulator",
+        )
         yield environment
     finally:
         environment.compose(
@@ -154,22 +188,30 @@ def staging_provider_environment(
             "--remove-orphans",
             check=False,
         )
-        run_command(
-            ["docker", "image", "rm", f"{project_name}-provider-simulator"],
-            environment=clean_environment(),
-            check=False,
-        )
+        _docker_network("rm", providers_network_name, check=False)
+        for image_name in (
+            f"{project_name}-microsoft-graph-simulator:0.1.0",
+            f"{project_name}-transcribe-ai-simulator:0.1.0",
+        ):
+            run_command(
+                ["docker", "image", "rm", image_name],
+                environment=clean_environment(),
+                check=False,
+            )
 
 
-def _base_url(environment: StagingProviderEnvironment) -> str:
-    return f"http://127.0.0.1:{environment.host_port}"
+def _graph_base_url(environment: StagingProviderEnvironment) -> str:
+    return f"http://127.0.0.1:{environment.graph_host_port}"
 
 
-def test_real_graph_and_transcription_clients_use_the_staging_simulator(
+def _transcription_base_url(environment: StagingProviderEnvironment) -> str:
+    return f"http://127.0.0.1:{environment.transcription_host_port}"
+
+
+def test_real_graph_client_uses_the_microsoft_graph_simulator(
     staging_provider_environment: StagingProviderEnvironment,
-    tmp_path: Path,
 ) -> None:
-    base_url = _base_url(staging_provider_environment)
+    base_url = _graph_base_url(staging_provider_environment)
     mailbox_id = "00000000-0000-4000-8000-000000000003"
     with httpx.Client() as admin_client:
         seeded = admin_client.post(
@@ -209,8 +251,15 @@ def test_real_graph_and_transcription_clients_use_the_staging_simulator(
     assert audio.getvalue().startswith(b"OggS")
     assert move.outcome is MoveOutcome.MOVED
 
+
+def test_real_transcription_client_uses_the_transcribe_ai_simulator(
+    staging_provider_environment: StagingProviderEnvironment,
+    tmp_path: Path,
+) -> None:
+    base_url = _transcription_base_url(staging_provider_environment)
+
     audio_path = tmp_path / "synthetic.ogg"
-    audio_path.write_bytes(audio.getvalue())
+    audio_path.write_bytes(b"OggS-synthetic-provider-contract")
     with httpx.Client() as transcription_http_client:
         transcription = TranscriptionClient(
             base_url=base_url,

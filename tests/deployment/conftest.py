@@ -13,6 +13,8 @@ from tests.support.mvp_compose import (
     COMMON_COMPOSE_SERVICES_FILE,
     CUSTOM_SERVICES,
     DOCKER_ROOT,
+    PROVIDERS_COMPOSE_FILE,
+    PROVIDERS_ENV_FILE,
     REPOSITORY_ROOT,
     STAGING_COMPOSE_FILE,
     MvpComposeEnvironment,
@@ -109,6 +111,33 @@ def render_staging_compose() -> Callable[[], dict[str, object]]:
     return render
 
 
+@pytest.fixture
+def render_providers_compose() -> Callable[[], dict[str, object]]:
+    """Render the standalone staging providers without starting containers."""
+
+    def render() -> dict[str, object]:
+        result = run_command(
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                str(PROVIDERS_ENV_FILE),
+                "--file",
+                str(PROVIDERS_COMPOSE_FILE),
+                "config",
+                "--format",
+                "json",
+            ],
+            environment=clean_environment(),
+        )
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Compose returned a non-object providers configuration")
+        return payload
+
+    return render
+
+
 @pytest.fixture(scope="session")
 def deployment_environment(
     tmp_path_factory: pytest.TempPathFactory,
@@ -144,6 +173,8 @@ __all__ = [
     "COMMON_COMPOSE_SERVICES_FILE",
     "CUSTOM_SERVICES",
     "DOCKER_ROOT",
+    "PROVIDERS_COMPOSE_FILE",
+    "PROVIDERS_ENV_FILE",
     "DeploymentEnvironment",
     "REPOSITORY_ROOT",
     "STAGING_COMPOSE_FILE",

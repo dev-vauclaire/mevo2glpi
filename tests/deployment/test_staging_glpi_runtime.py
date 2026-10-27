@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from .conftest import (
-    DOCKER_ROOT,
-    STAGING_COMPOSE_FILE,
+    PROVIDERS_COMPOSE_FILE,
+    PROVIDERS_ENV_FILE,
     clean_environment,
     run_command,
 )
@@ -42,7 +42,7 @@ $context = stream_context_create(['http' => [
     'timeout' => 10,
 ]]);
 $response = @file_get_contents(
-    'http://glpi/api.php/v2.3.0/token',
+    'http://glpi-staging/api.php/v2.3.0/token',
     false,
     $context
 );
@@ -123,7 +123,7 @@ class StagingGlpiEnvironment:
                 "--env-file",
                 str(self.environment_file),
                 "--file",
-                str(STAGING_COMPOSE_FILE),
+                str(PROVIDERS_COMPOSE_FILE),
                 *arguments,
             ],
             environment=self.process_environment,
@@ -133,7 +133,7 @@ class StagingGlpiEnvironment:
 
 
 def _read_example_environment() -> dict[str, str]:
-    source = (DOCKER_ROOT / "staging.env.example").read_text(encoding="utf-8")
+    source = PROVIDERS_ENV_FILE.read_text(encoding="utf-8")
     return dict(re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", source, re.MULTILINE))
 
 
@@ -145,9 +145,19 @@ def _write_environment(path: Path, values: Mapping[str, str]) -> None:
     path.chmod(0o600)
 
 
-def _docker_network(command: str, network_name: str, *, check: bool = True) -> None:
+def _docker_network(
+    command: str,
+    network_name: str,
+    *,
+    internal: bool = False,
+    check: bool = True,
+) -> None:
+    arguments = ["docker", "network", command]
+    if command == "create" and internal:
+        arguments.append("--internal")
+    arguments.append(network_name)
     run_command(
-        ["docker", "network", command, network_name],
+        arguments,
         environment=clean_environment(),
         check=check,
     )
@@ -163,7 +173,7 @@ def staging_glpi_environment(
 
     suffix = secrets.token_hex(6)
     project_name = f"gta-staging-test-{suffix}"
-    database_network = f"{project_name}-database"
+    providers_network = f"{project_name}-providers"
     dokploy_network = f"{project_name}-dokploy"
     runtime_root = tmp_path_factory.mktemp("gta-staging-glpi")
     environment_file = runtime_root / "compose.env"
@@ -171,9 +181,8 @@ def staging_glpi_environment(
     values.update(
         {
             "COMPOSE_PROJECT_NAME": project_name,
-            "DATABASE_NETWORK_NAME": database_network,
+            "PROVIDERS_NETWORK_NAME": providers_network,
             "DOKPLOY_NETWORK_NAME": dokploy_network,
-            "AUDIO_VOLUME_NAME": f"{project_name}-audio",
             "GLPI_DATA_VOLUME_NAME": f"{project_name}-glpi-data",
             "GLPI_DATABASE_VOLUME_NAME": f"{project_name}-mysql-data",
             "GLPI_DB_PASSWORD": secrets.token_urlsafe(32),
@@ -185,8 +194,8 @@ def staging_glpi_environment(
             "GLPI_OAUTH_CLIENT_NAME": f"glpi-staging-oauth-{suffix}",
             "GLPI_CLIENT_ID": f"glpi-staging-client-{suffix}",
             "GLPI_CLIENT_SECRET": secrets.token_urlsafe(32),
-            "PROVIDER_SIMULATOR_ADMIN_TOKEN": secrets.token_urlsafe(32),
-            "PROVIDER_SIMULATOR_TRANSCRIPTION_API_KEY": secrets.token_urlsafe(32),
+            "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN": secrets.token_urlsafe(32),
+            "TRANSCRIBE_AI_SIMULATOR_API_KEY": secrets.token_urlsafe(32),
         }
     )
     _write_environment(environment_file, values)
@@ -195,15 +204,15 @@ def staging_glpi_environment(
         project_name=project_name,
         environment_file=environment_file,
         process_environment=process_environment,
-        network_names=(database_network, dokploy_network),
+        network_names=(providers_network, dokploy_network),
     )
     primary_error: BaseException | None = None
 
     try:
-        for network_name in environment.network_names:
-            _docker_network("create", network_name)
-        environment.compose("build", "glpi")
-        environment.compose("up", "--detach", "glpi")
+        _docker_network("create", providers_network, internal=True)
+        _docker_network("create", dokploy_network)
+        environment.compose("build", "glpi-staging")
+        environment.compose("up", "--detach", "glpi-staging")
         yield environment
     except BaseException as error:
         primary_error = error
@@ -250,7 +259,7 @@ def test_staging_glpi_bootstrap_is_idempotent_and_issues_a_token(
     version = staging_glpi_environment.compose(
         "exec",
         "--no-TTY",
-        "glpi",
+        "glpi-staging",
         "php",
         "bin/console",
         "--version",

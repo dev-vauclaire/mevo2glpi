@@ -65,6 +65,7 @@ Depuis la racine du dépôt, synchroniser l'environnement verrouillé :
 
 ```bash
 uv sync --locked --all-packages --all-groups
+uv sync --directory providers --locked --all-packages --all-groups
 ```
 
 Exécuter la qualité et la suite locale :
@@ -73,6 +74,7 @@ Exécuter la qualité et la suite locale :
 uv run ruff format --check .
 uv run ruff check .
 uv run --all-packages pytest -m "not database and not deployment and not glpi and not transcribe_ai and not e2e"
+uv run --directory providers --all-packages pytest
 ```
 
 Avec Docker disponible, exécuter les migrations et intégrations PostgreSQL :
@@ -86,6 +88,8 @@ Le manifeste Compose peut être rendu sans démarrer les services :
 ```bash
 docker compose --env-file ./infra/docker/.env.example --file infra/docker/docker-compose.prod.yml config --quiet
 docker compose --env-file ./infra/docker/staging.env.example --file infra/docker/docker-compose.staging.yml config --quiet
+docker compose --env-file ./infra/docker/providers/providers.env.example --file infra/docker/providers/docker-compose.providers.yml config --quiet
+uv run pytest tests/deployment/test_providers_compose.py
 ```
 
 Ces commandes n'autorisent pas l'utilisation d'un fichier d'environnement

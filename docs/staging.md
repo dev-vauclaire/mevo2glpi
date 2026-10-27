@@ -1,5 +1,14 @@
 # Environnement staging Dokploy
 
+> **Jalon providers en cours.** La stack autonome des fournisseurs de recette
+> est décrite dans
+> [`infra/docker/providers/README.md`](../infra/docker/providers/README.md).
+> Pendant sa validation, déployer uniquement
+> `infra/docker/providers/docker-compose.providers.yml` depuis la branche
+> `feat/staging-providers`. La stack applicative décrite ci-dessous reste le
+> contrat historique et ne doit pas être redéployée avant son raccordement au
+> réseau providers lors du jalon suivant.
+
 Le staging valide le pipeline complet sans lire la boîte Exchange de
 production et sans consommer le GPU Transcribe AI. Il suit automatiquement la
 branche `main`, alors que le déploiement de production reste manuel.

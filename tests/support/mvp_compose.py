@@ -19,6 +19,9 @@ DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker"
 BASE_COMPOSE_FILE = DOCKER_ROOT / "docker-compose.prod.yml"
 COMMON_COMPOSE_SERVICES_FILE = DOCKER_ROOT / "docker-compose.common.services.yml"
 STAGING_COMPOSE_FILE = DOCKER_ROOT / "docker-compose.staging.yml"
+PROVIDERS_DOCKER_ROOT = DOCKER_ROOT / "providers"
+PROVIDERS_COMPOSE_FILE = PROVIDERS_DOCKER_ROOT / "docker-compose.providers.yml"
+PROVIDERS_ENV_FILE = PROVIDERS_DOCKER_ROOT / "providers.env.example"
 CUSTOM_SERVICES = (
     "database-migrations",
     "web",
@@ -53,6 +56,7 @@ def _deployment_environment_names() -> frozenset[str]:
     example_paths = (
         DOCKER_ROOT / ".env.example",
         DOCKER_ROOT / "staging.env.example",
+        PROVIDERS_ENV_FILE,
     )
     return frozenset(
         name
@@ -753,6 +757,9 @@ __all__ = [
     "CUSTOM_SERVICES",
     "DOCKER_ROOT",
     "MvpComposeEnvironment",
+    "PROVIDERS_COMPOSE_FILE",
+    "PROVIDERS_DOCKER_ROOT",
+    "PROVIDERS_ENV_FILE",
     "ProviderConfiguration",
     "REPOSITORY_ROOT",
     "STAGING_COMPOSE_FILE",

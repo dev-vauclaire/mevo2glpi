@@ -44,11 +44,16 @@ jobs:
         with:
           version: "0.10.11"
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: |
+            uv.lock
+            providers/uv.lock
           prune-cache: true
 
       - name: Synchroniser le workspace verrouillé
         run: uv sync --locked --all-packages --all-groups
+
+      - name: Synchroniser le workspace providers verrouillé
+        run: uv sync --directory providers --locked --all-packages --all-groups
 
       - name: Vérifier le formatage
         run: uv run ruff format --check .
@@ -61,6 +66,9 @@ jobs:
           uv run --all-packages pytest
           -m "not database and not deployment and not glpi and not transcribe_ai and not e2e"
           --maxfail=1
+
+      - name: Exécuter les tests unitaires des providers
+        run: uv run --directory providers --all-packages pytest --maxfail=1
 
       - name: Valider le manifeste Docker Compose de production
         run: >-
@@ -75,6 +83,16 @@ jobs:
           --env-file ./infra/docker/staging.env.example
           --file infra/docker/docker-compose.staging.yml
           config --quiet
+
+      - name: Valider le manifeste Docker Compose des providers
+        run: >-
+          docker compose
+          --env-file ./infra/docker/providers/providers.env.example
+          --file infra/docker/providers/docker-compose.providers.yml
+          config --quiet
+
+      - name: Vérifier le contrat Docker Compose des providers
+        run: uv run pytest tests/deployment/test_providers_compose.py --maxfail=1
 
       - name: Valider PostgreSQL et les migrations
         run: >-
