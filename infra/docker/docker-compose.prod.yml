@@ -1,21 +1,81 @@
 name: ${COMPOSE_PROJECT_NAME:-gta-prod}
 
-# Dokploy analyse uniquement ce point d'entrée pour valider les domaines, avant
-# que Docker Compose ne résolve l'include. Ces stubs rendent donc les cinq
-# services découvrables ; Compose 5+ les fusionne ensuite avec leur configuration.
+# Les services sont déclarés directement pour rester visibles dans Dokploy.
+# `extends` fusionne chaque définition avec le socle commun sans créer les
+# collisions de ressources interdites par la sémantique Compose de `include`.
 services:
-  database-migrations: {}
-  web: {}
-  worker-automation: {}
-  worker-publisher: {}
-  worker-retention: {}
+  database-migrations:
+    extends:
+      file: ./docker-compose.common.services.yml
+      service: database-migrations
 
-# Dokploy crée ce fichier à côté du point d'entrée Compose. L'include explicite
-# contourne la régression v0.30.3 lorsque --project-directory désigne la racine
-# du dépôt au lieu du répertoire contenant ce fichier.
-include:
-  - path:
-      - ./infra/docker/docker-compose.common.services.yml
-      - ./infra/docker/docker-compose.prod.services.yml
-    project_directory: ./infra/docker
-    env_file: ${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}
+  web:
+    extends:
+      file: ./docker-compose.common.services.yml
+      service: web
+
+  worker-automation:
+    extends:
+      file: ./docker-compose.common.services.yml
+      service: worker-automation
+    environment:
+      LEGACY_TRANSCRIPTION_BASE_URL: ${LEGACY_TRANSCRIPTION_BASE_URL:?Set LEGACY_TRANSCRIPTION_BASE_URL}
+      LEGACY_TRANSCRIPTION_API_KEY: ${LEGACY_TRANSCRIPTION_API_KEY:?Set LEGACY_TRANSCRIPTION_API_KEY}
+      GLPI_BASE_URL: ${GLPI_BASE_URL:?Set GLPI_BASE_URL}
+      GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+      GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+      GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+      GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+      GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
+      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
+
+  worker-publisher:
+    extends:
+      file: ./docker-compose.common.services.yml
+      service: worker-publisher
+    environment:
+      PUBLISHER_GRAPH_AUTH_MODE: entra_certificate
+      PUBLISHER_GRAPH_BASE_URL: https://graph.microsoft.com/v1.0
+      PUBLISHER_ENTRA_TENANT_ID: ${PUBLISHER_ENTRA_TENANT_ID:?Set PUBLISHER_ENTRA_TENANT_ID}
+      PUBLISHER_ENTRA_CLIENT_ID: ${PUBLISHER_ENTRA_CLIENT_ID:?Set PUBLISHER_ENTRA_CLIENT_ID}
+      PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH: /run/secrets/publisher-entra-private-key.pem
+      PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH: /run/secrets/publisher-entra-certificate.pem
+      PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE: ${PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE:-}
+    volumes:
+      - type: bind
+        source: ${PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH:?Set PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH}
+        target: /run/secrets/publisher-entra-private-key.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH:?Set PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH}
+        target: /run/secrets/publisher-entra-certificate.pem
+        read_only: true
+        bind:
+          create_host_path: false
+
+  worker-retention:
+    extends:
+      file: ./docker-compose.common.services.yml
+      service: worker-retention
+    environment:
+      GLPI_BASE_URL: ${GLPI_BASE_URL:?Set GLPI_BASE_URL}
+      GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+      GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+      GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+      GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+      GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
+      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
+
+networks:
+  database:
+    name: ${DATABASE_NETWORK_NAME:-gta-database-network}
+    external: true
+  dokploy-network:
+    name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
+    external: true
+
+volumes:
+  audio-data:
+    name: ${AUDIO_VOLUME_NAME:-gta-prod-audio-data}

@@ -299,8 +299,9 @@ accès réseau pour télécharger le modèle Whisper `tiny` et suffisamment
 d'espace disque pour l'image STT. Le mode GPU optionnel exige un GPU NVIDIA et
 NVIDIA Container Toolkit.
 
-Pour Dokploy, le serveur doit fournir Docker Compose 5.0 ou supérieur, Traefik,
-un PostgreSQL externe et les deux réseaux Docker décrits plus bas.
+Pour Dokploy, le serveur doit fournir Dokploy `v0.30.10`, version validée pour
+ce projet, ainsi qu'une version récente de Docker Compose, Traefik, un
+PostgreSQL externe et les deux réseaux Docker décrits plus bas.
 
 ## Installation et démarrage local
 
@@ -400,8 +401,8 @@ lecture seule.
 
 Le seul manifeste à donner à Dokploy est
 [infra/docker/docker-compose.prod.yml](infra/docker/docker-compose.prod.yml).
-Il rend les cinq services découvrables puis inclut
-`docker-compose.prod.services.yml`, où se trouve leur configuration complète :
+Il déclare les cinq services directement afin que Dokploy puisse les découvrir,
+puis réutilise leur configuration commune avec `extends` :
 
 - `database-migrations` ;
 - `web` ;
@@ -409,35 +410,37 @@ Il rend les cinq services découvrables puis inclut
 - `worker-automation` ;
 - `worker-retention`.
 
-Le wrapper charge explicitement `infra/docker/.env` via
-`GTA_DOKPLOY_ENV_FILE`. Ce mécanisme contourne la régression
-[Dokploy #5252](https://github.com/Dokploy/dokploy/issues/5252), dans laquelle
-Dokploy utilise la racine du dépôt comme répertoire de projet. La fusion des
-stubs et des services inclus requiert Docker Compose 5.0 ou supérieur.
+Dokploy `v0.30.10` transmet explicitement à Compose le fichier `.env` généré à
+côté du manifeste. Le correctif correspondant est disponible depuis la version
+`v0.30.4` et évite la régression
+[Dokploy #5252](https://github.com/Dokploy/dokploy/issues/5252). Les manifestes
+n'utilisent pas de collision `include` et restent compatibles avec la
+sémantique standard de Docker Compose.
 
 ### Préparation
 
-1. Provisionner un PostgreSQL et sa base vide.
-2. Créer un réseau Docker privé partagé avec PostgreSQL, par exemple
+1. Vérifier que Dokploy est en version `v0.30.10`.
+2. Provisionner un PostgreSQL et sa base vide.
+3. Créer un réseau Docker privé partagé avec PostgreSQL, par exemple
    `gta-database-network`. Ne pas utiliser l'option Docker `--internal` : le
    publisher doit résoudre le DNS et sortir en HTTPS vers Entra ID et Graph.
-3. Vérifier l'existence du réseau Dokploy, généralement
+4. Vérifier l'existence du réseau Dokploy, généralement
    `dokploy-network`.
-4. Préparer sur l'hôte un bundle de CA lisible par l'UID/GID `10001` des
+5. Préparer sur l'hôte un bundle de CA lisible par l'UID/GID `10001` des
    conteneurs, typiquement en mode `0644`. Il doit contenir les
    autorités publiques usuelles et les CA internes requises par PostgreSQL,
    GLPI, Transcribe AI, Entra ID ou Graph.
-5. Déposer sur l'hôte deux fichiers distincts et lisibles par l'UID/GID `10001` :
+6. Déposer sur l'hôte deux fichiers distincts et lisibles par l'UID/GID `10001` :
    la clé privée PEM du publisher et son certificat public X.509 PEM. Charger
    ce certificat public exact dans **Certificates & secrets** de l'application
    Entra ; la clé privée ne doit jamais être intégrée à l'image ou au dépôt.
-6. Créer dans Dokploy un service **Docker Compose** depuis ce dépôt et utiliser
+7. Créer dans Dokploy un service **Docker Compose** depuis ce dépôt et utiliser
    le chemin `./infra/docker/docker-compose.prod.yml`.
-7. Copier toutes les variables de
+8. Copier toutes les variables de
    [infra/docker/.env.example](infra/docker/.env.example) dans l'onglet
    **Environment**, puis remplacer les valeurs `CHANGE_ME`.
-8. Attacher PostgreSQL au réseau indiqué par `DATABASE_NETWORK_NAME`.
-9. Ajouter au service `web` un domaine Dokploy pointant vers le port
+9. Attacher PostgreSQL au réseau indiqué par `DATABASE_NETWORK_NAME`.
+10. Ajouter au service `web` un domaine Dokploy pointant vers le port
    conteneur `8000`, puis limiter son accès au réseau interne.
 
 `DATABASE_URL` doit utiliser le nom ou l'adresse joignable depuis le réseau
@@ -473,8 +476,8 @@ d'automatisation.
 Le contrat Compose peut être vérifié sans démarrer les services :
 
 ```bash
-GTA_DOKPLOY_ENV_FILE=./infra/docker/.env.example docker compose \
-  --project-directory . \
+docker compose \
+  --env-file ./infra/docker/.env.example \
   --file infra/docker/docker-compose.prod.yml \
   config --quiet
 ```

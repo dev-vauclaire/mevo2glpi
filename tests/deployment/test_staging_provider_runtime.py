@@ -29,7 +29,6 @@ from glpi_ticketing_worker_publisher.graph import (
 
 from .conftest import (
     DOCKER_ROOT,
-    REPOSITORY_ROOT,
     STAGING_COMPOSE_FILE,
     clean_environment,
     run_command,
@@ -63,8 +62,6 @@ class StagingProviderEnvironment:
             [
                 "docker",
                 "compose",
-                "--project-directory",
-                str(REPOSITORY_ROOT),
                 "--project-name",
                 self.project_name,
                 "--env-file",
@@ -135,10 +132,7 @@ def staging_provider_environment(
         "  test-loopback: {}\n",
         encoding="utf-8",
     )
-    process_environment = {
-        **clean_environment(),
-        "GTA_DOKPLOY_ENV_FILE": str(environment_file),
-    }
+    process_environment = clean_environment()
     environment = StagingProviderEnvironment(
         project_name=project_name,
         environment_file=environment_file,

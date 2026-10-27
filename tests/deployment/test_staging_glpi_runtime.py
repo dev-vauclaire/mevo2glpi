@@ -14,7 +14,6 @@ import pytest
 
 from .conftest import (
     DOCKER_ROOT,
-    REPOSITORY_ROOT,
     STAGING_COMPOSE_FILE,
     clean_environment,
     run_command,
@@ -119,8 +118,6 @@ class StagingGlpiEnvironment:
             [
                 "docker",
                 "compose",
-                "--project-directory",
-                str(REPOSITORY_ROOT),
                 "--project-name",
                 self.project_name,
                 "--env-file",
@@ -193,10 +190,7 @@ def staging_glpi_environment(
         }
     )
     _write_environment(environment_file, values)
-    process_environment = {
-        **clean_environment(),
-        "GTA_DOKPLOY_ENV_FILE": str(environment_file),
-    }
+    process_environment = clean_environment()
     environment = StagingGlpiEnvironment(
         project_name=project_name,
         environment_file=environment_file,

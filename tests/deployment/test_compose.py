@@ -17,8 +17,6 @@ from .conftest import (
     COMMON_COMPOSE_SERVICES_FILE,
     CUSTOM_SERVICES,
     DOCKER_ROOT,
-    PRODUCTION_COMPOSE_SERVICES_FILE,
-    REPOSITORY_ROOT,
     DeploymentEnvironment,
     clean_environment,
     run_command,
@@ -47,43 +45,36 @@ def test_production_manifest_contains_only_the_five_applications() -> None:
         DOCKER_ROOT / "docker-compose.common.services.yml"
     )
     assert COMMON_COMPOSE_SERVICES_FILE.is_file()
-    assert PRODUCTION_COMPOSE_SERVICES_FILE == (
-        DOCKER_ROOT / "docker-compose.prod.services.yml"
-    )
-    assert PRODUCTION_COMPOSE_SERVICES_FILE.is_file()
     assert (DOCKER_ROOT / ".env.example").is_file()
 
 
-def test_production_entrypoint_explicitly_loads_dokploy_environment_file() -> None:
+def test_production_entrypoint_uses_portable_service_extends() -> None:
     compose_source = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
 
-    assert "include:" in compose_source
-    assert "- ./infra/docker/docker-compose.common.services.yml" in compose_source
-    assert "- ./infra/docker/docker-compose.prod.services.yml" in compose_source
-    assert "project_directory: ./infra/docker" in compose_source
-    assert "env_file: ${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}" in compose_source
-
-
-def test_production_entrypoint_exposes_services_to_dokploy() -> None:
-    compose_source = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
-    entrypoint_service_index = """services:
-  database-migrations: {}
-  web: {}
-  worker-automation: {}
-  worker-publisher: {}
-  worker-retention: {}
+    assert "include:" not in compose_source
+    for service_name in CUSTOM_SERVICES:
+        declaration = f"""  {service_name}:
+    extends:
+      file: ./docker-compose.common.services.yml
+      service: {service_name}
 """
-
-    assert entrypoint_service_index in compose_source
+        assert declaration in compose_source
 
 
 def test_dokploy_domain_patch_merges_with_web_configuration(tmp_path: Path) -> None:
     compose_source = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
-    web_stub = "  web: {}\n"
-    assert compose_source.count(web_stub) == 1
+    web_declaration = """  web:
+    extends:
+      file: ./docker-compose.common.services.yml
+      service: web
+"""
+    assert compose_source.count(web_declaration) == 1
     compose_source = compose_source.replace(
-        web_stub,
+        web_declaration,
         """  web:
+    extends:
+      file: ./docker-compose.common.services.yml
+      service: web
     labels:
       - traefik.docker.network=dokploy-network
       - traefik.enable=true
@@ -92,15 +83,7 @@ def test_dokploy_domain_patch_merges_with_web_configuration(tmp_path: Path) -> N
       - default
 """,
         1,
-    ).replace(
-        "${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}",
-        "./infra/docker/.env.example",
     )
-    compose_source += """
-networks:
-  dokploy-network:
-    external: true
-"""
     patched_compose_file = tmp_path / "docker-compose.dokploy-domain.yml"
     patched_compose_file.write_text(compose_source, encoding="utf-8")
 
@@ -109,7 +92,9 @@ networks:
             "docker",
             "compose",
             "--project-directory",
-            str(REPOSITORY_ROOT),
+            str(DOCKER_ROOT),
+            "--env-file",
+            str(DOCKER_ROOT / ".env.example"),
             "--file",
             str(patched_compose_file),
             "config",
@@ -138,7 +123,6 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
         (
             BASE_COMPOSE_FILE.read_text(encoding="utf-8"),
             COMMON_COMPOSE_SERVICES_FILE.read_text(encoding="utf-8"),
-            PRODUCTION_COMPOSE_SERVICES_FILE.read_text(encoding="utf-8"),
         )
     )
     example_source = (DOCKER_ROOT / ".env.example").read_text(encoding="utf-8")

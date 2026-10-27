@@ -18,9 +18,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker"
 BASE_COMPOSE_FILE = DOCKER_ROOT / "docker-compose.prod.yml"
 COMMON_COMPOSE_SERVICES_FILE = DOCKER_ROOT / "docker-compose.common.services.yml"
-PRODUCTION_COMPOSE_SERVICES_FILE = DOCKER_ROOT / "docker-compose.prod.services.yml"
 STAGING_COMPOSE_FILE = DOCKER_ROOT / "docker-compose.staging.yml"
-STAGING_COMPOSE_SERVICES_FILE = DOCKER_ROOT / "docker-compose.staging.services.yml"
 CUSTOM_SERVICES = (
     "database-migrations",
     "web",
@@ -175,8 +173,6 @@ class MvpComposeEnvironment:
         command = [
             "docker",
             "compose",
-            "--project-directory",
-            str(REPOSITORY_ROOT),
             "--project-name",
             project_name or self.project_name,
             "--env-file",
@@ -561,7 +557,6 @@ def create_mvp_compose_environment(
     compose_environment_file = runtime_root / "compose.env"
     values = {
         "COMPOSE_PROJECT_NAME": project_name,
-        "GTA_DOKPLOY_ENV_FILE": str(compose_environment_file),
         "DOKPLOY_NETWORK_NAME": proxy_network_name,
         "DATABASE_NETWORK_NAME": database_network_name,
         "AUDIO_VOLUME_NAME": audio_volume_name,
@@ -753,13 +748,14 @@ secrets:
 __all__ = [
     "ALL_SERVICES",
     "BASE_COMPOSE_FILE",
-    "PRODUCTION_COMPOSE_SERVICES_FILE",
+    "COMMON_COMPOSE_SERVICES_FILE",
     "CONTROLLABLE_MVP_SERVICES",
     "CUSTOM_SERVICES",
     "DOCKER_ROOT",
     "MvpComposeEnvironment",
     "ProviderConfiguration",
     "REPOSITORY_ROOT",
+    "STAGING_COMPOSE_FILE",
     "clean_environment",
     "create_mvp_compose_environment",
     "run_command",

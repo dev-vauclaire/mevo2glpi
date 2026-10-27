@@ -65,20 +65,16 @@ jobs:
       - name: Valider le manifeste Docker Compose de production
         run: >-
           docker compose
-          --project-directory .
+          --env-file ./infra/docker/.env.example
           --file infra/docker/docker-compose.prod.yml
           config --quiet
-        env:
-          GTA_DOKPLOY_ENV_FILE: ./infra/docker/.env.example
 
       - name: Valider le manifeste Docker Compose de staging
         run: >-
           docker compose
-          --project-directory .
+          --env-file ./infra/docker/staging.env.example
           --file infra/docker/docker-compose.staging.yml
           config --quiet
-        env:
-          GTA_DOKPLOY_ENV_FILE: ./infra/docker/staging.env.example
 
       - name: Valider PostgreSQL et les migrations
         run: >-

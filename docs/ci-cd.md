@@ -84,8 +84,8 @@ uv run --all-packages pytest -m database -vv --maxfail=1
 Le manifeste Compose peut être rendu sans démarrer les services :
 
 ```bash
-GTA_DOKPLOY_ENV_FILE=./infra/docker/.env.example docker compose --project-directory . --file infra/docker/docker-compose.prod.yml config --quiet
-GTA_DOKPLOY_ENV_FILE=./infra/docker/staging.env.example docker compose --project-directory . --file infra/docker/docker-compose.staging.yml config --quiet
+docker compose --env-file ./infra/docker/.env.example --file infra/docker/docker-compose.prod.yml config --quiet
+docker compose --env-file ./infra/docker/staging.env.example --file infra/docker/docker-compose.staging.yml config --quiet
 ```
 
 Ces commandes n'autorisent pas l'utilisation d'un fichier d'environnement

@@ -12,7 +12,6 @@ from .conftest import (
     COMMON_COMPOSE_SERVICES_FILE,
     DOCKER_ROOT,
     STAGING_COMPOSE_FILE,
-    STAGING_COMPOSE_SERVICES_FILE,
 )
 
 pytestmark = pytest.mark.deployment
@@ -27,6 +26,13 @@ STAGING_SERVICES = {
     "glpi-db",
     "glpi",
     "glpi-bootstrap",
+}
+COMMON_APPLICATION_SERVICES = {
+    "database-migrations",
+    "web",
+    "worker-automation",
+    "worker-publisher",
+    "worker-retention",
 }
 
 
@@ -46,12 +52,16 @@ def _volume_for(service: dict[str, Any], target: str) -> dict[str, Any] | None:
 def test_staging_entrypoint_exposes_every_service_to_dokploy() -> None:
     source = STAGING_COMPOSE_FILE.read_text(encoding="utf-8")
 
-    assert "- ./infra/docker/docker-compose.common.services.yml" in source
-    assert "- ./infra/docker/docker-compose.staging.services.yml" in source
-    assert "project_directory: ./infra/docker" in source
-    assert "env_file: ${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}" in source
-    for service_name in STAGING_SERVICES:
-        assert f"  {service_name}: {{}}" in source
+    assert "include:" not in source
+    for service_name in COMMON_APPLICATION_SERVICES:
+        declaration = f"""  {service_name}:
+    extends:
+      file: ./docker-compose.common.services.yml
+      service: {service_name}
+"""
+        assert declaration in source
+    for service_name in STAGING_SERVICES - COMMON_APPLICATION_SERVICES:
+        assert f"  {service_name}:\n" in source
 
 
 def test_staging_environment_documents_every_interpolated_variable() -> None:
@@ -60,7 +70,6 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
         for path in (
             STAGING_COMPOSE_FILE,
             COMMON_COMPOSE_SERVICES_FILE,
-            STAGING_COMPOSE_SERVICES_FILE,
         )
     )
     example_source = (DOCKER_ROOT / "staging.env.example").read_text(encoding="utf-8")

@@ -47,17 +47,22 @@ staging, puis appliquée aux deux environnements.
 
 ## Création du projet Dokploy
 
-1. Créer un projet ou un environnement Dokploy distinct nommé `staging`.
-2. Connecter le dépôt GitHub privé avec la GitHub App Dokploy.
-3. Sélectionner la branche `main`.
-4. Choisir le chemin Compose
+1. Vérifier que Dokploy est en version `v0.30.10`, version validée pour ce
+   projet. Le correctif disponible depuis `v0.30.4` transmet explicitement le
+   fichier `.env` situé à côté d'un Compose placé dans un sous-répertoire.
+2. Créer un projet ou un environnement Dokploy distinct nommé `staging`.
+3. Connecter le dépôt GitHub privé avec la GitHub App Dokploy.
+4. Sélectionner la branche `main`.
+5. Choisir le chemin Compose
    `./infra/docker/docker-compose.staging.yml`.
-5. Activer l'auto-déploiement uniquement pour ce projet staging.
-6. Laisser l'auto-déploiement désactivé sur le projet de production.
+6. Activer l'auto-déploiement uniquement pour ce projet staging.
+7. Laisser l'auto-déploiement désactivé sur le projet de production.
 
 Dokploy écrit les variables de son onglet Environment dans le fichier `.env`
-du clone. Le manifeste référence explicitement ce fichier via
-`GTA_DOKPLOY_ENV_FILE`.
+placé à côté du manifeste et le transmet à Docker Compose avec `--env-file`.
+Une version de Dokploy antérieure à `v0.30.4` réintroduirait le défaut de
+chargement décrit par l'issue
+[#5252](https://github.com/Dokploy/dokploy/issues/5252).
 
 ## PostgreSQL
 
