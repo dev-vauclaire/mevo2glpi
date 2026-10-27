@@ -497,7 +497,7 @@ Les suites d'intégration sont opt-in :
 | --- | --- |
 | `database` | PostgreSQL 16 jetable : migrations, schéma, repositories, verrous et cycles applicatifs |
 | `deployment` | Construction et validation du Compose et des cinq images |
-| `glpi` | GLPI 11.0.8 et MySQL 8.4.11 jetables, OAuth et contrats réels |
+| `glpi` | GLPI 11.0.7 et MySQL 8.4.11 jetables, OAuth et contrats réels |
 | `transcribe_ai` | Stack Transcribe AI v1 jetable, CPU par défaut ou GPU explicite |
 | `e2e` | Pipeline aval avec frontière publisher synthétique, web, automation, retention, PostgreSQL, GLPI et Transcribe AI |
 

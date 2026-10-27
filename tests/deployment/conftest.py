@@ -10,10 +10,13 @@ import pytest
 from tests.support.mvp_compose import (
     ALL_SERVICES,
     BASE_COMPOSE_FILE,
+    COMMON_COMPOSE_SERVICES_FILE,
     CUSTOM_SERVICES,
     DOCKER_ROOT,
     PRODUCTION_COMPOSE_SERVICES_FILE,
     REPOSITORY_ROOT,
+    STAGING_COMPOSE_FILE,
+    STAGING_COMPOSE_SERVICES_FILE,
     MvpComposeEnvironment,
     ProviderConfiguration,
     clean_environment,
@@ -82,6 +85,36 @@ def render_compose() -> Callable[[], dict[str, object]]:
     return render
 
 
+@pytest.fixture
+def render_staging_compose() -> Callable[[], dict[str, object]]:
+    """Render the isolated staging manifest without starting containers."""
+
+    def render() -> dict[str, object]:
+        result = run_command(
+            [
+                "docker",
+                "compose",
+                "--project-directory",
+                str(REPOSITORY_ROOT),
+                "-f",
+                str(STAGING_COMPOSE_FILE),
+                "config",
+                "--format",
+                "json",
+            ],
+            environment={
+                **clean_environment(),
+                "GTA_DOKPLOY_ENV_FILE": str(DOCKER_ROOT / "staging.env.example"),
+            },
+        )
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Compose returned a non-object staging configuration")
+        return payload
+
+    return render
+
+
 @pytest.fixture(scope="session")
 def deployment_environment(
     tmp_path_factory: pytest.TempPathFactory,
@@ -114,11 +147,14 @@ def deployment_environment(
 __all__ = [
     "ALL_SERVICES",
     "BASE_COMPOSE_FILE",
+    "COMMON_COMPOSE_SERVICES_FILE",
     "CUSTOM_SERVICES",
     "DOCKER_ROOT",
     "DeploymentEnvironment",
     "PRODUCTION_COMPOSE_SERVICES_FILE",
     "REPOSITORY_ROOT",
+    "STAGING_COMPOSE_FILE",
+    "STAGING_COMPOSE_SERVICES_FILE",
     "clean_environment",
     "run_command",
 ]

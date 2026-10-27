@@ -14,6 +14,8 @@ services:
 # contourne la régression v0.30.3 lorsque --project-directory désigne la racine
 # du dépôt au lieu du répertoire contenant ce fichier.
 include:
-  - path: ./infra/docker/docker-compose.prod.services.yml
+  - path:
+      - ./infra/docker/docker-compose.common.services.yml
+      - ./infra/docker/docker-compose.prod.services.yml
     project_directory: ./infra/docker
     env_file: ${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}

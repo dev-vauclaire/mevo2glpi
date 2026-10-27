@@ -5,10 +5,21 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import glpi_ticketing_worker_publisher.settings as settings_module
 from glpi_ticketing_worker_publisher.settings import (
     MAX_ATTACHMENT_BYTES,
+    OFFICIAL_GRAPH_BASE_URL,
+    PublisherGraphAuthMode,
     PublisherLogLevel,
     PublisherSettings,
+)
+
+ENTRA_VARIABLES = (
+    "PUBLISHER_ENTRA_TENANT_ID",
+    "PUBLISHER_ENTRA_CLIENT_ID",
+    "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH",
+    "PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH",
+    "PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE",
 )
 
 
@@ -54,6 +65,12 @@ def test_settings_load_two_distinct_pem_paths_and_runtime_defaults(
         == (publisher_environment["certificate"])
     )
     assert settings.publisher_entra_private_key_passphrase is None
+    assert settings.publisher_graph_auth_mode is (
+        PublisherGraphAuthMode.ENTRA_CERTIFICATE
+    )
+    assert str(settings.publisher_graph_base_url).rstrip("/") == (
+        OFFICIAL_GRAPH_BASE_URL
+    )
     assert settings.publisher_log_level is PublisherLogLevel.INFO
     assert settings.publisher_max_attachment_bytes == MAX_ATTACHMENT_BYTES
 
@@ -116,4 +133,95 @@ def test_retry_initial_must_not_exceed_retry_maximum(
     monkeypatch.setenv("PUBLISHER_RETRY_MAX_SECONDS", "30")
 
     with pytest.raises(ValidationError):
+        PublisherSettings()
+
+
+def test_synthetic_graph_mode_requires_no_entra_credentials(
+    publisher_environment: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del publisher_environment
+    for variable_name in ENTRA_VARIABLES:
+        monkeypatch.delenv(variable_name, raising=False)
+    monkeypatch.setenv("PUBLISHER_GRAPH_AUTH_MODE", "synthetic")
+    monkeypatch.setenv(
+        "PUBLISHER_GRAPH_BASE_URL",
+        "http://provider-simulator:8080/v1.0",
+    )
+
+    settings = PublisherSettings()
+
+    assert settings.publisher_graph_auth_mode is PublisherGraphAuthMode.SYNTHETIC
+    assert str(settings.publisher_graph_base_url).rstrip("/") == (
+        "http://provider-simulator:8080/v1.0"
+    )
+    assert settings.publisher_entra_tenant_id is None
+    assert settings.publisher_entra_client_id is None
+    assert settings.publisher_entra_private_key_pem_path is None
+    assert settings.publisher_entra_certificate_pem_path is None
+
+
+def test_synthetic_graph_mode_rejects_entra_settings_without_reading_pem_files(
+    publisher_environment: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del publisher_environment
+    monkeypatch.setenv("PUBLISHER_GRAPH_AUTH_MODE", "synthetic")
+    monkeypatch.setenv(
+        "PUBLISHER_GRAPH_BASE_URL",
+        "http://provider-simulator:8080/v1.0",
+    )
+    monkeypatch.setenv(
+        "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH",
+        "/secrets/must-not-be-read/private.pem",
+    )
+    monkeypatch.setenv(
+        "PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH",
+        "/secrets/must-not-be-read/certificate.pem",
+    )
+
+    def fail_if_read(*_args: object, **_kwargs: object) -> Path:
+        raise AssertionError("synthetic mode must not inspect PEM files")
+
+    monkeypatch.setattr(settings_module, "_validate_readable_file", fail_if_read)
+
+    with pytest.raises(ValidationError, match="must not receive Entra credentials"):
+        PublisherSettings()
+
+
+def test_synthetic_graph_mode_refuses_the_official_graph_endpoint(
+    publisher_environment: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del publisher_environment
+    for variable_name in ENTRA_VARIABLES:
+        monkeypatch.delenv(variable_name, raising=False)
+    monkeypatch.setenv("PUBLISHER_GRAPH_AUTH_MODE", "synthetic")
+
+    with pytest.raises(ValidationError, match="requires a non-Microsoft URL"):
+        PublisherSettings()
+
+
+def test_certificate_graph_mode_refuses_a_non_microsoft_endpoint(
+    publisher_environment: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del publisher_environment
+    monkeypatch.setenv(
+        "PUBLISHER_GRAPH_BASE_URL",
+        "https://graph-staging.example.test/v1.0",
+    )
+
+    with pytest.raises(ValidationError, match="official Microsoft Graph URL"):
+        PublisherSettings()
+
+
+def test_certificate_graph_mode_requires_all_entra_material(
+    publisher_environment: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del publisher_environment
+    monkeypatch.delenv("PUBLISHER_ENTRA_CLIENT_ID")
+
+    with pytest.raises(ValidationError, match="requires tenant, client and PEM files"):
         PublisherSettings()

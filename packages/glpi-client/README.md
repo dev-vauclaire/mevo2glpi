@@ -11,7 +11,7 @@ Il expose deux ports distincts :
   identifiant GLPI persisté.
 
 La lecture retourne uniquement l'identifiant, l'`external_id` et un
-`TicketStatus` épinglé sur GLPI 11.0.8. Le client analyse `status.id` et ignore
+`TicketStatus` épinglé sur GLPI 11.0.7. Le client analyse `status.id` et ignore
 `status.name`, dont le contenu dépend de la langue de l'instance. Seul
 `TicketStatus.CLOSED` représente un ticket fermé ; `SOLVED` et `APPROVAL` sont
 des états distincts.

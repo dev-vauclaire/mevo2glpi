@@ -11,14 +11,13 @@ l'établissement.
 flowchart LR
     Feature[feature/* ou fix/*] -->|Pull Request| CI[CI sans secret]
     CI -->|contrôles réussis + revue manuelle| Main[main]
-    Main -.->|STG-1 : auto-déploiement prévu| Staging[Staging Dokploy]
+    Main -->|STG-1 : auto-déploiement| Staging[Staging Dokploy]
     Staging -.->|recette validée| Tag[Tag mvp-vX.Y.Z]
     Tag -.->|REL-1 : action opérateur prévue| Production[Production Dokploy]
 ```
 
-Les traits pleins représentent le périmètre effectivement livré par CI-1. Les
-traits pointillés décrivent les jalons de staging et de release qui seront mis
-en place séparément.
+Les traits pleins représentent les périmètres CI-1 et STG-1. Le trait pointillé
+décrit encore la promotion de release manuelle qui sera finalisée séparément.
 
 - `feature/*` porte une évolution fonctionnelle ;
 - `fix/*` porte une correction ;
@@ -42,12 +41,14 @@ synthétiques :
 3. suite Pytest locale, incluant les contrats HTTP simulés et le faux serveur
    Graph stateful ;
 4. migrations et intégrations PostgreSQL jetables ;
-5. rendu statique du manifeste Docker Compose avec la configuration d'exemple.
+5. rendu statique des manifestes Docker Compose production et staging avec
+   leurs configurations d'exemple.
 
 Les suites `deployment`, `glpi`, `transcribe_ai` et `e2e`, qui construisent ou
 démarrent des stacks lourdes, ne font pas partie du contrôle automatique de
-chaque Pull Request. Elles restent des contrôles de recette manuels et seront
-positionnées dans le futur jalon staging.
+chaque Pull Request. Elles restent des contrôles de recette manuels. Le staging
+déployé exerce Graph et Transcribe au moyen d'un simulateur interne et GLPI au
+moyen d'une instance 11.0.7 isolée.
 
 La CI ne réalise aucune des opérations suivantes :
 
@@ -84,6 +85,7 @@ Le manifeste Compose peut être rendu sans démarrer les services :
 
 ```bash
 GTA_DOKPLOY_ENV_FILE=./infra/docker/.env.example docker compose --project-directory . --file infra/docker/docker-compose.prod.yml config --quiet
+GTA_DOKPLOY_ENV_FILE=./infra/docker/staging.env.example docker compose --project-directory . --file infra/docker/docker-compose.staging.yml config --quiet
 ```
 
 Ces commandes n'autorisent pas l'utilisation d'un fichier d'environnement
@@ -138,12 +140,10 @@ Avant la fusion :
 
 ## Promotion vers staging et production
 
-Cette section décrit la cible des jalons STG-1 et REL-1 ; elle ne signifie pas
-que ces automatismes existent dès CI-1.
-
-Le staging Dokploy suivra `main` avec l'auto-déploiement activé. Il possédera
-des ressources isolées, un GLPI 11.0.7 de test et des simulateurs Graph et
-Transcribe AI. Il ne recevra aucun identifiant ou certificat de production.
+Le staging Dokploy suit `main` avec l'auto-déploiement activé. Il possède des
+ressources isolées, un GLPI 11.0.7 et un simulateur Graph/Transcribe. Il ne
+reçoit aucun identifiant ou certificat de production. Sa procédure complète
+est décrite dans [staging.md](staging.md).
 
 Après une recette staging réussie :
 
@@ -191,7 +191,6 @@ L'opérateur reste responsable de :
   ce dépôt privé ;
 - la CI ne prouve pas le fonctionnement des services Microsoft, GLPI ou
   Transcribe AI réels ;
-- le staging isolé et ses simulateurs seront livrés dans un jalon ultérieur ;
 - les images staging et production seront reconstruites séparément tant qu'un
   registre n'est pas adopté ;
 - le correctif des dates GLPI et son outil `dry-run`/`apply` restent hors du

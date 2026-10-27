@@ -481,7 +481,7 @@ def _clean_test_resources(
     environment: Mapping[str, str],
 ) -> None:
     project_name = environment["COMPOSE_PROJECT_NAME"]
-    image_reference = f"{project_name}-glpi-test:11.0.8"
+    image_reference = f"{project_name}-glpi-test:11.0.7"
     cleanup_failed = False
 
     try:

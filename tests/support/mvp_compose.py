@@ -17,7 +17,10 @@ import httpx
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker"
 BASE_COMPOSE_FILE = DOCKER_ROOT / "docker-compose.prod.yml"
+COMMON_COMPOSE_SERVICES_FILE = DOCKER_ROOT / "docker-compose.common.services.yml"
 PRODUCTION_COMPOSE_SERVICES_FILE = DOCKER_ROOT / "docker-compose.prod.services.yml"
+STAGING_COMPOSE_FILE = DOCKER_ROOT / "docker-compose.staging.yml"
+STAGING_COMPOSE_SERVICES_FILE = DOCKER_ROOT / "docker-compose.staging.services.yml"
 CUSTOM_SERVICES = (
     "database-migrations",
     "web",
@@ -49,13 +52,17 @@ c3ludGhldGljLXRlc3Qtb25seS1jZXJ0aWZpY2F0ZQ==
 
 def _deployment_environment_names() -> frozenset[str]:
     """Return the variables controlled by the versioned Dokploy contract."""
-    example_path = DOCKER_ROOT / ".env.example"
+    example_paths = (
+        DOCKER_ROOT / ".env.example",
+        DOCKER_ROOT / "staging.env.example",
+    )
     return frozenset(
         name
+        for example_path in example_paths
+        if example_path.is_file()
         for raw_line in example_path.read_text(encoding="utf-8").splitlines()
-        if (line := raw_line.strip())
-        and not line.startswith("#")
-        and (name := line.partition("=")[0])
+        if (line := raw_line.strip()) and not line.startswith("#")
+        if (name := line.partition("=")[0])
     )
 
 

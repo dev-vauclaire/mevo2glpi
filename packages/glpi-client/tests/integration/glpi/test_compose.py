@@ -195,8 +195,8 @@ def test_custom_image_contains_no_real_secret(glpi_environment) -> None:
     normalized_compose = compose_file.lower()
     assert "latest" not in normalized_dockerfile + normalized_compose
     assert (
-        "from glpi/glpi:11.0.8@sha256:"
-        "ca6b53ef948e940f41e1f4af31c001097897e819b66d146d3e5cac51ac7e9f14"
+        "from glpi/glpi:11.0.7@sha256:"
+        "7e100562afe13cce132fe46c0a21ddb94f7ed2c06950da9c4b34ce734a1ad4ac"
         in normalized_dockerfile
     )
     assert (
@@ -205,7 +205,7 @@ def test_custom_image_contains_no_real_secret(glpi_environment) -> None:
         in normalized_compose
     )
     assert ":latest" not in glpi_environment.image_metadata.lower()
-    assert "-glpi-test:11.0.8" in glpi_environment.image_metadata.lower()
+    assert "-glpi-test:11.0.7" in glpi_environment.image_metadata.lower()
     assert "env glpi_test_" not in normalized_dockerfile
     assert "set_ticket_status.php" in normalized_dockerfile
     assert "INSERT " not in status_helper

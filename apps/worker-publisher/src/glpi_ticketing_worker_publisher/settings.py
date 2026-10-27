@@ -6,12 +6,20 @@ from pathlib import Path
 from typing import Self
 from uuid import UUID
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+OFFICIAL_GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
+
+
+class PublisherGraphAuthMode(StrEnum):
+    """Explicit Graph authentication backends supported by the publisher."""
+
+    ENTRA_CERTIFICATE = "entra_certificate"
+    SYNTHETIC = "synthetic"
 
 
 class PublisherLogLevel(StrEnum):
@@ -35,10 +43,14 @@ class PublisherSettings(BaseSettings):
         frozen=True,
     )
 
-    publisher_entra_tenant_id: UUID
-    publisher_entra_client_id: UUID
-    publisher_entra_private_key_pem_path: Path
-    publisher_entra_certificate_pem_path: Path
+    publisher_graph_auth_mode: PublisherGraphAuthMode = (
+        PublisherGraphAuthMode.ENTRA_CERTIFICATE
+    )
+    publisher_graph_base_url: HttpUrl = HttpUrl(OFFICIAL_GRAPH_BASE_URL)
+    publisher_entra_tenant_id: UUID | None = None
+    publisher_entra_client_id: UUID | None = None
+    publisher_entra_private_key_pem_path: Path | None = None
+    publisher_entra_certificate_pem_path: Path | None = None
     publisher_entra_private_key_passphrase: SecretStr | None = Field(
         default=None,
         repr=False,
@@ -85,24 +97,6 @@ class PublisherSettings(BaseSettings):
         allow_inf_nan=False,
     )
 
-    @field_validator("publisher_entra_private_key_pem_path")
-    @classmethod
-    def validate_private_key_path(cls, path: Path) -> Path:
-        """Require a mounted, readable private-key PEM secret."""
-        return _validate_readable_file(
-            path,
-            variable_name="PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH",
-        )
-
-    @field_validator("publisher_entra_certificate_pem_path")
-    @classmethod
-    def validate_certificate_path(cls, path: Path) -> Path:
-        """Require a mounted, readable public X.509 certificate PEM."""
-        return _validate_readable_file(
-            path,
-            variable_name="PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH",
-        )
-
     @field_validator("publisher_entra_private_key_passphrase")
     @classmethod
     def validate_private_key_passphrase(
@@ -132,13 +126,29 @@ class PublisherSettings(BaseSettings):
             raise ValueError("DATABASE_URL must use the postgresql+psycopg driver")
         return database_url
 
-    @field_validator("publisher_log_level", mode="before")
+    @field_validator("publisher_graph_auth_mode", "publisher_log_level", mode="before")
     @classmethod
-    def normalize_log_level(cls, value: object) -> object:
-        """Accept conventional case-insensitive publisher log levels."""
+    def normalize_enum_setting(cls, value: object) -> object:
+        """Accept conventional case-insensitive enum values."""
         if isinstance(value, str):
-            return value.strip().upper()
+            normalized = value.strip()
+            if normalized.lower() in {mode.value for mode in PublisherGraphAuthMode}:
+                return normalized.lower()
+            return normalized.upper()
         return value
+
+    @field_validator("publisher_graph_base_url")
+    @classmethod
+    def validate_graph_base_url(cls, url: HttpUrl) -> HttpUrl:
+        """Require the pinned Graph v1.0 root without embedded request data."""
+        if url.username or url.password or url.query or url.fragment:
+            raise ValueError(
+                "PUBLISHER_GRAPH_BASE_URL must not contain credentials, "
+                "a query, or a fragment"
+            )
+        if url.path.rstrip("/") != "/v1.0":
+            raise ValueError("PUBLISHER_GRAPH_BASE_URL must target Graph v1.0")
+        return url
 
     @field_validator(
         "database_connect_timeout_seconds",
@@ -173,12 +183,49 @@ class PublisherSettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_runtime_ranges(self) -> Self:
-        """Keep the retry schedule and PEM paths internally coherent."""
+        """Keep retry and authentication settings internally coherent."""
         if self.publisher_retry_initial_seconds > self.publisher_retry_max_seconds:
             raise ValueError(
                 "PUBLISHER_RETRY_INITIAL_SECONDS must not exceed "
                 "PUBLISHER_RETRY_MAX_SECONDS"
             )
+
+        entra_values = (
+            self.publisher_entra_tenant_id,
+            self.publisher_entra_client_id,
+            self.publisher_entra_private_key_pem_path,
+            self.publisher_entra_certificate_pem_path,
+            self.publisher_entra_private_key_passphrase,
+        )
+        if self.publisher_graph_auth_mode is PublisherGraphAuthMode.SYNTHETIC:
+            if _is_official_graph_url(self.publisher_graph_base_url):
+                raise ValueError(
+                    "Synthetic Graph authentication requires a non-Microsoft URL"
+                )
+            if any(value is not None for value in entra_values):
+                raise ValueError(
+                    "Synthetic Graph authentication must not receive Entra credentials"
+                )
+            return self
+
+        if not _is_official_graph_url(self.publisher_graph_base_url):
+            raise ValueError(
+                "Certificate authentication requires the official Microsoft Graph URL"
+            )
+        if any(value is None for value in entra_values[:4]):
+            raise ValueError(
+                "Certificate authentication requires tenant, client and PEM files"
+            )
+        assert self.publisher_entra_private_key_pem_path is not None
+        assert self.publisher_entra_certificate_pem_path is not None
+        _validate_readable_file(
+            self.publisher_entra_private_key_pem_path,
+            variable_name="PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH",
+        )
+        _validate_readable_file(
+            self.publisher_entra_certificate_pem_path,
+            variable_name="PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH",
+        )
         if (
             self.publisher_entra_private_key_pem_path.resolve()
             == self.publisher_entra_certificate_pem_path.resolve()
@@ -198,4 +245,22 @@ def _validate_readable_file(path: Path, *, variable_name: str) -> Path:
     return path
 
 
-__all__ = ["MAX_ATTACHMENT_BYTES", "PublisherLogLevel", "PublisherSettings"]
+def _is_official_graph_url(url: HttpUrl) -> bool:
+    return (
+        url.scheme == "https"
+        and url.host == "graph.microsoft.com"
+        and url.path.rstrip("/") == "/v1.0"
+        and not url.username
+        and not url.password
+        and not url.query
+        and not url.fragment
+    )
+
+
+__all__ = [
+    "MAX_ATTACHMENT_BYTES",
+    "OFFICIAL_GRAPH_BASE_URL",
+    "PublisherGraphAuthMode",
+    "PublisherLogLevel",
+    "PublisherSettings",
+]

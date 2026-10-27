@@ -31,7 +31,7 @@ class TicketLevel(IntEnum):
 
 
 class TicketStatus(IntEnum):
-    """Ticket statuses exposed by the pinned GLPI 11.0.8 API contract."""
+    """Ticket statuses exposed by the pinned GLPI 11.0.7 API contract."""
 
     INCOMING = 1
     ASSIGNED = 2

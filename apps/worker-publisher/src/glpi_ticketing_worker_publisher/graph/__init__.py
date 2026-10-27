@@ -3,9 +3,11 @@
 from .auth import (
     ENTRA_AUTHORITY_ROOT,
     GRAPH_DEFAULT_SCOPE,
+    SYNTHETIC_GRAPH_ACCESS_TOKEN,
     MsalApplicationFactory,
     MsalCertificateTokenProvider,
     MsalConfidentialClientProtocol,
+    SyntheticGraphTokenProvider,
 )
 from .client import (
     DEFAULT_MAX_ATTACHMENT_BYTES,
@@ -54,6 +56,7 @@ __all__ = [
     "GRAPH_API_BASE_URL",
     "GRAPH_API_VERSION",
     "GRAPH_DEFAULT_SCOPE",
+    "SYNTHETIC_GRAPH_ACCESS_TOKEN",
     "GraphAccessToken",
     "GraphAttachment",
     "GraphAttachmentKind",
@@ -78,4 +81,5 @@ __all__ = [
     "MsalApplicationFactory",
     "MsalCertificateTokenProvider",
     "MsalConfidentialClientProtocol",
+    "SyntheticGraphTokenProvider",
 ]

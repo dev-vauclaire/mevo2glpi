@@ -1,0 +1,18 @@
+[project]
+name = "glpi-ticketing-provider-simulator"
+version = "0.1.0"
+description = "Simulateur Graph et Transcribe AI reserve au staging"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.116,<1",
+    "pydantic-settings>=2.10,<3",
+    "uvicorn>=0.35,<1",
+]
+
+[project.scripts]
+glpi-ticketing-provider-simulator = "glpi_ticketing_provider_simulator.application:main"
+glpi-ticketing-provider-simulator-admin = "glpi_ticketing_provider_simulator.admin:main"
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"

@@ -20,7 +20,7 @@ services:
       - mysql_data:/var/lib/mysql
 
   glpi:
-    image: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}-glpi-test:11.0.8
+    image: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}-glpi-test:11.0.7
     build:
       context: image
       dockerfile: Dockerfile

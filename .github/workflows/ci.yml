@@ -62,7 +62,7 @@ jobs:
           -m "not database and not deployment and not glpi and not transcribe_ai and not e2e"
           --maxfail=1
 
-      - name: Valider le manifeste Docker Compose
+      - name: Valider le manifeste Docker Compose de production
         run: >-
           docker compose
           --project-directory .
@@ -70,6 +70,15 @@ jobs:
           config --quiet
         env:
           GTA_DOKPLOY_ENV_FILE: ./infra/docker/.env.example
+
+      - name: Valider le manifeste Docker Compose de staging
+        run: >-
+          docker compose
+          --project-directory .
+          --file infra/docker/docker-compose.staging.yml
+          config --quiet
+        env:
+          GTA_DOKPLOY_ENV_FILE: ./infra/docker/staging.env.example
 
       - name: Valider PostgreSQL et les migrations
         run: >-

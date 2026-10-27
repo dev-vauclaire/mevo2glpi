@@ -1,223 +1,45 @@
-x-ca-bundle: &ca-bundle
-  type: bind
-  source: ${CA_BUNDLE_HOST_PATH:-/etc/ssl/certs/ca-certificates.crt}
-  target: /etc/ssl/certs/gta-ca-bundle.pem
-  read_only: true
-  bind:
-    create_host_path: false
-
-x-publisher-private-key: &publisher-private-key
-  type: bind
-  source: ${PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH:?Set PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH}
-  target: /run/secrets/publisher-entra-private-key.pem
-  read_only: true
-  bind:
-    create_host_path: false
-
-x-publisher-certificate: &publisher-certificate
-  type: bind
-  source: ${PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH:?Set PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH}
-  target: /run/secrets/publisher-entra-certificate.pem
-  read_only: true
-  bind:
-    create_host_path: false
-
-x-application-runtime: &application-runtime
-  init: true
-  read_only: true
-  cap_drop:
-    - ALL
-  security_opt:
-    - no-new-privileges:true
-  pids_limit: 128
-  stop_grace_period: 30s
-  logging:
-    driver: json-file
-    options:
-      max-size: 10m
-      max-file: "3"
-x-database-environment: &database-environment
-  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the external PostgreSQL database}
-  PGSSLROOTCERT: /etc/ssl/certs/gta-ca-bundle.pem
-
-x-glpi-environment: &glpi-environment
-  GLPI_BASE_URL: ${GLPI_BASE_URL:?Set GLPI_BASE_URL}
-  GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
-  GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
-  GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
-  GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
-  GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
-  SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
-
 services:
-  database-migrations:
-    <<: *application-runtime
-    build:
-      context: ../..
-      dockerfile: infra/docker/database-migrations/Dockerfile
-    environment:
-      <<: *database-environment
-      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
-      DATABASE_READY_TIMEOUT_SECONDS: ${DATABASE_READY_TIMEOUT_SECONDS:-60}
-      DATABASE_READY_INTERVAL_SECONDS: ${DATABASE_READY_INTERVAL_SECONDS:-1}
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
-    volumes:
-      - *ca-bundle
-    networks:
-      - database
-    restart: "no"
-
-  web:
-    <<: *application-runtime
-    build:
-      context: ../..
-      dockerfile: infra/docker/web/Dockerfile
-    environment:
-      <<: *database-environment
-      AUDIO_ROOT: /data/audios
-      WEB_HOST: 0.0.0.0
-      WEB_PORT: "8000"
-      WEB_TRUST_PROXY_HEADERS: "true"
-      WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-10}
-      DASHBOARD_WORKER_STALE_AFTER_SECONDS: ${DASHBOARD_WORKER_STALE_AFTER_SECONDS:-45}
-      DASHBOARD_PENDING_ALERT_AFTER_SECONDS: ${DASHBOARD_PENDING_ALERT_AFTER_SECONDS:-900}
-      DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS: ${DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS:-60}
-      DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS: ${DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS:-120}
-    depends_on:
-      database-migrations:
-        condition: service_completed_successfully
-    expose:
-      - "8000"
-    volumes:
-      - audio-data:/data/audios:ro
-      - *ca-bundle
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
-    networks:
-      - database
-      - dokploy-network
-    restart: unless-stopped
-
   worker-automation:
-    <<: *application-runtime
-    build:
-      context: ../..
-      dockerfile: infra/docker/worker-automation/Dockerfile
     environment:
-      <<: [*database-environment, *glpi-environment]
-      AUDIO_ROOT: /data/audios
-      WORKER_LOG_LEVEL: ${WORKER_LOG_LEVEL:-INFO}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL to the public Dokploy URL}
-      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
-      WORKER_IDLE_INTERVAL_SECONDS: ${WORKER_IDLE_INTERVAL_SECONDS:-1}
-      WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-10}
-      WORKER_HEALTHCHECK_STALE_AFTER_SECONDS: ${WORKER_HEALTHCHECK_STALE_AFTER_SECONDS:-45}
-      WORKER_RETRY_INITIAL_SECONDS: ${WORKER_RETRY_INITIAL_SECONDS:-5}
-      WORKER_RETRY_MAX_SECONDS: ${WORKER_RETRY_MAX_SECONDS:-300}
-      WORKER_SYSTEM_PROBE_INTERVAL_SECONDS: ${WORKER_SYSTEM_PROBE_INTERVAL_SECONDS:-60}
-      COMPLETED_RETENTION_DAYS: ${COMPLETED_RETENTION_DAYS:-90}
-      FAILED_RETENTION_DAYS: ${FAILED_RETENTION_DAYS:-30}
-      BLOCKED_RETENTION_DAYS: ${BLOCKED_RETENTION_DAYS:-90}
-      RETENTION_CHECK_INTERVAL_HOURS: ${RETENTION_CHECK_INTERVAL_HOURS:-6}
       LEGACY_TRANSCRIPTION_BASE_URL: ${LEGACY_TRANSCRIPTION_BASE_URL:?Set LEGACY_TRANSCRIPTION_BASE_URL}
       LEGACY_TRANSCRIPTION_API_KEY: ${LEGACY_TRANSCRIPTION_API_KEY:?Set LEGACY_TRANSCRIPTION_API_KEY}
-      TRANSCRIPTION_HTTP_TIMEOUT_SECONDS: ${TRANSCRIPTION_HTTP_TIMEOUT_SECONDS:-10}
-      TRANSCRIPTION_POLL_INTERVAL_SECONDS: ${TRANSCRIPTION_POLL_INTERVAL_SECONDS:-2}
-      TRANSCRIPTION_JOB_TIMEOUT_SECONDS: ${TRANSCRIPTION_JOB_TIMEOUT_SECONDS:-900}
-      GLPI_TICKET_TITLE: ${GLPI_TICKET_TITLE:-Demande issue d'un audio}
-      GLPI_TICKET_TYPE: ${GLPI_TICKET_TYPE:-2}
-      GLPI_TICKET_URGENCY: ${GLPI_TICKET_URGENCY:-3}
-      GLPI_TICKET_IMPACT: ${GLPI_TICKET_IMPACT:-3}
-    depends_on:
-      database-migrations:
-        condition: service_completed_successfully
-    volumes:
-      - audio-data:/data/audios:ro
-      - *ca-bundle
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
-    networks:
-      - database
-    restart: "on-failure:5"
+      GLPI_BASE_URL: ${GLPI_BASE_URL:?Set GLPI_BASE_URL}
+      GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+      GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+      GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+      GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+      GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
+      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
 
   worker-publisher:
-    <<: *application-runtime
-    build:
-      context: ../..
-      dockerfile: infra/docker/worker-publisher/Dockerfile
     environment:
-      <<: *database-environment
-      AUDIO_ROOT: /data/audios
-      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
-      PUBLISHER_LOG_LEVEL: ${PUBLISHER_LOG_LEVEL:-INFO}
+      PUBLISHER_GRAPH_AUTH_MODE: entra_certificate
+      PUBLISHER_GRAPH_BASE_URL: https://graph.microsoft.com/v1.0
       PUBLISHER_ENTRA_TENANT_ID: ${PUBLISHER_ENTRA_TENANT_ID:?Set PUBLISHER_ENTRA_TENANT_ID}
       PUBLISHER_ENTRA_CLIENT_ID: ${PUBLISHER_ENTRA_CLIENT_ID:?Set PUBLISHER_ENTRA_CLIENT_ID}
       PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH: /run/secrets/publisher-entra-private-key.pem
       PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH: /run/secrets/publisher-entra-certificate.pem
       PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE: ${PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE:-}
-      PUBLISHER_MAILBOX_ID: ${PUBLISHER_MAILBOX_ID:?Set PUBLISHER_MAILBOX_ID}
-      PUBLISHER_GRAPH_PAGE_SIZE: ${PUBLISHER_GRAPH_PAGE_SIZE:-50}
-      PUBLISHER_MAX_ATTACHMENT_BYTES: ${PUBLISHER_MAX_ATTACHMENT_BYTES:-26214400}
-      PUBLISHER_HTTP_TIMEOUT_SECONDS: ${PUBLISHER_HTTP_TIMEOUT_SECONDS:-10}
-      PUBLISHER_POLL_INTERVAL_SECONDS: ${PUBLISHER_POLL_INTERVAL_SECONDS:-30}
-      PUBLISHER_HEARTBEAT_INTERVAL_SECONDS: ${PUBLISHER_HEARTBEAT_INTERVAL_SECONDS:-10}
-      WORKER_HEALTHCHECK_STALE_AFTER_SECONDS: ${WORKER_HEALTHCHECK_STALE_AFTER_SECONDS:-45}
-      PUBLISHER_RETRY_INITIAL_SECONDS: ${PUBLISHER_RETRY_INITIAL_SECONDS:-5}
-      PUBLISHER_RETRY_MAX_SECONDS: ${PUBLISHER_RETRY_MAX_SECONDS:-300}
-      PUBLISHER_SYSTEM_PROBE_INTERVAL_SECONDS: ${PUBLISHER_SYSTEM_PROBE_INTERVAL_SECONDS:-60}
-      REQUESTS_CA_BUNDLE: /etc/ssl/certs/gta-ca-bundle.pem
-      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
-    depends_on:
-      database-migrations:
-        condition: service_completed_successfully
     volumes:
-      - audio-data:/data/audios
-      - *ca-bundle
-      - *publisher-private-key
-      - *publisher-certificate
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
-    networks:
-      - database
-    restart: "on-failure:5"
+      - type: bind
+        source: ${PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH:?Set PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH}
+        target: /run/secrets/publisher-entra-private-key.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH:?Set PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH}
+        target: /run/secrets/publisher-entra-certificate.pem
+        read_only: true
+        bind:
+          create_host_path: false
 
   worker-retention:
-    <<: *application-runtime
-    build:
-      context: ../..
-      dockerfile: infra/docker/worker-retention/Dockerfile
     environment:
-      <<: [*database-environment, *glpi-environment]
-      AUDIO_ROOT: /data/audios
-      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
-      WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-10}
-      WORKER_HEALTHCHECK_STALE_AFTER_SECONDS: ${WORKER_HEALTHCHECK_STALE_AFTER_SECONDS:-45}
-      RETENTION_POLL_INTERVAL_SECONDS: ${RETENTION_POLL_INTERVAL_SECONDS:-60}
-      RETENTION_RETRY_INITIAL_SECONDS: ${RETENTION_RETRY_INITIAL_SECONDS:-5}
-      RETENTION_RETRY_MAX_SECONDS: ${RETENTION_RETRY_MAX_SECONDS:-300}
-      RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS: ${RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS:-60}
-      RETENTION_CHECK_INTERVAL_HOURS: ${RETENTION_CHECK_INTERVAL_HOURS:-6}
-    depends_on:
-      database-migrations:
-        condition: service_completed_successfully
-    volumes:
-      - audio-data:/data/audios
-      - *ca-bundle
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
-    networks:
-      - database
-    restart: "on-failure:5"
-
-networks:
-  database:
-    name: ${DATABASE_NETWORK_NAME:-gta-database-network}
-    external: true
-  dokploy-network:
-    name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
-    external: true
-
-volumes:
-  audio-data:
-    name: ${AUDIO_VOLUME_NAME:-gta-prod-audio-data}
+      GLPI_BASE_URL: ${GLPI_BASE_URL:?Set GLPI_BASE_URL}
+      GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+      GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+      GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+      GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+      GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
+      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem

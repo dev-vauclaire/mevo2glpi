@@ -13,7 +13,9 @@ from pydantic import SecretStr
 from glpi_ticketing_worker_publisher.graph.auth import (
     ENTRA_AUTHORITY_ROOT,
     GRAPH_DEFAULT_SCOPE,
+    SYNTHETIC_GRAPH_ACCESS_TOKEN,
     MsalCertificateTokenProvider,
+    SyntheticGraphTokenProvider,
 )
 from glpi_ticketing_worker_publisher.graph.contracts import GraphAuthenticationError
 from glpi_ticketing_worker_publisher.graph.models import GraphErrorCategory
@@ -47,6 +49,17 @@ class FakeMsalApplication:
 
     def remove_tokens_for_client(self) -> None:
         self.invalidations += 1
+
+
+def test_synthetic_provider_returns_the_known_non_secret_staging_token() -> None:
+    provider = SyntheticGraphTokenProvider()
+
+    token = provider.get_access_token()
+    provider.invalidate()
+
+    assert token.value.get_secret_value() == SYNTHETIC_GRAPH_ACCESS_TOKEN
+    assert token.expires_in_seconds is None
+    assert SYNTHETIC_GRAPH_ACCESS_TOKEN not in repr(token)
 
 
 def test_from_pem_configures_msal_with_separate_files_and_verbatim_passphrase(

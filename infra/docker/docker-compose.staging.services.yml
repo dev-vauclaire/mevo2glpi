@@ -1,0 +1,201 @@
+services:
+  worker-automation:
+    environment:
+      LEGACY_TRANSCRIPTION_BASE_URL: http://provider-simulator:8080
+      LEGACY_TRANSCRIPTION_API_KEY: ${PROVIDER_SIMULATOR_TRANSCRIPTION_API_KEY:?Set PROVIDER_SIMULATOR_TRANSCRIPTION_API_KEY}
+      GLPI_BASE_URL: http://glpi
+      GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+      GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+      GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+      GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+      GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
+    depends_on:
+      provider-simulator:
+        condition: service_healthy
+      glpi-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - staging-providers
+
+  worker-publisher:
+    environment:
+      PUBLISHER_GRAPH_AUTH_MODE: synthetic
+      PUBLISHER_GRAPH_BASE_URL: http://provider-simulator:8080/v1.0
+    depends_on:
+      provider-simulator:
+        condition: service_healthy
+    networks:
+      - staging-providers
+
+  worker-retention:
+    environment:
+      GLPI_BASE_URL: http://glpi
+      GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+      GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+      GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+      GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+      GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
+    depends_on:
+      glpi-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - staging-providers
+
+  provider-simulator:
+    build:
+      context: ../..
+      dockerfile: infra/docker/provider-simulator/Dockerfile
+    environment:
+      PROVIDER_SIMULATOR_HOST: 0.0.0.0
+      PROVIDER_SIMULATOR_PORT: "8080"
+      PROVIDER_SIMULATOR_MAILBOX_ID: ${PUBLISHER_MAILBOX_ID:?Set PUBLISHER_MAILBOX_ID}
+      PROVIDER_SIMULATOR_ADMIN_TOKEN: ${PROVIDER_SIMULATOR_ADMIN_TOKEN:?Set PROVIDER_SIMULATOR_ADMIN_TOKEN}
+      PROVIDER_SIMULATOR_TRANSCRIPTION_API_KEY: ${PROVIDER_SIMULATOR_TRANSCRIPTION_API_KEY:?Set PROVIDER_SIMULATOR_TRANSCRIPTION_API_KEY}
+    expose:
+      - "8080"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    init: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    networks:
+      - staging-providers
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  glpi-db:
+    image: mysql:8.4.11@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+    environment:
+      MYSQL_DATABASE: ${GLPI_DB_NAME:?Set GLPI_DB_NAME}
+      MYSQL_USER: ${GLPI_DB_USER:?Set GLPI_DB_USER}
+      MYSQL_PASSWORD: ${GLPI_DB_PASSWORD:?Set GLPI_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${GLPI_DB_ROOT_PASSWORD:?Set GLPI_DB_ROOT_PASSWORD}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping --host=127.0.0.1 --user=root --silent
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    volumes:
+      - glpi-database-data:/var/lib/mysql
+    networks:
+      - glpi-database
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  glpi:
+    image: ${COMPOSE_PROJECT_NAME:-gta-staging}-glpi:11.0.7
+    build:
+      context: ./glpi-staging
+      dockerfile: Dockerfile
+    depends_on:
+      glpi-db:
+        condition: service_healthy
+    environment:
+      GLPI_CRONTAB_ENABLED: "0"
+      GLPI_DB_HOST: glpi-db
+      GLPI_DB_PORT: "3306"
+      GLPI_DB_NAME: ${GLPI_DB_NAME:?Set GLPI_DB_NAME}
+      GLPI_DB_USER: ${GLPI_DB_USER:?Set GLPI_DB_USER}
+      GLPI_DB_PASSWORD: ${GLPI_DB_PASSWORD:?Set GLPI_DB_PASSWORD}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test -f /var/glpi/config/config_db.php &&
+          test "$$(cat /var/glpi/.gta-staging-bootstrap-ready 2>/dev/null)" = "11.0.7" &&
+          php -r '$$socket = @fsockopen("127.0.0.1", 80, $$errno, $$error, 2); exit($$socket === false ? 1 : 0);'
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    expose:
+      - "80"
+    volumes:
+      - glpi-data:/var/glpi
+    networks:
+      - glpi-database
+      - staging-providers
+      - dokploy-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  glpi-bootstrap:
+    image: ${COMPOSE_PROJECT_NAME:-gta-staging}-glpi:11.0.7
+    depends_on:
+      glpi:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        attempts=0
+        until test -f /var/glpi/config/config_db.php && php -r '$$socket = @fsockopen("glpi", 80, $$errno, $$error, 2); exit($$socket === false ? 1 : 0);'; do
+          attempts=$$((attempts + 1))
+          if test "$$attempts" -ge 90; then
+            echo "GLPI staging bootstrap readiness timeout" >&2
+            exit 1
+          fi
+          sleep 2
+        done
+        exec php /opt/glpi-staging/bootstrap_oauth.php
+    environment:
+      GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+      GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+      GLPI_ADMIN_USERNAME: ${GLPI_ADMIN_USERNAME:?Set GLPI_ADMIN_USERNAME}
+      GLPI_ADMIN_PASSWORD: ${GLPI_ADMIN_PASSWORD:?Set GLPI_ADMIN_PASSWORD}
+      GLPI_OAUTH_CLIENT_NAME: ${GLPI_OAUTH_CLIENT_NAME:?Set GLPI_OAUTH_CLIENT_NAME}
+      GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+      GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+    volumes:
+      - glpi-data:/var/glpi
+    networks:
+      - glpi-database
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  staging-providers:
+    internal: true
+  glpi-database:
+    internal: true
+
+volumes:
+  glpi-data:
+    name: ${GLPI_DATA_VOLUME_NAME:-gta-staging-glpi-data}
+  glpi-database-data:
+    name: ${GLPI_DATABASE_VOLUME_NAME:-gta-staging-glpi-database-data}

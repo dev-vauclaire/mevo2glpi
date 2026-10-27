@@ -14,6 +14,7 @@ import pytest
 from .conftest import (
     ALL_SERVICES,
     BASE_COMPOSE_FILE,
+    COMMON_COMPOSE_SERVICES_FILE,
     CUSTOM_SERVICES,
     DOCKER_ROOT,
     PRODUCTION_COMPOSE_SERVICES_FILE,
@@ -42,6 +43,10 @@ def _volume_for(service: dict[str, Any], target: str) -> dict[str, Any] | None:
 def test_production_manifest_contains_only_the_five_applications() -> None:
     assert BASE_COMPOSE_FILE == DOCKER_ROOT / "docker-compose.prod.yml"
     assert BASE_COMPOSE_FILE.is_file()
+    assert COMMON_COMPOSE_SERVICES_FILE == (
+        DOCKER_ROOT / "docker-compose.common.services.yml"
+    )
+    assert COMMON_COMPOSE_SERVICES_FILE.is_file()
     assert PRODUCTION_COMPOSE_SERVICES_FILE == (
         DOCKER_ROOT / "docker-compose.prod.services.yml"
     )
@@ -53,7 +58,8 @@ def test_production_entrypoint_explicitly_loads_dokploy_environment_file() -> No
     compose_source = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
 
     assert "include:" in compose_source
-    assert "path: ./infra/docker/docker-compose.prod.services.yml" in compose_source
+    assert "- ./infra/docker/docker-compose.common.services.yml" in compose_source
+    assert "- ./infra/docker/docker-compose.prod.services.yml" in compose_source
     assert "project_directory: ./infra/docker" in compose_source
     assert "env_file: ${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}" in compose_source
 
@@ -131,6 +137,7 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     compose_source = "\n".join(
         (
             BASE_COMPOSE_FILE.read_text(encoding="utf-8"),
+            COMMON_COMPOSE_SERVICES_FILE.read_text(encoding="utf-8"),
             PRODUCTION_COMPOSE_SERVICES_FILE.read_text(encoding="utf-8"),
         )
     )

@@ -19,6 +19,7 @@ LOGGER = logging.getLogger(__name__)
 
 GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default"
 ENTRA_AUTHORITY_ROOT = "https://login.microsoftonline.com"
+SYNTHETIC_GRAPH_ACCESS_TOKEN = "synthetic-token"
 
 
 class MsalConfidentialClientProtocol(Protocol):
@@ -38,6 +39,18 @@ class MsalConfidentialClientProtocol(Protocol):
 
 
 MsalApplicationFactory = Callable[..., MsalConfidentialClientProtocol]
+
+
+class SyntheticGraphTokenProvider:
+    """Provide the known non-secret bearer accepted by the staging simulator."""
+
+    def get_access_token(self) -> GraphAccessToken:
+        return GraphAccessToken(
+            value=SecretStr(SYNTHETIC_GRAPH_ACCESS_TOKEN),
+        )
+
+    def invalidate(self) -> None:
+        """Keep the immutable simulator token after an HTTP 401 response."""
 
 
 class MsalCertificateTokenProvider:

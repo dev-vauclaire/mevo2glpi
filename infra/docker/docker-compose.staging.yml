@@ -1,0 +1,21 @@
+name: ${COMPOSE_PROJECT_NAME:-gta-staging}
+
+# Dokploy discovers services from this entrypoint before resolving includes.
+# Only `web` and `glpi` should receive a domain in the Dokploy interface.
+services:
+  database-migrations: {}
+  web: {}
+  worker-automation: {}
+  worker-publisher: {}
+  worker-retention: {}
+  provider-simulator: {}
+  glpi-db: {}
+  glpi: {}
+  glpi-bootstrap: {}
+
+include:
+  - path:
+      - ./infra/docker/docker-compose.common.services.yml
+      - ./infra/docker/docker-compose.staging.services.yml
+    project_directory: ./infra/docker
+    env_file: ${GTA_DOKPLOY_ENV_FILE:-./infra/docker/.env}
