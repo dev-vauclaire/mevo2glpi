@@ -1,0 +1,76 @@
+name: CI providers
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .dockerignore
+      - .github/workflows/ci-providers.yml
+      - conftest.py
+      - infra/docker/providers/**
+      - providers/**
+      - pyproject.toml
+      - uv.lock
+  push:
+    branches:
+      - main
+    paths:
+      - .dockerignore
+      - .github/workflows/ci-providers.yml
+      - conftest.py
+      - infra/docker/providers/**
+      - providers/**
+      - pyproject.toml
+      - uv.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-providers-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+  UV_NO_PROGRESS: "1"
+
+jobs:
+  validate:
+    name: Qualité et tests des providers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Installer Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12.14"
+          check-latest: false
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.10.11"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
+
+      - name: Synchroniser le workspace verrouillé
+        run: uv sync --locked --all-packages --all-groups
+
+      - name: Vérifier le formatage des providers
+        run: uv run ruff format --check providers
+
+      - name: Exécuter l'analyse statique des providers
+        run: uv run ruff check providers
+
+      - name: Exécuter les tests des providers et du Compose
+        run: uv run pytest providers --maxfail=1

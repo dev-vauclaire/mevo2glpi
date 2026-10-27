@@ -31,24 +31,39 @@ bases, volumes, réseaux et secrets.
 
 ## Contrôles de CI-1
 
-Le workflow [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) est
-déclenché par une Pull Request vers `main`, un push sur `main` ou une demande
-manuelle. Il exécute uniquement des contrôles déterministes avec des données
+La CI est séparée en deux workflows, déclenchés par une Pull Request vers
+`main`, un push sur `main` ou une demande manuelle :
+
+- [`.github/workflows/ci-apps.yml`](../.github/workflows/ci-apps.yml) valide le
+  workspace applicatif lorsque `apps/`, `packages/`, ses tests ou son
+  infrastructure changent ;
+- [`.github/workflows/ci-providers.yml`](../.github/workflows/ci-providers.yml)
+  valide les packages et le Compose providers uniquement lorsque leur code,
+  leurs tests ou leur infrastructure changent.
+
+Le workspace uv et son unique `uv.lock` sont partagés par les deux périmètres.
+Une modification du manifeste ou du verrouillage déclenche donc les deux
+workflows. Une modification limitée au code ou au Compose providers ne lance
+que leur workflow ; `.dockerignore`, utilisé par toutes les images, déclenche
+également les deux. Un lancement manuel ignore les filtres de chemins et permet
+de rejouer chaque workflow indépendamment.
+
+Les contrôles restent déterministes et utilisent uniquement des données
 synthétiques :
 
 1. vérification du formatage Ruff ;
 2. analyse statique Ruff ;
-3. suite Pytest locale, incluant les contrats HTTP simulés et le faux serveur
-   Graph stateful ;
-4. migrations et intégrations PostgreSQL jetables ;
-5. rendu statique des manifestes Docker Compose production et staging avec
-   leurs configurations d'exemple.
+3. suites Pytest locales du périmètre concerné ;
+4. migrations et intégrations PostgreSQL jetables pour les applications ;
+5. rendu statique des manifestes Docker Compose concernés.
 
-Les suites `deployment`, `glpi`, `transcribe_ai` et `e2e`, qui construisent ou
-démarrent des stacks lourdes, ne font pas partie du contrôle automatique de
-chaque Pull Request. Elles restent des contrôles de recette manuels. Le staging
-déployé exerce Graph et Transcribe au moyen d'un simulateur interne et GLPI au
-moyen d'une instance 11.0.7 isolée.
+Les tests `deployment` qui construisent des images ou démarrent des conteneurs,
+ainsi que les suites `glpi`, `transcribe_ai` et `e2e`, ne font pas partie du
+contrôle automatique de chaque Pull Request. Ils restent des contrôles de
+recette manuels. Le contrat Compose statique des providers, également marqué
+`deployment`, reste en revanche exécuté par leur CI sans démarrer de conteneur.
+Le staging déployé exerce Graph et Transcribe au moyen de simulateurs internes
+et GLPI au moyen d'une instance 11.0.7 isolée.
 
 La CI ne réalise aucune des opérations suivantes :
 
@@ -65,7 +80,6 @@ Depuis la racine du dépôt, synchroniser l'environnement verrouillé :
 
 ```bash
 uv sync --locked --all-packages --all-groups
-uv sync --directory providers --locked --all-packages --all-groups
 ```
 
 Exécuter la qualité et la suite locale :
@@ -73,8 +87,8 @@ Exécuter la qualité et la suite locale :
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run --all-packages pytest -m "not database and not deployment and not glpi and not transcribe_ai and not e2e"
-uv run --directory providers --all-packages pytest
+uv run --all-packages pytest apps packages tests -m "not database and not deployment and not glpi and not transcribe_ai and not e2e"
+uv run pytest providers --maxfail=1
 ```
 
 Avec Docker disponible, exécuter les migrations et intégrations PostgreSQL :
@@ -89,7 +103,6 @@ Le manifeste Compose peut être rendu sans démarrer les services :
 docker compose --env-file ./infra/docker/.env.example --file infra/docker/docker-compose.prod.yml config --quiet
 docker compose --env-file ./infra/docker/staging.env.example --file infra/docker/docker-compose.staging.yml config --quiet
 docker compose --env-file ./infra/docker/providers/providers.env.example --file infra/docker/providers/docker-compose.providers.yml config --quiet
-uv run pytest tests/deployment/test_providers_compose.py
 ```
 
 Ces commandes n'autorisent pas l'utilisation d'un fichier d'environnement
@@ -104,11 +117,12 @@ déploiement sur les offres supérieures.
 
 En conséquence :
 
-- le workflow possède uniquement la permission `contents: read` ;
+- les deux workflows possèdent uniquement la permission `contents: read` ;
 - aucun secret GitHub Actions de staging ou de production n'est créé ;
 - les actions utilisées sont épinglées à une révision immuable ;
-- deux exécutions concurrentes de la même branche sont évitées et une ancienne
-  exécution peut être annulée au profit du commit le plus récent ;
+- deux exécutions concurrentes du même workflow et de la même branche sont
+  évitées ; une ancienne exécution peut être annulée au profit du commit le
+  plus récent ;
 - chaque job possède un délai maximal ;
 - la fusion reste une décision humaine après lecture des résultats ;
 - les secrets d'exécution resteront exclusivement dans chaque projet Dokploy.

@@ -1,19 +1,41 @@
-name: CI
+name: CI applications
 
 on:
   pull_request:
     branches:
       - main
+    paths:
+      - .dockerignore
+      - .github/workflows/ci-apps.yml
+      - apps/**
+      - conftest.py
+      - infra/docker/**
+      - "!infra/docker/providers/**"
+      - packages/**
+      - pyproject.toml
+      - tests/**
+      - uv.lock
   push:
     branches:
       - main
+    paths:
+      - .dockerignore
+      - .github/workflows/ci-apps.yml
+      - apps/**
+      - conftest.py
+      - infra/docker/**
+      - "!infra/docker/providers/**"
+      - packages/**
+      - pyproject.toml
+      - tests/**
+      - uv.lock
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-apps-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -23,7 +45,7 @@ env:
 
 jobs:
   validate:
-    name: Qualité, tests et migrations
+    name: Qualité, tests et migrations des applications
     runs-on: ubuntu-24.04
     timeout-minutes: 35
 
@@ -44,16 +66,11 @@ jobs:
         with:
           version: "0.10.11"
           enable-cache: true
-          cache-dependency-glob: |
-            uv.lock
-            providers/uv.lock
+          cache-dependency-glob: uv.lock
           prune-cache: true
 
       - name: Synchroniser le workspace verrouillé
         run: uv sync --locked --all-packages --all-groups
-
-      - name: Synchroniser le workspace providers verrouillé
-        run: uv sync --directory providers --locked --all-packages --all-groups
 
       - name: Vérifier le formatage
         run: uv run ruff format --check .
@@ -64,11 +81,15 @@ jobs:
       - name: Exécuter la suite locale déterministe
         run: >-
           uv run --all-packages pytest
+          apps packages tests
           -m "not database and not deployment and not glpi and not transcribe_ai and not e2e"
           --maxfail=1
 
-      - name: Exécuter les tests unitaires des providers
-        run: uv run --directory providers --all-packages pytest --maxfail=1
+      - name: Vérifier les manifests uv copiés dans les images
+        run: >-
+          uv run pytest
+          tests/deployment/test_compose.py::test_application_dockerfiles_copy_every_workspace_member_manifest
+          --maxfail=1
 
       - name: Valider le manifeste Docker Compose de production
         run: >-
@@ -83,16 +104,6 @@ jobs:
           --env-file ./infra/docker/staging.env.example
           --file infra/docker/docker-compose.staging.yml
           config --quiet
-
-      - name: Valider le manifeste Docker Compose des providers
-        run: >-
-          docker compose
-          --env-file ./infra/docker/providers/providers.env.example
-          --file infra/docker/providers/docker-compose.providers.yml
-          config --quiet
-
-      - name: Vérifier le contrat Docker Compose des providers
-        run: uv run pytest tests/deployment/test_providers_compose.py --maxfail=1
 
       - name: Valider PostgreSQL et les migrations
         run: >-
