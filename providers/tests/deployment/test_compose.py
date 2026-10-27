@@ -22,16 +22,8 @@ PROVIDERS_ENV_FILE = PROVIDERS_DOCKER_ROOT / "providers.env.example"
 PROVIDER_SERVICES = {
     "microsoft-graph-simulator",
     "transcribe-ai-simulator",
-    "glpi-db",
-    "glpi-staging",
-    "glpi-bootstrap",
 }
 DOCUMENTED_SECRET_NAMES = {
-    "GLPI_ADMIN_PASSWORD",
-    "GLPI_CLIENT_SECRET",
-    "GLPI_DB_PASSWORD",
-    "GLPI_DB_ROOT_PASSWORD",
-    "GLPI_PASSWORD",
     "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN",
     "TRANSCRIBE_AI_SIMULATOR_API_KEY",
 }
@@ -95,19 +87,20 @@ def _services(config: dict[str, object]) -> dict[str, dict[str, Any]]:
 def test_providers_environment_documents_every_interpolated_variable() -> None:
     compose_source = PROVIDERS_COMPOSE_FILE.read_text(encoding="utf-8")
     example_source = PROVIDERS_ENV_FILE.read_text(encoding="utf-8")
-    interpolated_names = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose_source))
+    active_compose_source = "\n".join(
+        line
+        for line in compose_source.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    interpolated_names = set(
+        re.findall(r"\$\{([A-Z][A-Z0-9_]*)", active_compose_source)
+    )
     documented_values = _example_environment()
 
     assert set(documented_values) == interpolated_names
     assert documented_values["COMPOSE_PROJECT_NAME"] == "gta-staging-providers"
     assert documented_values["PROVIDERS_NETWORK_NAME"] == (
         "gta-staging-providers-network"
-    )
-    assert documented_values["GLPI_DATA_VOLUME_NAME"].startswith(
-        "gta-staging-providers-"
-    )
-    assert documented_values["GLPI_DATABASE_VOLUME_NAME"].startswith(
-        "gta-staging-providers-"
     )
     assert {
         name: documented_values[name] for name in DOCUMENTED_SECRET_NAMES
@@ -118,7 +111,7 @@ def test_providers_environment_documents_every_interpolated_variable() -> None:
     )
 
 
-def test_providers_manifest_contains_only_the_five_expected_services(
+def test_providers_manifest_contains_only_the_two_active_simulators(
     providers_compose_config: dict[str, object],
 ) -> None:
     assert providers_compose_config["name"] == "gta-staging-providers"
@@ -145,36 +138,20 @@ def test_simulators_are_isolated_and_have_stable_network_aliases(
         assert service["networks"]["providers"]["aliases"] == [alias]
 
 
-def test_glpi_networks_keep_mysql_private_and_traefik_separate(
+def test_providers_manifest_uses_only_the_shared_provider_network(
     providers_compose_config: dict[str, object],
 ) -> None:
-    services = _services(providers_compose_config)
-
     assert providers_compose_config["networks"]["providers"] == {
         "name": "gta-staging-providers-network",
         "ipam": {},
         "external": True,
     }
-    assert providers_compose_config["networks"]["glpi-database"]["internal"] is True
-    assert providers_compose_config["networks"]["dokploy-network"]["external"] is True
-    assert set(services["glpi-db"]["networks"]) == {"glpi-database"}
-    assert set(services["glpi-bootstrap"]["networks"]) == {"glpi-database"}
-    assert set(services["glpi-staging"]["networks"]) == {
-        "glpi-database",
-        "providers",
-        "dokploy-network",
-    }
-    assert services["glpi-staging"]["networks"]["providers"]["aliases"] == [
-        "gta-staging-glpi"
-    ]
-    assert services["glpi-staging"]["expose"] == ["80"]
-    assert "ports" not in services["glpi-staging"]
+    assert set(providers_compose_config["networks"]) == {"providers"}
+    assert providers_compose_config.get("volumes", {}) == {}
 
 
-def test_glpi_images_bootstrap_and_fresh_volumes_are_explicit(
-    providers_compose_config: dict[str, object],
-) -> None:
-    services = _services(providers_compose_config)
+def test_optional_glpi_simulation_remains_versioned_but_disabled() -> None:
+    compose_source = PROVIDERS_COMPOSE_FILE.read_text(encoding="utf-8")
     dockerfile = (PROVIDERS_DOCKER_ROOT / "glpi-staging" / "Dockerfile").read_text(
         encoding="utf-8"
     )
@@ -186,27 +163,22 @@ def test_glpi_images_bootstrap_and_fresh_volumes_are_explicit(
         "glpi/glpi:11.0.7@sha256:"
         "7e100562afe13cce132fe46c0a21ddb94f7ed2c06950da9c4b34ce734a1ad4ac"
     ) in dockerfile
-    assert services["glpi-db"]["image"].startswith("mysql:8.4.11@sha256:")
-    assert services["glpi-staging"]["image"] == "gta-staging-providers-glpi:11.0.7"
-    assert services["glpi-bootstrap"]["image"] == services["glpi-staging"]["image"]
-    assert services["glpi-staging"]["depends_on"]["glpi-db"]["condition"] == (
-        "service_healthy"
-    )
-    assert (
-        services["glpi-bootstrap"]["depends_on"]["glpi-staging"]["condition"]
-        == "service_started"
-    )
-    assert services["glpi-bootstrap"]["restart"] == "no"
+    for disabled_resource in (
+        "glpi-db",
+        "glpi-staging",
+        "glpi-bootstrap",
+        "glpi-database",
+        "dokploy-network",
+        "glpi-data",
+        "glpi-database-data",
+    ):
+        assert re.search(
+            rf"(?m)^\s*#\s+{re.escape(disabled_resource)}:", compose_source
+        )
     assert "INSERT " not in bootstrap
     assert "UPDATE " not in bootstrap
     assert "DELETE " not in bootstrap
     assert "str_contains(strtoupper($value), 'CHANGE_ME')" in bootstrap
-    mysql_healthcheck = " ".join(services["glpi-db"]["healthcheck"]["test"])
-    assert "CHANGE_ME" in mysql_healthcheck
-    assert providers_compose_config["volumes"] == {
-        "glpi-data": {"name": "gta-staging-providers-glpi-data"},
-        "glpi-database-data": {"name": "gta-staging-providers-glpi-database-data"},
-    }
 
 
 def test_simulator_build_context_contains_only_required_workspace_sources() -> None:

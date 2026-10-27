@@ -53,142 +53,145 @@ services:
         aliases:
           - gta-staging-transcribe-ai
 
-  glpi-db:
-    image: mysql:8.4.11@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
-    environment:
-      MYSQL_DATABASE: ${GLPI_DB_NAME:?Set GLPI_DB_NAME}
-      MYSQL_USER: ${GLPI_DB_USER:?Set GLPI_DB_USER}
-      MYSQL_PASSWORD: ${GLPI_DB_PASSWORD:?Set GLPI_DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${GLPI_DB_ROOT_PASSWORD:?Set GLPI_DB_ROOT_PASSWORD}
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          case "$$MYSQL_ROOT_PASSWORD:$$MYSQL_PASSWORD" in
-            *CHANGE_ME*) exit 1 ;;
-          esac;
-          MYSQL_PWD=$$MYSQL_ROOT_PASSWORD
-          mysqladmin ping --host=127.0.0.1 --user=root --silent
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 15s
-    volumes:
-      - glpi-database-data:/var/lib/mysql
-    networks:
-      - glpi-database
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "3"
+  # Simulation GLPI optionnelle, désactivée au profit du GLPI de test externe.
+  # Pour la réactiver, décommenter ces trois services, leurs réseaux et volumes,
+  # puis les variables GLPI de providers.env.example.
+  # glpi-db:
+  #   image: mysql:8.4.11@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+  #   environment:
+  #     MYSQL_DATABASE: ${GLPI_DB_NAME:?Set GLPI_DB_NAME}
+  #     MYSQL_USER: ${GLPI_DB_USER:?Set GLPI_DB_USER}
+  #     MYSQL_PASSWORD: ${GLPI_DB_PASSWORD:?Set GLPI_DB_PASSWORD}
+  #     MYSQL_ROOT_PASSWORD: ${GLPI_DB_ROOT_PASSWORD:?Set GLPI_DB_ROOT_PASSWORD}
+  #   healthcheck:
+  #     test:
+  #       - CMD-SHELL
+  #       - >-
+  #         case "$$MYSQL_ROOT_PASSWORD:$$MYSQL_PASSWORD" in
+  #           *CHANGE_ME*) exit 1 ;;
+  #         esac;
+  #         MYSQL_PWD=$$MYSQL_ROOT_PASSWORD
+  #         mysqladmin ping --host=127.0.0.1 --user=root --silent
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 30
+  #     start_period: 15s
+  #   volumes:
+  #     - glpi-database-data:/var/lib/mysql
+  #   networks:
+  #     - glpi-database
+  #   restart: unless-stopped
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: 10m
+  #       max-file: "3"
 
-  glpi-staging:
-    image: ${COMPOSE_PROJECT_NAME:-gta-staging-providers}-glpi:11.0.7
-    build:
-      context: ./glpi-staging
-      dockerfile: Dockerfile
-    depends_on:
-      glpi-db:
-        condition: service_healthy
-    environment:
-      GLPI_CRONTAB_ENABLED: "0"
-      GLPI_DB_HOST: glpi-db
-      GLPI_DB_PORT: "3306"
-      GLPI_DB_NAME: ${GLPI_DB_NAME:?Set GLPI_DB_NAME}
-      GLPI_DB_USER: ${GLPI_DB_USER:?Set GLPI_DB_USER}
-      GLPI_DB_PASSWORD: ${GLPI_DB_PASSWORD:?Set GLPI_DB_PASSWORD}
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          test -f /var/glpi/config/config_db.php &&
-          test "$$(cat /var/glpi/.gta-staging-bootstrap-ready 2>/dev/null)" = "11.0.7" &&
-          php -r '$$socket = @fsockopen("127.0.0.1", 80, $$errno, $$error, 2); exit($$socket === false ? 1 : 0);'
-      interval: 5s
-      timeout: 5s
-      retries: 60
-      start_period: 20s
-    expose:
-      - "80"
-    volumes:
-      - glpi-data:/var/glpi
-    networks:
-      glpi-database: {}
-      providers:
-        aliases:
-          - gta-staging-glpi
-      dokploy-network: {}
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "3"
+  # glpi-staging:
+  #   image: ${COMPOSE_PROJECT_NAME:-gta-staging-providers}-glpi:11.0.7
+  #   build:
+  #     context: ./glpi-staging
+  #     dockerfile: Dockerfile
+  #   depends_on:
+  #     glpi-db:
+  #       condition: service_healthy
+  #   environment:
+  #     GLPI_CRONTAB_ENABLED: "0"
+  #     GLPI_DB_HOST: glpi-db
+  #     GLPI_DB_PORT: "3306"
+  #     GLPI_DB_NAME: ${GLPI_DB_NAME:?Set GLPI_DB_NAME}
+  #     GLPI_DB_USER: ${GLPI_DB_USER:?Set GLPI_DB_USER}
+  #     GLPI_DB_PASSWORD: ${GLPI_DB_PASSWORD:?Set GLPI_DB_PASSWORD}
+  #   healthcheck:
+  #     test:
+  #       - CMD-SHELL
+  #       - >-
+  #         test -f /var/glpi/config/config_db.php &&
+  #         test "$$(cat /var/glpi/.gta-staging-bootstrap-ready 2>/dev/null)" = "11.0.7" &&
+  #         php -r '$$socket = @fsockopen("127.0.0.1", 80, $$errno, $$error, 2); exit($$socket === false ? 1 : 0);'
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 60
+  #     start_period: 20s
+  #   expose:
+  #     - "80"
+  #   volumes:
+  #     - glpi-data:/var/glpi
+  #   networks:
+  #     glpi-database: {}
+  #     providers:
+  #       aliases:
+  #         - gta-staging-glpi
+  #     dokploy-network: {}
+  #   restart: unless-stopped
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: 10m
+  #       max-file: "3"
 
-  glpi-bootstrap:
-    image: ${COMPOSE_PROJECT_NAME:-gta-staging-providers}-glpi:11.0.7
-    depends_on:
-      glpi-staging:
-        condition: service_started
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        attempts=0
-        until test -f /var/glpi/config/config_db.php && php -r '$$socket = @fsockopen("glpi-staging", 80, $$errno, $$error, 2); exit($$socket === false ? 1 : 0);'; do
-          attempts=$$((attempts + 1))
-          if test "$$attempts" -ge 90; then
-            echo "GLPI staging bootstrap readiness timeout" >&2
-            exit 1
-          fi
-          sleep 2
-        done
-        exec php /opt/glpi-staging/bootstrap_oauth.php
-    environment:
-      GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
-      GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
-      GLPI_ADMIN_USERNAME: ${GLPI_ADMIN_USERNAME:?Set GLPI_ADMIN_USERNAME}
-      GLPI_ADMIN_PASSWORD: ${GLPI_ADMIN_PASSWORD:?Set GLPI_ADMIN_PASSWORD}
-      GLPI_OAUTH_CLIENT_NAME: ${GLPI_OAUTH_CLIENT_NAME:?Set GLPI_OAUTH_CLIENT_NAME}
-      GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
-      GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
-    volumes:
-      - glpi-data:/var/glpi
-    networks:
-      - glpi-database
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 64
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
-    restart: "no"
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "3"
+  # glpi-bootstrap:
+  #   image: ${COMPOSE_PROJECT_NAME:-gta-staging-providers}-glpi:11.0.7
+  #   depends_on:
+  #     glpi-staging:
+  #       condition: service_started
+  #   entrypoint:
+  #     - /bin/sh
+  #     - -ec
+  #     - |
+  #       attempts=0
+  #       until test -f /var/glpi/config/config_db.php && php -r '$$socket = @fsockopen("glpi-staging", 80, $$errno, $$error, 2); exit($$socket === false ? 1 : 0);'; do
+  #         attempts=$$((attempts + 1))
+  #         if test "$$attempts" -ge 90; then
+  #           echo "GLPI staging bootstrap readiness timeout" >&2
+  #           exit 1
+  #         fi
+  #         sleep 2
+  #       done
+  #       exec php /opt/glpi-staging/bootstrap_oauth.php
+  #   environment:
+  #     GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+  #     GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+  #     GLPI_ADMIN_USERNAME: ${GLPI_ADMIN_USERNAME:?Set GLPI_ADMIN_USERNAME}
+  #     GLPI_ADMIN_PASSWORD: ${GLPI_ADMIN_PASSWORD:?Set GLPI_ADMIN_PASSWORD}
+  #     GLPI_OAUTH_CLIENT_NAME: ${GLPI_OAUTH_CLIENT_NAME:?Set GLPI_OAUTH_CLIENT_NAME}
+  #     GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+  #     GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+  #   volumes:
+  #     - glpi-data:/var/glpi
+  #   networks:
+  #     - glpi-database
+  #   read_only: true
+  #   cap_drop:
+  #     - ALL
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   pids_limit: 64
+  #   tmpfs:
+  #     - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+  #   restart: "no"
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: 10m
+  #       max-file: "3"
 
 networks:
   providers:
     name: ${PROVIDERS_NETWORK_NAME:-gta-staging-providers-network}
     external: true
-  glpi-database:
-    internal: true
-  dokploy-network:
-    name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
-    external: true
+  # glpi-database:
+  #   internal: true
+  # dokploy-network:
+  #   name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
+  #   external: true
 
-volumes:
-  glpi-data:
-    name: ${GLPI_DATA_VOLUME_NAME:-gta-staging-providers-glpi-data}
-  glpi-database-data:
-    name: ${GLPI_DATABASE_VOLUME_NAME:-gta-staging-providers-glpi-database-data}
+# volumes:
+#   glpi-data:
+#     name: ${GLPI_DATA_VOLUME_NAME:-gta-staging-providers-glpi-data}
+#   glpi-database-data:
+#     name: ${GLPI_DATABASE_VOLUME_NAME:-gta-staging-providers-glpi-database-data}
