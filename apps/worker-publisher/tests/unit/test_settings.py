@@ -146,14 +146,14 @@ def test_synthetic_graph_mode_requires_no_entra_credentials(
     monkeypatch.setenv("PUBLISHER_GRAPH_AUTH_MODE", "synthetic")
     monkeypatch.setenv(
         "PUBLISHER_GRAPH_BASE_URL",
-        "http://provider-simulator:8080/v1.0",
+        "http://gta-staging-microsoft-graph:8080/v1.0",
     )
 
     settings = PublisherSettings()
 
     assert settings.publisher_graph_auth_mode is PublisherGraphAuthMode.SYNTHETIC
     assert str(settings.publisher_graph_base_url).rstrip("/") == (
-        "http://provider-simulator:8080/v1.0"
+        "http://gta-staging-microsoft-graph:8080/v1.0"
     )
     assert settings.publisher_entra_tenant_id is None
     assert settings.publisher_entra_client_id is None
@@ -169,7 +169,7 @@ def test_synthetic_graph_mode_rejects_entra_settings_without_reading_pem_files(
     monkeypatch.setenv("PUBLISHER_GRAPH_AUTH_MODE", "synthetic")
     monkeypatch.setenv(
         "PUBLISHER_GRAPH_BASE_URL",
-        "http://provider-simulator:8080/v1.0",
+        "http://gta-staging-microsoft-graph:8080/v1.0",
     )
     monkeypatch.setenv(
         "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH",

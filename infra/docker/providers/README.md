@@ -14,7 +14,8 @@ production.
 
 La simulation GLPI 11.0.7 reste versionnée mais désactivée. Pour l'utiliser,
 décommenter `glpi-db`, `glpi-staging`, `glpi-bootstrap`, leurs réseaux et
-volumes, puis les variables GLPI de `providers.env.example`.
+volumes, puis les variables GLPI de `providers.env.example`. Cette solution de
+repli est manuelle et n'est pas validée par le Compose actif.
 
 ## Réseaux et volumes
 

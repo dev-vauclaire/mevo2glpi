@@ -62,8 +62,8 @@ ainsi que les suites `glpi`, `transcribe_ai` et `e2e`, ne font pas partie du
 contrôle automatique de chaque Pull Request. Ils restent des contrôles de
 recette manuels. Le contrat Compose statique des providers, également marqué
 `deployment`, reste en revanche exécuté par leur CI sans démarrer de conteneur.
-Le staging déployé exerce Graph et Transcribe au moyen de simulateurs internes
-et GLPI au moyen d'une instance 11.0.7 isolée.
+Le staging déployé exerce Graph et Transcribe au moyen de deux simulateurs
+séparés et utilise une instance GLPI de test externe en HTTPS.
 
 La CI ne réalise aucune des opérations suivantes :
 
@@ -159,9 +159,9 @@ Avant la fusion :
 ## Promotion vers staging et production
 
 Le staging Dokploy suit `main` avec l'auto-déploiement activé. Il possède des
-ressources isolées, un GLPI 11.0.7 et un simulateur Graph/Transcribe. Il ne
-reçoit aucun identifiant ou certificat de production. Sa procédure complète
-est décrite dans [staging.md](staging.md).
+ressources isolées, deux simulateurs de providers et des identifiants dédiés au
+GLPI de test externe. Il ne reçoit aucun identifiant ou certificat de
+production. Sa procédure complète est décrite dans [staging.md](staging.md).
 
 Après une recette staging réussie :
 

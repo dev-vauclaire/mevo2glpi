@@ -1,4 +1,4 @@
-"""Validate the isolated Dokploy staging contract without real providers."""
+"""Validate the Dokploy staging contract with external provider services."""
 
 from __future__ import annotations
 
@@ -22,17 +22,6 @@ STAGING_SERVICES = {
     "worker-automation",
     "worker-publisher",
     "worker-retention",
-    "provider-simulator",
-    "glpi-db",
-    "glpi",
-    "glpi-bootstrap",
-}
-COMMON_APPLICATION_SERVICES = {
-    "database-migrations",
-    "web",
-    "worker-automation",
-    "worker-publisher",
-    "worker-retention",
 }
 
 
@@ -49,19 +38,25 @@ def _volume_for(service: dict[str, Any], target: str) -> dict[str, Any] | None:
     return None
 
 
-def test_staging_entrypoint_exposes_every_service_to_dokploy() -> None:
+def test_staging_entrypoint_exposes_only_the_five_applications() -> None:
     source = STAGING_COMPOSE_FILE.read_text(encoding="utf-8")
 
     assert "include:" not in source
-    for service_name in COMMON_APPLICATION_SERVICES:
+    for service_name in STAGING_SERVICES:
         declaration = f"""  {service_name}:
     extends:
       file: ./docker-compose.common.services.yml
       service: {service_name}
 """
         assert declaration in source
-    for service_name in STAGING_SERVICES - COMMON_APPLICATION_SERVICES:
-        assert f"  {service_name}:\n" in source
+
+    for removed_service in (
+        "provider-simulator",
+        "glpi-db",
+        "glpi",
+        "glpi-bootstrap",
+    ):
+        assert f"  {removed_service}:\n" not in source
 
 
 def test_staging_environment_documents_every_interpolated_variable() -> None:
@@ -82,15 +77,23 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     assert documented_values["COMPOSE_PROJECT_NAME"] == "gta-staging"
     assert documented_values["AUDIO_VOLUME_NAME"].startswith("gta-staging-")
     assert documented_values["DATABASE_NETWORK_NAME"].startswith("gta-staging-")
+    assert documented_values["PROVIDERS_NETWORK_NAME"] == (
+        "gta-staging-providers-network"
+    )
+    assert documented_values["GLPI_BASE_URL"].startswith("https://")
     assert "PUBLISHER_ENTRA_CLIENT_ID" not in documented_values
     assert "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH" not in documented_values
+    assert not any(name.startswith("PROVIDER_SIMULATOR_") for name in documented_values)
+    assert not any(name.startswith("GLPI_DB_") for name in documented_values)
+    assert "GLPI_ADMIN_USERNAME" not in documented_values
+    assert "GLPI_OAUTH_CLIENT_NAME" not in documented_values
     assert not re.search(
         r"(?i)(?:api[_-]?key|secret|password)=[0-9a-f]{32,}",
         example_source,
     )
 
 
-def test_staging_manifest_isolates_services_networks_and_volumes(
+def test_staging_manifest_uses_external_database_and_provider_networks(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:
     config = render_staging_compose()
@@ -102,62 +105,86 @@ def test_staging_manifest_isolates_services_networks_and_volumes(
     assert config["networks"]["database"]["external"] is True
     assert config["networks"]["dokploy-network"]["name"] == "dokploy-network"
     assert config["networks"]["dokploy-network"]["external"] is True
-    assert config["networks"]["staging-providers"]["internal"] is True
-    assert config["networks"]["glpi-database"]["internal"] is True
-    assert config["volumes"] == {
-        "audio-data": {"name": "gta-staging-audio-data"},
-        "glpi-data": {"name": "gta-staging-glpi-data"},
-        "glpi-database-data": {"name": "gta-staging-glpi-database-data"},
-    }
-
-    assert set(services["web"]["networks"]) == {"database", "dokploy-network"}
-    assert set(services["glpi"]["networks"]) == {
+    assert config["networks"]["providers"]["name"] == ("gta-staging-providers-network")
+    assert config["networks"]["providers"]["external"] is True
+    assert set(config["networks"]) == {
+        "database",
         "dokploy-network",
-        "glpi-database",
-        "staging-providers",
+        "providers",
     }
-    assert set(services["provider-simulator"]["networks"]) == {"staging-providers"}
-    assert set(services["glpi-db"]["networks"]) == {"glpi-database"}
+    assert config["volumes"] == {"audio-data": {"name": "gta-staging-audio-data"}}
+
+    assert set(services["database-migrations"]["networks"]) == {"database"}
+    assert set(services["web"]["networks"]) == {"database", "dokploy-network"}
+    assert set(services["worker-automation"]["networks"]) == {
+        "database",
+        "providers",
+    }
+    assert set(services["worker-publisher"]["networks"]) == {
+        "database",
+        "providers",
+    }
+    assert set(services["worker-retention"]["networks"]) == {"database"}
 
 
-def test_staging_simulators_and_glpi_have_no_direct_host_port(
+def test_staging_uses_the_separated_provider_simulators(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:
     services = _services(render_staging_compose())
+    publisher_environment = services["worker-publisher"]["environment"]
+    automation_environment = services["worker-automation"]["environment"]
 
-    for service_name in ("provider-simulator", "glpi", "glpi-db"):
-        assert "ports" not in services[service_name]
-    assert services["provider-simulator"]["expose"] == ["8080"]
-    assert services["glpi"]["expose"] == ["80"]
-    assert "dokploy-network" not in services["provider-simulator"]["networks"]
-    assert "dokploy-network" in services["glpi"]["networks"]
-
-
-def test_staging_publisher_cannot_receive_entra_material(
-    render_staging_compose: Callable[[], dict[str, object]],
-) -> None:
-    services = _services(render_staging_compose())
-    publisher = services["worker-publisher"]
-    environment = publisher["environment"]
-
-    assert environment["PUBLISHER_GRAPH_AUTH_MODE"] == "synthetic"
-    assert environment["PUBLISHER_GRAPH_BASE_URL"] == (
-        "http://provider-simulator:8080/v1.0"
+    assert publisher_environment["PUBLISHER_GRAPH_AUTH_MODE"] == "synthetic"
+    assert publisher_environment["PUBLISHER_GRAPH_BASE_URL"] == (
+        "http://gta-staging-microsoft-graph:8080/v1.0"
     )
-    assert not any(name.startswith("PUBLISHER_ENTRA_") for name in environment)
+    assert automation_environment["LEGACY_TRANSCRIPTION_BASE_URL"] == (
+        "http://gta-staging-transcribe-ai:8080"
+    )
+    assert "LEGACY_TRANSCRIPTION_API_KEY" in automation_environment
+    assert not any(
+        name.startswith("PUBLISHER_ENTRA_") for name in publisher_environment
+    )
     assert (
         _volume_for(
-            publisher,
+            services["worker-publisher"],
             "/run/secrets/publisher-entra-private-key.pem",
         )
         is None
     )
     assert (
         _volume_for(
-            publisher,
+            services["worker-publisher"],
             "/run/secrets/publisher-entra-certificate.pem",
         )
         is None
+    )
+
+
+def test_staging_glpi_is_external_https_and_uses_the_ca_bundle(
+    render_staging_compose: Callable[[], dict[str, object]],
+) -> None:
+    services = _services(render_staging_compose())
+    ca_target = "/etc/ssl/certs/gta-ca-bundle.pem"
+    automation = services["worker-automation"]
+    retention = services["worker-retention"]
+
+    for worker in (automation, retention):
+        environment = worker["environment"]
+        assert environment["GLPI_BASE_URL"].startswith("https://")
+        assert environment["SSL_CERT_FILE"] == ca_target
+        assert _volume_for(worker, ca_target) is not None
+        for credential_name in (
+            "GLPI_USERNAME",
+            "GLPI_PASSWORD",
+            "GLPI_CLIENT_ID",
+            "GLPI_CLIENT_SECRET",
+        ):
+            assert credential_name in environment
+
+    assert (
+        automation["environment"]["GLPI_BASE_URL"]
+        == (retention["environment"]["GLPI_BASE_URL"])
     )
 
 
@@ -165,82 +192,34 @@ def test_staging_credentials_follow_least_privilege(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:
     services = _services(render_staging_compose())
-    simulator_environment = services["provider-simulator"]["environment"]
     publisher_environment = services["worker-publisher"]["environment"]
     automation_environment = services["worker-automation"]["environment"]
+    retention_environment = services["worker-retention"]["environment"]
     web_environment = services["web"]["environment"]
 
-    assert "PROVIDER_SIMULATOR_ADMIN_TOKEN" in simulator_environment
-    assert "PROVIDER_SIMULATOR_ADMIN_TOKEN" not in publisher_environment
-    assert "PROVIDER_SIMULATOR_ADMIN_TOKEN" not in automation_environment
-    assert "PROVIDER_SIMULATOR_TRANSCRIPTION_API_KEY" not in web_environment
-    assert "GLPI_DB_ROOT_PASSWORD" not in automation_environment
-    assert "GLPI_DB_PASSWORD" not in automation_environment
+    assert "TRANSCRIBE_AI_SIMULATOR_API_KEY" not in publisher_environment
+    assert "LEGACY_TRANSCRIPTION_API_KEY" not in publisher_environment
+    assert not any(name.startswith("GLPI_") for name in publisher_environment)
+    assert "LEGACY_TRANSCRIPTION_API_KEY" not in retention_environment
+    assert "LEGACY_TRANSCRIPTION_API_KEY" in automation_environment
     assert not any(name.startswith("GLPI_") for name in web_environment)
+    assert "LEGACY_TRANSCRIPTION_API_KEY" not in web_environment
 
 
-def test_staging_glpi_is_pinned_bootstrapped_and_persistent(
+def test_staging_workers_depend_only_on_database_migrations(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:
     services = _services(render_staging_compose())
-    glpi = services["glpi"]
-    bootstrap = services["glpi-bootstrap"]
-    dockerfile = (DOCKER_ROOT / "glpi-staging" / "Dockerfile").read_text(
-        encoding="utf-8"
-    )
-    bootstrap_source = (DOCKER_ROOT / "glpi-staging" / "bootstrap_oauth.php").read_text(
-        encoding="utf-8"
-    )
 
-    assert (
-        "glpi/glpi:11.0.7@sha256:"
-        "7e100562afe13cce132fe46c0a21ddb94f7ed2c06950da9c4b34ce734a1ad4ac"
-    ) in dockerfile
-    assert ":latest" not in dockerfile.lower()
-    assert glpi["image"] == "gta-staging-glpi:11.0.7"
-    assert bootstrap["image"] == glpi["image"]
-    assert _volume_for(glpi, "/var/glpi")["source"] == "glpi-data"
-    assert _volume_for(bootstrap, "/var/glpi")["source"] == "glpi-data"
-    assert bootstrap["restart"] == "no"
-    assert bootstrap["depends_on"]["glpi"]["condition"] == "service_started"
-    assert ".gta-staging-bootstrap-ready" in glpi["healthcheck"]["test"][1]
-    assert "readiness timeout" in bootstrap["entrypoint"][2]
-    assert "INSERT " not in bootstrap_source
-    assert "UPDATE " not in bootstrap_source
-    assert "DELETE " not in bootstrap_source
-    assert "GLPI_CLIENT_SECRET" not in dockerfile
-
-
-def test_provider_simulator_is_included_in_the_restricted_build_context() -> None:
-    dockerignore = (DOCKER_ROOT.parent.parent / ".dockerignore").read_text(
-        encoding="utf-8"
-    )
-
-    for required_path in (
-        "!apps/provider-simulator/",
-        "!apps/provider-simulator/pyproject.toml",
-        "!apps/provider-simulator/src/",
-        "!apps/provider-simulator/src/**",
+    for service_name in (
+        "web",
+        "worker-automation",
+        "worker-publisher",
+        "worker-retention",
     ):
-        assert required_path in dockerignore
-
-
-def test_staging_dependencies_gate_workers_on_required_bootstraps(
-    render_staging_compose: Callable[[], dict[str, object]],
-) -> None:
-    services = _services(render_staging_compose())
-
-    assert set(services["worker-automation"]["depends_on"]) == {
-        "database-migrations",
-        "provider-simulator",
-        "glpi-bootstrap",
-    }
-    assert set(services["worker-publisher"]["depends_on"]) == {
-        "database-migrations",
-        "provider-simulator",
-    }
-    assert set(services["worker-retention"]["depends_on"]) == {
-        "database-migrations",
-        "glpi-bootstrap",
-    }
-    assert services["glpi"]["depends_on"]["glpi-db"]["condition"] == ("service_healthy")
+        assert services[service_name]["depends_on"] == {
+            "database-migrations": {
+                "condition": "service_completed_successfully",
+                "required": True,
+            }
+        }

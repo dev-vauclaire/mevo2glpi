@@ -9,10 +9,6 @@
 !apps/database-migrations/pyproject.toml
 !apps/database-migrations/src/
 !apps/database-migrations/src/**
-!apps/provider-simulator/
-!apps/provider-simulator/pyproject.toml
-!apps/provider-simulator/src/
-!apps/provider-simulator/src/**
 !apps/web/
 !apps/web/pyproject.toml
 !apps/web/src/

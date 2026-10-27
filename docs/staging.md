@@ -1,181 +1,126 @@
 # Environnement staging Dokploy
 
-> **Jalon providers en cours.** La stack autonome des fournisseurs de recette
-> est décrite dans
-> [`infra/docker/providers/README.md`](../infra/docker/providers/README.md).
-> Pendant sa validation, déployer uniquement
-> `infra/docker/providers/docker-compose.providers.yml` depuis la branche
-> `feat/staging-providers`. La stack applicative décrite ci-dessous reste le
-> contrat historique et ne doit pas être redéployée avant son raccordement au
-> réseau providers lors du jalon suivant.
-
-Le staging valide le pipeline complet sans lire la boîte Exchange de
-production et sans consommer le GPU Transcribe AI. Il suit automatiquement la
-branche `main`, alors que le déploiement de production reste manuel.
+Le staging valide le pipeline avec des données synthétiques. Microsoft Graph
+et Transcribe AI sont simulés dans un projet Dokploy séparé ; GLPI est une
+instance de test externe accessible en HTTPS. Aucun service de production ni
+aucune donnée réelle ne doit être utilisé.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Operator[Opérateur] -->|CLI interne| Simulator[Provider simulator]
-    Simulator -->|HTTP Graph synthétique| Publisher[Worker publisher]
+    Operator[Opérateur] -->|CLI interne| Graph[Microsoft Graph simulator]
+    Graph -->|HTTP synthétique| Publisher[Worker publisher]
     Publisher -->|SQL| PostgreSQL[(PostgreSQL staging)]
-    Publisher -->|Fichier audio| Audio[(Volume audio staging)]
-    Automation[Worker automation] -->|Lit l'audio| Audio
-    Automation -->|HTTP Transcribe synthétique| Simulator
-    Automation -->|HTTP API V2.3.0| GLPI[GLPI 11.0.7 staging]
-    Retention[Worker retention] -->|HTTP API V2.3.0| GLPI
+    Publisher -->|Fichier| Audio[(Volume audio staging)]
+    Automation[Worker automation] -->|Lit| Audio
+    Automation -->|HTTP synthétique| Transcribe[Transcribe AI simulator]
+    Automation -->|HTTPS API V2.3.0| GLPI[GLPI de test externe]
+    Retention[Worker retention] -->|HTTPS API V2.3.0| GLPI
     Web[Dashboard] -->|SQL| PostgreSQL
 ```
 
-Le manifeste est
-[`infra/docker/docker-compose.staging.yml`](../infra/docker/docker-compose.staging.yml).
-Il déploie les cinq applications du produit, le simulateur, GLPI, MySQL et le
-bootstrap OAuth one-shot. PostgreSQL reste un service externe dédié au
-staging.
+Deux projets Compose partagent uniquement le réseau Docker externe
+`gta-staging-providers-network` :
 
-## Isolation obligatoire
+- `infra/docker/providers/docker-compose.providers.yml` déploie les deux
+  simulateurs ;
+- `infra/docker/docker-compose.staging.yml` déploie les cinq applications.
 
-Le staging doit posséder ses propres :
+PostgreSQL reste un service externe dédié au staging. Le GLPI de test n'est pas
+déployé par ce dépôt.
 
-- projet Compose `gta-staging` ;
-- base et utilisateur PostgreSQL ;
-- réseau PostgreSQL externe ;
-- volume audio ;
-- volumes GLPI et MySQL ;
-- domaines web et GLPI ;
-- secrets GLPI et simulateur.
+## Prérequis
 
-Aucun certificat Entra, identifiant Exchange, secret GLPI de production ou
-donnée réelle ne doit être copié dans cet environnement.
+Avant de déployer les applications :
 
-GLPI 11.0.7 est volontairement aligné sur la production. Cette version ne doit
-pas être publiée directement sur Internet : son domaine staging doit rester
-limité au LAN ou au VPN. La montée de version de GLPI devra être préparée sur
-staging, puis appliquée aux deux environnements.
+1. vérifier que les deux simulateurs sont `healthy` ;
+2. vérifier que le réseau `gta-staging-providers-network` existe et porte les
+   deux projets ;
+3. créer une base et un utilisateur PostgreSQL exclusivement réservés au
+   staging ;
+4. vérifier depuis la VM que le nom du GLPI de test est résolu et que son
+   certificat est validé par le bundle configuré ;
+5. disposer d'identifiants OAuth GLPI réservés au test.
 
-## Création du projet Dokploy
+Le test TLS ne doit jamais désactiver la vérification du certificat :
 
-1. Vérifier que Dokploy est en version `v0.30.10`, version validée pour ce
-   projet. Le correctif disponible depuis `v0.30.4` transmet explicitement le
-   fichier `.env` situé à côté d'un Compose placé dans un sous-répertoire.
-2. Créer un projet ou un environnement Dokploy distinct nommé `staging`.
-3. Connecter le dépôt GitHub privé avec la GitHub App Dokploy.
-4. Sélectionner la branche `main`.
-5. Choisir le chemin Compose
-   `./infra/docker/docker-compose.staging.yml`.
-6. Activer l'auto-déploiement uniquement pour ce projet staging.
-7. Laisser l'auto-déploiement désactivé sur le projet de production.
+```bash
+openssl s_client -connect NOM_GLPI:443 -servername NOM_GLPI -CAfile /chemin/ca.pem -verify_return_error </dev/null
+```
 
-Dokploy écrit les variables de son onglet Environment dans le fichier `.env`
-placé à côté du manifeste et le transmet à Docker Compose avec `--env-file`.
-Une version de Dokploy antérieure à `v0.30.4` réintroduirait le défaut de
-chargement décrit par l'issue
-[#5252](https://github.com/Dokploy/dokploy/issues/5252).
+Le résultat attendu est `Verify return code: 0 (ok)`. Si l'accès exige un
+certificat client mTLS, le client applicatif doit être adapté avant le
+déploiement : `CA_BUNDLE_HOST_PATH` configure uniquement la confiance envers le
+certificat serveur.
 
-## PostgreSQL
+## Déploiement applicatif
 
-Créer une base et un utilisateur réservés au staging, puis attacher le service
-PostgreSQL au réseau Docker externe configuré par
-`DATABASE_NETWORK_NAME=gta-staging-database-network`.
-
-`DATABASE_URL` doit viser le nom DNS Docker du service PostgreSQL, jamais
-`localhost`. La base de production ne doit pas être réutilisée.
-
-## Variables
-
-Copier le contenu de
-[`infra/docker/staging.env.example`](../infra/docker/staging.env.example) dans
-l'onglet Environment de Dokploy, puis remplacer chaque `CHANGE_ME`.
-
-Les identités créées par le bootstrap doivent conserver les préfixes suivants :
+Créer un projet Docker Compose Dokploy avec :
 
 ```text
-GLPI_ADMIN_USERNAME=glpi-staging-...
-GLPI_USERNAME=glpi-staging-...
-GLPI_OAUTH_CLIENT_NAME=glpi-staging-...
+./infra/docker/docker-compose.staging.yml
 ```
 
-Le bootstrap :
+Copier les variables de `infra/docker/staging.env.example` dans l'onglet
+Environment, puis remplacer tous les placeholders. En particulier :
 
-1. attend la fin de l'auto-installation GLPI ;
-2. active l'API V2 ;
-3. génère les clés OAuth si nécessaire ;
-4. crée ou retrouve un administrateur staging distinct et lui attribue le
-   profil `Super-Admin` sur l'entité racine ;
-5. désactive les comptes GLPI de démonstration `glpi`, `tech`, `normal` et
-   `post-only` ;
-6. crée ou réconcilie l'utilisateur de service ;
-7. crée ou réconcilie le client OAuth Password avec le scope `api`.
+- `PROVIDERS_NETWORK_NAME` doit être identique dans les deux projets ;
+- `TRANSCRIBE_AI_SIMULATOR_API_KEY` doit avoir la même valeur que dans la stack
+  providers ;
+- `PUBLISHER_MAILBOX_ID` doit correspondre à la boîte Graph fictive ;
+- `GLPI_BASE_URL` doit contenir l'URL HTTPS du GLPI de test ;
+- `CA_BUNDLE_HOST_PATH` doit désigner sur la VM le bundle qui valide GLPI et
+  PostgreSQL.
 
-Il est idempotent et ne journalise aucun identifiant sensible.
-GLPI ne devient `healthy` qu'après la publication atomique du marqueur de
-bootstrap. En cas d'échec pendant la réconciliation, le marqueur reste absent
-et les applications dépendantes ne démarrent pas.
+Les projets Compose ne peuvent pas exprimer de `depends_on` entre eux. Les
+providers doivent donc être déployés et sains avant les workers.
 
-Les mots de passe et identifiants OAuth doivent rester stables entre deux
-déploiements. Si une valeur configurée ne correspond plus à la valeur déjà
-stockée par GLPI, le bootstrap échoue sans modifier le secret existant. Toute
-rotation doit donc être une opération explicite, préparée et tracée ; elle ne
-doit pas être réalisée en changeant simplement une variable Dokploy.
+Le futur domaine Dokploy concernera uniquement le service `web`, sur son port
+interne `8000`. Il n'est pas nécessaire pour valider l'exécution des workers,
+mais les liens audio resteront inutilisables tant que `PUBLIC_BASE_URL` ne
+désignera pas une URL accessible.
 
-## Domaines Dokploy
+## Recette synthétique
 
-Configurer exactement deux domaines :
+Après le déploiement, vérifier :
 
-| Service | Port interne | Exposition |
-|---|---:|---|
-| `web` | `8000` | LAN/VPN |
-| `glpi` | `80` | LAN/VPN |
+1. `database-migrations` termine avec le code `0` ;
+2. les trois workers et le web démarrent ;
+3. leurs heartbeats sont présents dans PostgreSQL ;
+4. aucun journal ne contient de secret, d'audio ou de transcription.
 
-Ne créer aucun domaine pour `provider-simulator`, `glpi-db`, les workers ou le
-service de bootstrap. Aucun de ces services ne publie directement un port de
-l'hôte.
-
-## Première recette
-
-Après le premier déploiement, vérifier dans Dokploy :
-
-1. `database-migrations` est terminé avec le code `0` ;
-2. `glpi-db`, `glpi` et `provider-simulator` sont healthy ;
-3. `glpi-bootstrap` est terminé avec le code `0` ;
-4. les trois workers et le web sont démarrés ;
-5. les heartbeats des workers sont frais dans le dashboard.
-
-Ouvrir ensuite un terminal dans `provider-simulator` et injecter un message :
+Dans le terminal du simulateur Microsoft, injecter un message :
 
 ```bash
-glpi-ticketing-provider-simulator-admin seed --extension wav
+glpi-ticketing-microsoft-graph-simulator-admin seed --extension wav
 ```
 
-Puis vérifier successivement :
-
-- la création d'une ingestion mail ;
-- la création et la complétion du job ;
-- la présence du ticket dans GLPI staging ;
-- le déplacement du message simulé dans `Processed` ;
-- l'absence de secret, contenu audio ou transcription dans les journaux.
-
-Rejouer la recette avec OGG :
+Puis contrôler la création de l'ingestion, la complétion du job, le déplacement
+du message dans `Processed` et la création du ticket dans le GLPI de test.
+Rejouer avec OGG :
 
 ```bash
-glpi-ticketing-provider-simulator-admin seed --extension ogg
+glpi-ticketing-microsoft-graph-simulator-admin seed --extension ogg
 ```
 
-Le simulateur peut être remis à zéro avec :
+Nettoyer uniquement l'état synthétique avec :
 
 ```bash
-glpi-ticketing-provider-simulator-admin reset
+glpi-ticketing-microsoft-graph-simulator-admin reset
 ```
 
-Son état est de toute façon effacé lors d'un redéploiement ou redémarrage.
+Le simulateur de transcription peut être contrôlé indépendamment :
+
+```bash
+glpi-ticketing-transcribe-ai-simulator-smoke
+```
 
 ## Limites
 
-- le simulateur vérifie les contrats HTTP et le pipeline, pas la qualité de la
-  transcription ;
-- le test ponctuel du GPU réel reste une recette manuelle distincte avec un
-  audio synthétique ;
-- GLPI et MySQL conservent leurs données entre les déploiements ;
+- les simulateurs valident les contrats HTTP, pas Microsoft Entra ID ni la
+  qualité de transcription ;
+- le staging partage les contraintes réseau et TLS de la VM qui l'héberge ;
 - un rollback applicatif ne supprime ni ne rétrograde automatiquement les
-  migrations PostgreSQL ou GLPI.
+  migrations PostgreSQL ;
+- aucune opération de nettoyage ne doit viser le GLPI de test externe.

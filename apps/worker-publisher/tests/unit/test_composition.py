@@ -23,7 +23,7 @@ from glpi_ticketing_worker_publisher.settings import (
 )
 
 MAILBOX_ID = UUID("00000000-0000-4000-8000-000000000003")
-SYNTHETIC_GRAPH_BASE_URL = "http://provider-simulator:8080/v1.0"
+SYNTHETIC_GRAPH_BASE_URL = "http://gta-staging-microsoft-graph:8080/v1.0"
 
 
 def _synthetic_settings(audio_root: Path) -> PublisherSettings:

@@ -136,8 +136,6 @@ def staging_provider_environment(
         {
             "COMPOSE_PROJECT_NAME": project_name,
             "PROVIDERS_NETWORK_NAME": providers_network_name,
-            "GLPI_DATA_VOLUME_NAME": f"{project_name}-glpi-data",
-            "GLPI_DATABASE_VOLUME_NAME": f"{project_name}-mysql-data",
             "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN": admin_token,
             "TRANSCRIBE_AI_SIMULATOR_API_KEY": transcription_api_key,
         }

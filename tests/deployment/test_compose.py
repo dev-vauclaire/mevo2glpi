@@ -183,7 +183,6 @@ def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
 
     for application_name in (
         "database-migrations",
-        "provider-simulator",
         "web",
         "worker-automation",
         "worker-publisher",
