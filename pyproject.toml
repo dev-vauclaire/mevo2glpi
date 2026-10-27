@@ -20,6 +20,8 @@ members = [
     "packages/common",
     "packages/database",
     "packages/glpi-client",
+    "providers/simulators/microsoft-graph-simulator",
+    "providers/simulators/transcribe-ai-simulator",
 ]
 
 [tool.uv.sources]
@@ -42,7 +44,7 @@ dev = [
 [tool.pytest.ini_options]
 minversion = "8.4"
 addopts = "--strict-config --strict-markers --import-mode=importlib"
-testpaths = ["apps", "packages", "tests"]
+testpaths = ["apps", "packages", "providers", "tests"]
 pythonpath = ["."]
 markers = [
     "database: démarre une instance PostgreSQL jetable pour valider le schéma et les migrations",
@@ -65,6 +67,8 @@ src = [
     "packages/common/src",
     "packages/database/src",
     "packages/glpi-client/src",
+    "providers/simulators/microsoft-graph-simulator/src",
+    "providers/simulators/transcribe-ai-simulator/src",
 ]
 
 [tool.ruff.lint]

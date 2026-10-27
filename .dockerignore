@@ -45,8 +45,6 @@
 !packages/glpi-client/src/**
 
 !providers/
-!providers/pyproject.toml
-!providers/uv.lock
 !providers/simulators/
 !providers/simulators/microsoft-graph-simulator/
 !providers/simulators/microsoft-graph-simulator/pyproject.toml

@@ -9,7 +9,9 @@ members = [
     "glpi-ticketing-database",
     "glpi-ticketing-database-migrations",
     "glpi-ticketing-glpi",
+    "glpi-ticketing-microsoft-graph-simulator",
     "glpi-ticketing-provider-simulator",
+    "glpi-ticketing-transcribe-ai-simulator",
     "glpi-ticketing-web",
     "glpi-ticketing-worker-automation",
     "glpi-ticketing-worker-publisher",
@@ -473,9 +475,43 @@ requires-dist = [
 ]
 
 [[package]]
+name = "glpi-ticketing-microsoft-graph-simulator"
+version = "0.1.0"
+source = { editable = "providers/simulators/microsoft-graph-simulator" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "pydantic-settings" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.116,<1" },
+    { name = "pydantic-settings", specifier = ">=2.10,<3" },
+    { name = "uvicorn", specifier = ">=0.35,<1" },
+]
+
+[[package]]
 name = "glpi-ticketing-provider-simulator"
 version = "0.1.0"
 source = { editable = "apps/provider-simulator" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "pydantic-settings" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.116,<1" },
+    { name = "pydantic-settings", specifier = ">=2.10,<3" },
+    { name = "uvicorn", specifier = ">=0.35,<1" },
+]
+
+[[package]]
+name = "glpi-ticketing-transcribe-ai-simulator"
+version = "0.1.0"
+source = { editable = "providers/simulators/transcribe-ai-simulator" }
 dependencies = [
     { name = "fastapi" },
     { name = "pydantic-settings" },

@@ -13,18 +13,27 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 
-WORKDIR /app/providers
+WORKDIR /app
 
 COPY --from=uv-binary /uv /usr/local/bin/uv
-COPY providers/pyproject.toml providers/uv.lock ./
-COPY providers/simulators/microsoft-graph-simulator/pyproject.toml simulators/microsoft-graph-simulator/pyproject.toml
-COPY providers/simulators/transcribe-ai-simulator/pyproject.toml simulators/transcribe-ai-simulator/pyproject.toml
+COPY pyproject.toml uv.lock README.md ./
+COPY apps/database-migrations/pyproject.toml apps/database-migrations/pyproject.toml
+COPY apps/provider-simulator/pyproject.toml apps/provider-simulator/pyproject.toml
+COPY apps/web/pyproject.toml apps/web/pyproject.toml
+COPY apps/worker-automation/pyproject.toml apps/worker-automation/pyproject.toml
+COPY apps/worker-publisher/pyproject.toml apps/worker-publisher/pyproject.toml
+COPY apps/worker-retention/pyproject.toml apps/worker-retention/pyproject.toml
+COPY packages/common/pyproject.toml packages/common/pyproject.toml
+COPY packages/database/pyproject.toml packages/database/pyproject.toml
+COPY packages/glpi-client/pyproject.toml packages/glpi-client/pyproject.toml
+COPY providers/simulators/microsoft-graph-simulator/pyproject.toml providers/simulators/microsoft-graph-simulator/pyproject.toml
+COPY providers/simulators/transcribe-ai-simulator/pyproject.toml providers/simulators/transcribe-ai-simulator/pyproject.toml
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
       --package glpi-ticketing-transcribe-ai-simulator --no-install-workspace
 
-COPY providers/simulators/transcribe-ai-simulator/src simulators/transcribe-ai-simulator/src
+COPY providers/simulators/transcribe-ai-simulator/src providers/simulators/transcribe-ai-simulator/src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -171,6 +172,30 @@ def test_production_manifest_builds_the_five_expected_images(
         build = services[service_name]["build"]
         assert build["context"].endswith("glpi-ticketing-automation")
         assert build["dockerfile"] == dockerfile
+
+
+def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
+    repository_root = DOCKER_ROOT.parent.parent
+    workspace = tomllib.loads(
+        (repository_root / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    members = workspace["tool"]["uv"]["workspace"]["members"]
+
+    for application_name in (
+        "database-migrations",
+        "provider-simulator",
+        "web",
+        "worker-automation",
+        "worker-publisher",
+        "worker-retention",
+    ):
+        dockerfile = (DOCKER_ROOT / application_name / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        assert "COPY pyproject.toml uv.lock README.md ./" in dockerfile
+        for member in members:
+            manifest = f"{member}/pyproject.toml"
+            assert f"COPY {manifest} {manifest}" in dockerfile
 
 
 def test_production_manifest_separates_proxy_and_database_networks(

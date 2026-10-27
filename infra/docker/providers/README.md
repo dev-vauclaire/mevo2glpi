@@ -60,6 +60,8 @@ sur les seuls changements de cette stack :
 providers/**
 infra/docker/providers/**
 .dockerignore
+pyproject.toml
+uv.lock
 ```
 
 Arrêter l'ancienne stack staging avant d'associer au nouveau service un domaine

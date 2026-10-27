@@ -1,7 +1,7 @@
 # Simulateurs de fournisseurs
 
-Ce workspace uv est strictement réservé au staging. Il contient deux services
-HTTP indépendants et sans donnée réelle :
+Ce dossier appartient au workspace uv racine et reste strictement réservé au
+staging. Il contient deux services HTTP indépendants et sans donnée réelle :
 
 - `microsoft-graph-simulator` reproduit le sous-ensemble de Microsoft Graph
   utilisé pour lire et classer les messages d'une boîte fictive ;
@@ -13,9 +13,12 @@ utilise son mode d'authentification synthétique.
 
 ## Validation locale
 
+La suite complète nécessite la commande `docker compose` pour rendre le
+manifeste providers, mais elle ne démarre aucun conteneur.
+
 ```bash
-uv sync --directory providers --locked --all-packages --all-groups
-uv run --directory providers --all-packages pytest
-uv run --directory providers ruff format --check .
-uv run --directory providers ruff check .
+uv sync --locked --all-packages --all-groups
+uv run pytest providers --maxfail=1
+uv run ruff format --check providers
+uv run ruff check providers
 ```
