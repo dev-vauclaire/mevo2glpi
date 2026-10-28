@@ -144,6 +144,7 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     assert documented_values["APP_ENVIRONMENT"] == "production"
     assert documented_values["APP_RELEASE"] == "CHANGE_ME"
     assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
+    assert documented_values["GLPI_TICKET_TYPE"] == "1"
 
     secret_names = {
         "LEGACY_TRANSCRIPTION_API_KEY",
@@ -333,7 +334,9 @@ def test_web_receives_no_provider_credentials(
     assert (
         "LEGACY_TRANSCRIPTION_API_KEY" in services["worker-automation"]["environment"]
     )
-    assert services["worker-automation"]["environment"]["WORKER_LOG_LEVEL"] == "INFO"
+    automation_environment = services["worker-automation"]["environment"]
+    assert automation_environment["WORKER_LOG_LEVEL"] == "INFO"
+    assert automation_environment["GLPI_TICKET_TYPE"] == "1"
     assert (
         "LEGACY_TRANSCRIPTION_API_KEY"
         not in services["worker-retention"]["environment"]

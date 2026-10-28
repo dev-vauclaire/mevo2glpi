@@ -621,7 +621,7 @@ def create_mvp_compose_environment(
         "GLPI_CLIENT_SECRET": provider_configuration.glpi_client_secret,
         "GLPI_HTTP_TIMEOUT_SECONDS": "30",
         "GLPI_TICKET_TITLE": "Synthetic audio request",
-        "GLPI_TICKET_TYPE": "2",
+        "GLPI_TICKET_TYPE": "1",
         "GLPI_TICKET_URGENCY": "3",
         "GLPI_TICKET_IMPACT": "3",
         "RETENTION_POLL_INTERVAL_SECONDS": "0.2",

@@ -25,7 +25,7 @@ COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
 def configure_required_worker_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Provide mandatory settings unless a test explicitly removes one."""
+    """Provide baseline settings unless a test explicitly removes one."""
     monkeypatch.setenv("LEGACY_TRANSCRIPTION_BASE_URL", TRANSCRIPTION_BASE_URL)
     monkeypatch.setenv("LEGACY_TRANSCRIPTION_API_KEY", TRANSCRIPTION_API_KEY)
     monkeypatch.setenv("GLPI_BASE_URL", GLPI_BASE_URL)
@@ -322,7 +322,24 @@ def test_secrets_are_not_in_worker_settings_repr() -> None:
     assert database_password not in settings_repr
 
 
-def test_glpi_settings_are_typed() -> None:
+def test_glpi_ticket_type_defaults_to_incident(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GLPI_TICKET_TYPE")
+
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        _env_file=None,
+    )
+
+    assert settings.glpi_ticket_type is TicketType.INCIDENT
+
+
+def test_glpi_settings_are_typed_and_request_remains_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GLPI_TICKET_TYPE", "2")
+
     settings = WorkerSettings(
         public_base_url="http://localhost:8000",
         glpi_base_url="https://glpi.example.test/subdirectory",
@@ -332,7 +349,6 @@ def test_glpi_settings_are_typed() -> None:
         glpi_client_secret="worker-client-secret",
         glpi_http_timeout_seconds=4.5,
         glpi_ticket_title="Demande audio",
-        glpi_ticket_type=2,
         glpi_ticket_urgency=4,
         glpi_ticket_impact=3,
         _env_file=None,
@@ -345,8 +361,7 @@ def test_glpi_settings_are_typed() -> None:
     assert settings.glpi_client_secret.get_secret_value() == "worker-client-secret"
     assert settings.glpi_http_timeout_seconds == 4.5
     assert settings.glpi_ticket_title == "Demande audio"
-    assert isinstance(settings.glpi_ticket_type, TicketType)
-    assert int(settings.glpi_ticket_type) == 2
+    assert settings.glpi_ticket_type is TicketType.REQUEST
     assert isinstance(settings.glpi_ticket_urgency, TicketLevel)
     assert int(settings.glpi_ticket_urgency) == 4
     assert int(settings.glpi_ticket_impact) == 3
@@ -361,7 +376,6 @@ def test_glpi_settings_are_typed() -> None:
         ("GLPI_CLIENT_ID", "glpi_client_id"),
         ("GLPI_CLIENT_SECRET", "glpi_client_secret"),
         ("GLPI_TICKET_TITLE", "glpi_ticket_title"),
-        ("GLPI_TICKET_TYPE", "glpi_ticket_type"),
         ("GLPI_TICKET_URGENCY", "glpi_ticket_urgency"),
         ("GLPI_TICKET_IMPACT", "glpi_ticket_impact"),
     ],

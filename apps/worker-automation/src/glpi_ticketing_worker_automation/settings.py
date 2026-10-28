@@ -101,7 +101,7 @@ class WorkerSettings(BaseSettings):
         allow_inf_nan=False,
     )
     glpi_ticket_title: str = Field(min_length=1, max_length=255)
-    glpi_ticket_type: TicketType
+    glpi_ticket_type: TicketType = TicketType.INCIDENT
     glpi_ticket_urgency: TicketLevel
     glpi_ticket_impact: TicketLevel
 

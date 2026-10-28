@@ -81,6 +81,7 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     assert documented_values["APP_ENVIRONMENT"] == "staging"
     assert documented_values["APP_RELEASE"] == "main"
     assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
+    assert documented_values["GLPI_TICKET_TYPE"] == "1"
     assert documented_values["AUDIO_VOLUME_NAME"].startswith("gta-staging-")
     assert documented_values["DATABASE_NETWORK_NAME"].startswith("gta-staging-")
     assert documented_values["PROVIDERS_NETWORK_NAME"] == (
@@ -160,6 +161,7 @@ def test_staging_uses_the_separated_provider_simulators(
     assert automation_environment["LEGACY_TRANSCRIPTION_BASE_URL"] == (
         "http://gta-staging-transcribe-ai:8080"
     )
+    assert automation_environment["GLPI_TICKET_TYPE"] == "1"
     assert "LEGACY_TRANSCRIPTION_API_KEY" in automation_environment
     assert not any(
         name.startswith("PUBLISHER_ENTRA_") for name in publisher_environment

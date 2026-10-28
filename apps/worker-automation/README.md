@@ -389,7 +389,6 @@ Les variables obligatoires sont chargées depuis l'environnement ou `.env` :
 | `GLPI_USERNAME`, `GLPI_PASSWORD` | Utilisateur du grant OAuth Password. |
 | `GLPI_CLIENT_ID`, `GLPI_CLIENT_SECRET` | Client OAuth GLPI. |
 | `GLPI_TICKET_TITLE` | Titre fixe des tickets. |
-| `GLPI_TICKET_TYPE` | `1` pour incident, `2` pour demande. |
 | `GLPI_TICKET_URGENCY`, `GLPI_TICKET_IMPACT` | Niveaux GLPI de 1 à 5. |
 
 Principaux réglages optionnels :
@@ -413,6 +412,7 @@ Principaux réglages optionnels :
 | `TRANSCRIPTION_POLL_INTERVAL_SECONDS` | `2` | Intervalle de polling distant. |
 | `TRANSCRIPTION_JOB_TIMEOUT_SECONDS` | `900` | Durée maximale d'un polling. |
 | `GLPI_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une opération GLPI. |
+| `GLPI_TICKET_TYPE` | `1` | Type GLPI : `1` pour incident par défaut, `2` pour demande. |
 
 Les secrets utilisent `SecretStr` et les erreurs de validation ne recopient
 pas les valeurs reçues. Aucun secret réel ne doit être ajouté au dépôt.
