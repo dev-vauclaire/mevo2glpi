@@ -18,6 +18,8 @@ from tests.support.mvp_compose import (
     PROVIDERS_ENV_FILE,
     REPOSITORY_ROOT,
     STAGING_COMPOSE_FILE,
+    SYNTHETIC_APP_COMMIT_SHA,
+    SYNTHETIC_APP_RELEASE,
     MvpComposeEnvironment,
     ProviderConfiguration,
     clean_environment,
@@ -37,6 +39,9 @@ def render_compose() -> Callable[[], dict[str, object]]:
         environment = {
             **clean_environment(),
             "COMPOSE_PROJECT_NAME": "gta-contract",
+            "APP_ENVIRONMENT": "production",
+            "APP_RELEASE": SYNTHETIC_APP_RELEASE,
+            "APP_COMMIT_SHA": SYNTHETIC_APP_COMMIT_SHA,
             "DOKPLOY_NETWORK_NAME": "gta-contract-dokploy",
             "DATABASE_NETWORK_NAME": "gta-contract-database",
             "AUDIO_VOLUME_NAME": "gta-contract-audio",
@@ -90,6 +95,12 @@ def render_staging_compose() -> Callable[[], dict[str, object]]:
     """Render the isolated staging manifest without starting containers."""
 
     def render() -> dict[str, object]:
+        environment = {
+            **clean_environment(),
+            "APP_ENVIRONMENT": "staging",
+            "APP_RELEASE": "main",
+            "APP_COMMIT_SHA": SYNTHETIC_APP_COMMIT_SHA,
+        }
         result = run_command(
             [
                 "docker",
@@ -102,7 +113,7 @@ def render_staging_compose() -> Callable[[], dict[str, object]]:
                 "--format",
                 "json",
             ],
-            environment=clean_environment(),
+            environment=environment,
         )
         payload = json.loads(result.stdout)
         if not isinstance(payload, dict):
@@ -152,6 +163,8 @@ __all__ = [
     "PROVIDERS_ENV_FILE",
     "DeploymentEnvironment",
     "REPOSITORY_ROOT",
+    "SYNTHETIC_APP_COMMIT_SHA",
+    "SYNTHETIC_APP_RELEASE",
     "STAGING_COMPOSE_FILE",
     "clean_environment",
     "run_command",

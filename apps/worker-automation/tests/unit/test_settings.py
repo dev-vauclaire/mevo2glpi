@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from glpi_ticketing_common import DeploymentEnvironment
 from glpi_ticketing_glpi import TicketLevel, TicketType
 from glpi_ticketing_worker_automation.settings import WorkerLogLevel, WorkerSettings
 
@@ -17,6 +18,7 @@ GLPI_TICKET_TITLE = "Demande issue d'un message audio"
 GLPI_TICKET_TYPE = "2"
 GLPI_TICKET_LEVEL = "3"
 DATABASE_URL = "postgresql+psycopg://worker:password@database:5432/jobs"
+COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
 
 
 @pytest.fixture(autouse=True)
@@ -118,6 +120,9 @@ def test_worker_settings_read_environment_overrides(
     tmp_path: Path,
 ) -> None:
     audio_root = tmp_path / "audios"
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_RELEASE", "v0.2.0")
+    monkeypatch.setenv("APP_COMMIT_SHA", COMMIT_SHA)
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://tickets.example.test/poc")
     monkeypatch.setenv("AUDIO_ROOT", str(audio_root))
     monkeypatch.setenv("DATABASE_CONNECT_TIMEOUT_SECONDS", "7")
@@ -130,6 +135,9 @@ def test_worker_settings_read_environment_overrides(
 
     settings = WorkerSettings(_env_file=None)
 
+    assert settings.release_identity.environment is DeploymentEnvironment.PRODUCTION
+    assert settings.release_identity.release == "v0.2.0"
+    assert settings.release_identity.commit_sha == COMMIT_SHA
     assert settings.public_base_url.scheme == "https"
     assert settings.public_base_url.host == "tickets.example.test"
     assert settings.public_base_url.path == "/poc"

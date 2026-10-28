@@ -3,9 +3,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from glpi_ticketing_common import DeploymentEnvironment
 from glpi_ticketing_database_migrations.settings import MigrationSettings
 
 DATABASE_URL = "postgresql+psycopg://migration:secret@database/mvp"
+COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
 
 
 def test_database_url_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -33,6 +35,9 @@ def test_database_url_requires_sync_psycopg(invalid_url: str) -> None:
 
 
 def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_RELEASE", "v0.2.0")
+    monkeypatch.setenv("APP_COMMIT_SHA", COMMIT_SHA)
     monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
     monkeypatch.setenv("DATABASE_READY_TIMEOUT_SECONDS", "12.5")
     monkeypatch.setenv("DATABASE_READY_INTERVAL_SECONDS", "0.25")
@@ -40,6 +45,9 @@ def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 
     settings = MigrationSettings(_env_file=None)
 
+    assert settings.release_identity.environment is DeploymentEnvironment.PRODUCTION
+    assert settings.release_identity.release == "v0.2.0"
+    assert settings.release_identity.commit_sha == COMMIT_SHA
     assert settings.database_url.get_secret_value() == DATABASE_URL
     assert settings.database_ready_timeout_seconds == 12.5
     assert settings.database_ready_interval_seconds == 0.25

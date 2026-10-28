@@ -9,6 +9,7 @@ from threading import Event
 
 import pytest
 
+from glpi_ticketing_common import DeploymentEnvironment
 from glpi_ticketing_worker_automation.application import (
     WorkerAlreadyRunningError,
     WorkerConfigurationError,
@@ -21,6 +22,7 @@ from glpi_ticketing_worker_automation.settings import WorkerLogLevel, WorkerSett
 from glpi_ticketing_worker_automation.worker import IdleOutcome
 
 SYNTHETIC_SECRET = "never-log-this-secret"
+COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
 
 
 @contextmanager
@@ -159,6 +161,29 @@ def test_run_cli_returns_success_after_cooperative_shutdown(
         )
         is WorkerExitCode.SUCCESS
     )
+
+
+def test_run_cli_logs_the_validated_release_identity(
+    worker_settings_factory: Callable[..., WorkerSettings],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = worker_settings_factory(
+        app_environment=DeploymentEnvironment.PRODUCTION,
+        app_release="v0.2.0",
+        app_commit_sha=COMMIT_SHA,
+    )
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_cli(
+            settings_factory=lambda: settings,
+            application_runner=lambda _settings, _stop_event: None,
+            signal_context_factory=_passthrough_signals,
+        )
+
+    assert exit_code is WorkerExitCode.SUCCESS
+    assert "app_environment=production" in caplog.text
+    assert "app_release=v0.2.0" in caplog.text
+    assert f"app_commit_sha={COMMIT_SHA}" in caplog.text
 
 
 def test_run_cli_applies_the_validated_worker_log_level(

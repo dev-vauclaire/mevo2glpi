@@ -32,6 +32,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       --package glpi-ticketing-database-migrations --no-install-workspace
 
 COPY apps/database-migrations/src apps/database-migrations/src
+COPY packages/common/src packages/common/src
 COPY packages/database/src packages/database/src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -40,8 +41,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM ${PYTHON_IMAGE} AS runtime
 
-ARG IMAGE_VERSION=0.1.0-mvp
-ARG VCS_REF=unknown
+ARG IMAGE_VERSION
+ARG VCS_REF
 
 LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-ticketing-automation" \
       org.opencontainers.image.title="GLPI ticketing database migrations" \
@@ -53,7 +54,9 @@ RUN groupadd --gid 10001 gta \
       --no-create-home --no-log-init --home-dir /nonexistent \
       --shell /usr/sbin/nologin gta
 
-ENV HOME=/nonexistent \
+ENV APP_RELEASE=${IMAGE_VERSION} \
+    APP_COMMIT_SHA=${VCS_REF} \
+    HOME=/nonexistent \
     PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

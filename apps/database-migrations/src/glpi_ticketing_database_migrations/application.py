@@ -153,7 +153,14 @@ def run_cli(
         )
         return MigrationExitCode.UNEXPECTED_ERROR
 
-    LOGGER.info("database migration starting")
+    release_identity = settings.release_identity
+    LOGGER.info(
+        "database migration starting app_environment=%s app_release=%s "
+        "app_commit_sha=%s",
+        release_identity.environment.value,
+        release_identity.release,
+        release_identity.commit_sha,
+    )
     try:
         application_runner(settings)
     except DatabaseUnavailableError:

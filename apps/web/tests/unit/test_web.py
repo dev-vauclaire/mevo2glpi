@@ -12,6 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 import glpi_ticketing_web.services.jobs.downloads as jobs_module
+from glpi_ticketing_common.release_identity import (
+    DeploymentEnvironment,
+    ReleaseIdentity,
+)
 from glpi_ticketing_database import (
     AudioExtension,
     JobStage,
@@ -30,6 +34,11 @@ from glpi_ticketing_web.services import (
 from glpi_ticketing_web.web import create_app
 
 SYNTHETIC_AUDIO = b"RIFF\x10\x00\x00\x00WAVEfmt \x00\x00\x00\x00data"
+RELEASE_IDENTITY = ReleaseIdentity(
+    environment=DeploymentEnvironment.STAGING,
+    release="main",
+    commit_sha="bd88d901f4569ea8ee455c53b20920b0e1140ee2",
+)
 
 
 @dataclass
@@ -87,6 +96,7 @@ def web_context(tmp_path: Path) -> Iterator[WebTestContext]:
         retry_audio_job=FakeRetryAudioJob(),
         get_downloadable_audio=GetDownloadableAudio(audio_root, query),
         get_observability=FakeGetObservability(),  # type: ignore[arg-type]
+        release_identity=RELEASE_IDENTITY,
     )
     with TestClient(app) as client:
         yield WebTestContext(
@@ -103,6 +113,22 @@ def test_health_returns_200(web_context: WebTestContext) -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_version_returns_complete_uncached_deployment_identity(
+    web_context: WebTestContext,
+) -> None:
+    response = web_context.client.get("/api/version")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "environment": "staging",
+        "release": "main",
+        "commit_sha": "bd88d901f4569ea8ee455c53b20920b0e1140ee2",
+    }
+    assert "database" not in response.text.casefold()
+    assert "audio_root" not in response.text
+
+
 def test_page_references_versioned_static_assets(
     web_context: WebTestContext,
 ) -> None:
@@ -111,6 +137,13 @@ def test_page_references_versioned_static_assets(
     assert response.status_code == 200
     assert 'href="http://testserver/static/css/app.css"' in response.text
     assert 'src="http://testserver/static/js/app.js"' in response.text
+    assert "<title>GLPI Ticketing Automation</title>" in response.text
+    assert "<h1>GLPI Ticketing Automation</h1>" in response.text
+    assert "Traitement des demandes audio" not in response.text
+    assert "Réseau interne" not in response.text
+    assert "Staging · main ·" in response.text
+    assert RELEASE_IDENTITY.short_commit_sha in response.text
+    assert RELEASE_IDENTITY.commit_sha in response.text
     assert web_context.client.get("/static/css/app.css").status_code == 200
     assert web_context.client.get("/static/js/app.js").status_code == 200
 

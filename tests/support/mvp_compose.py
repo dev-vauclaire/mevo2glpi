@@ -42,6 +42,8 @@ ALL_SERVICES = (
 )
 CONTROLLABLE_MVP_SERVICES = frozenset({"worker-automation", "worker-retention"})
 POLL_INTERVAL_SECONDS = 0.25
+SYNTHETIC_APP_RELEASE = "v0.0.0"
+SYNTHETIC_APP_COMMIT_SHA = "a" * 40
 _SYNTHETIC_PUBLISHER_PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
 c3ludGhldGljLXRlc3Qtb25seS1wcml2YXRlLWtleQ==
 -----END PRIVATE KEY-----
@@ -224,8 +226,16 @@ class MvpComposeEnvironment:
     def inspect_image_for_service(self, service_name: str) -> dict[str, object]:
         """Inspect the exact image used by one container in the running stack."""
         image_id = str(self.inspect_service(service_name)["Image"])
+        return self._inspect_image(image_id)
+
+    def inspect_built_image_for_service(self, service_name: str) -> dict[str, object]:
+        """Inspect a built service image even when its container is not started."""
+        return self._inspect_image(f"{self.project_name}-{service_name}")
+
+    def _inspect_image(self, image_reference: str) -> dict[str, object]:
+        """Return Docker metadata for one image reference."""
         result = run_command(
-            ["docker", "image", "inspect", image_id],
+            ["docker", "image", "inspect", image_reference],
             environment=clean_environment(),
             secrets_to_redact=self._runtime_secrets,
         )
@@ -562,6 +572,9 @@ def create_mvp_compose_environment(
     compose_environment_file = runtime_root / "compose.env"
     values = {
         "COMPOSE_PROJECT_NAME": project_name,
+        "APP_ENVIRONMENT": "production",
+        "APP_RELEASE": SYNTHETIC_APP_RELEASE,
+        "APP_COMMIT_SHA": SYNTHETIC_APP_COMMIT_SHA,
         "DOKPLOY_NETWORK_NAME": proxy_network_name,
         "DATABASE_NETWORK_NAME": database_network_name,
         "AUDIO_VOLUME_NAME": audio_volume_name,
@@ -764,6 +777,8 @@ __all__ = [
     "PROVIDERS_ENV_FILE",
     "ProviderConfiguration",
     "REPOSITORY_ROOT",
+    "SYNTHETIC_APP_COMMIT_SHA",
+    "SYNTHETIC_APP_RELEASE",
     "STAGING_COMPOSE_FILE",
     "clean_environment",
     "create_mvp_compose_environment",

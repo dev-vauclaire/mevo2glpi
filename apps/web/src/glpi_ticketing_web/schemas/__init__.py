@@ -25,6 +25,7 @@ from .observability import (
     WorkerRuntimeState,
     WorkerService,
 )
+from .version import VersionResponse
 
 __all__ = [
     "AudioFileExtension",
@@ -48,4 +49,5 @@ __all__ = [
     "WorkerObservationResponse",
     "WorkerRuntimeState",
     "WorkerService",
+    "VersionResponse",
 ]

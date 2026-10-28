@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+from glpi_ticketing_common import DeploymentEnvironment, ReleaseIdentity
 from glpi_ticketing_glpi import TicketLevel, TicketType
 
 
@@ -33,6 +34,9 @@ class WorkerSettings(BaseSettings):
         frozen=True,
     )
 
+    app_environment: DeploymentEnvironment = DeploymentEnvironment.DEVELOPMENT
+    app_release: str = "development"
+    app_commit_sha: str = "unknown"
     public_base_url: HttpUrl
     database_url: SecretStr = Field(repr=False)
     audio_root: Path = Path("/data/audios")
@@ -248,3 +252,18 @@ class WorkerSettings(BaseSettings):
                 "deadline"
             )
         return self
+
+    @model_validator(mode="after")
+    def validate_release_identity(self) -> Self:
+        """Reject an incoherent environment, release and Git revision."""
+        _ = self.release_identity
+        return self
+
+    @property
+    def release_identity(self) -> ReleaseIdentity:
+        """Return the validated non-sensitive identity of this process."""
+        return ReleaseIdentity(
+            environment=self.app_environment,
+            release=self.app_release,
+            commit_sha=self.app_commit_sha,
+        )

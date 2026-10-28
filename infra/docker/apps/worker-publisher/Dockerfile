@@ -38,8 +38,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       --package glpi-ticketing-worker-publisher
 
 FROM ${PYTHON_IMAGE} AS runtime
-ARG IMAGE_VERSION=0.1.0-mvp
-ARG VCS_REF=unknown
+ARG IMAGE_VERSION
+ARG VCS_REF
 
 LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-ticketing-automation" \
       org.opencontainers.image.title="GLPI ticketing publisher worker" \
@@ -52,7 +52,9 @@ RUN groupadd --gid 10001 gta \
       --shell /usr/sbin/nologin gta \
     && install -d -m 0750 -o 10001 -g 10001 /data/audios
 
-ENV HOME=/nonexistent \
+ENV APP_RELEASE=${IMAGE_VERSION} \
+    APP_COMMIT_SHA=${VCS_REF} \
+    HOME=/nonexistent \
     PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

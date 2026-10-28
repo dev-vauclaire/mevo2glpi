@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import math
+from typing import Self
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+
+from glpi_ticketing_common import DeploymentEnvironment, ReleaseIdentity
 
 
 class MigrationSettings(BaseSettings):
@@ -23,6 +26,9 @@ class MigrationSettings(BaseSettings):
         frozen=True,
     )
 
+    app_environment: DeploymentEnvironment = DeploymentEnvironment.DEVELOPMENT
+    app_release: str = "development"
+    app_commit_sha: str = "unknown"
     database_url: SecretStr
     database_ready_timeout_seconds: float = Field(default=60.0, gt=0)
     database_ready_interval_seconds: float = Field(default=1.0, gt=0)
@@ -67,6 +73,21 @@ class MigrationSettings(BaseSettings):
         if not parsed_url.database:
             raise ValueError("DATABASE_URL must select a database")
         return value
+
+    @model_validator(mode="after")
+    def validate_release_identity(self) -> Self:
+        """Reject an incoherent environment, release and Git revision."""
+        _ = self.release_identity
+        return self
+
+    @property
+    def release_identity(self) -> ReleaseIdentity:
+        """Return the validated non-sensitive identity of this process."""
+        return ReleaseIdentity(
+            environment=self.app_environment,
+            release=self.app_release,
+            commit_sha=self.app_commit_sha,
+        )
 
 
 __all__ = ["MigrationSettings"]

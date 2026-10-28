@@ -9,6 +9,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+from glpi_ticketing_common.release_identity import (
+    DeploymentEnvironment,
+    ReleaseIdentity,
+)
+
 
 class WebSettings(BaseSettings):
     """Configuration required by the persistent web application."""
@@ -34,6 +39,9 @@ class WebSettings(BaseSettings):
     dashboard_pending_alert_after_seconds: float = Field(default=900.0, gt=0)
     dashboard_retry_overdue_grace_seconds: float = Field(default=60.0, gt=0)
     dashboard_retention_deadline_grace_seconds: float = Field(default=120.0, gt=0)
+    app_environment: DeploymentEnvironment = DeploymentEnvironment.DEVELOPMENT
+    app_release: str = "development"
+    app_commit_sha: str = "unknown"
 
     @field_validator("web_port", mode="before")
     @classmethod
@@ -76,6 +84,21 @@ class WebSettings(BaseSettings):
                 "WORKER_HEARTBEAT_INTERVAL_SECONDS"
             )
         return self
+
+    @model_validator(mode="after")
+    def validate_release_identity(self) -> "WebSettings":
+        """Reject inconsistent deployment metadata at the configuration edge."""
+        _ = self.release_identity
+        return self
+
+    @property
+    def release_identity(self) -> ReleaseIdentity:
+        """Return the validated non-sensitive deployment identity."""
+        return ReleaseIdentity(
+            environment=self.app_environment,
+            release=self.app_release,
+            commit_sha=self.app_commit_sha,
+        )
 
     @field_validator("web_host")
     @classmethod

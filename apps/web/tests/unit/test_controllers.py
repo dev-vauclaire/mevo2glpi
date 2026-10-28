@@ -13,6 +13,10 @@ import pytest
 from fastapi import HTTPException, Response
 
 import glpi_ticketing_web.controllers.jobs as jobs_controller_module
+from glpi_ticketing_common.release_identity import (
+    DeploymentEnvironment,
+    ReleaseIdentity,
+)
 from glpi_ticketing_database import (
     AudioExtension,
     JobEventActor,
@@ -20,7 +24,13 @@ from glpi_ticketing_database import (
     JobStage,
     JobStatus,
 )
-from glpi_ticketing_web.controllers import JobController, ManagedStreamingResponse
+from glpi_ticketing_web.controllers import (
+    JobController,
+    ManagedStreamingResponse,
+    PageController,
+    VersionController,
+)
+from glpi_ticketing_web.schemas import VersionResponse
 from glpi_ticketing_web.services import (
     AudioStorageUnavailableError,
     DownloadableAudio,
@@ -33,6 +43,58 @@ from glpi_ticketing_web.services import (
 )
 
 AUDIO_UUID = UUID("8ce23f5b-4e31-49f1-ae23-4eacdbba48f8")
+RELEASE_IDENTITY = ReleaseIdentity(
+    environment=DeploymentEnvironment.PRODUCTION,
+    release="v0.2.0",
+    commit_sha="bd88d901f4569ea8ee455c53b20920b0e1140ee2",
+)
+VERSION_RESPONSE = VersionResponse(
+    environment=RELEASE_IDENTITY.environment.value,
+    release=RELEASE_IDENTITY.release,
+    commit_sha=RELEASE_IDENTITY.commit_sha,
+)
+
+
+def test_version_controller_returns_only_uncached_release_metadata() -> None:
+    response = Response()
+    controller = VersionController(VERSION_RESPONSE)
+
+    body = controller.get_version(response)
+
+    assert response.headers["cache-control"] == "no-store"
+    assert body.model_dump() == {
+        "environment": "production",
+        "release": "v0.2.0",
+        "commit_sha": "bd88d901f4569ea8ee455c53b20920b0e1140ee2",
+    }
+
+
+def test_page_controller_passes_localized_release_identity_to_template() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeTemplates:
+        def TemplateResponse(self, **kwargs: object) -> Response:  # noqa: N802
+            captured.update(kwargs)
+            return Response()
+
+    request = object()
+    controller = PageController(
+        templates=FakeTemplates(),  # type: ignore[arg-type]
+        version=VERSION_RESPONSE,
+    )
+
+    controller.index(request)  # type: ignore[arg-type]
+
+    assert captured == {
+        "request": request,
+        "name": "index.html",
+        "context": {
+            "release_environment": "Production",
+            "release_name": "v0.2.0",
+            "release_commit_sha": "bd88d901f4569ea8ee455c53b20920b0e1140ee2",
+            "release_short_commit_sha": "bd88d901f456",
+        },
+    }
 
 
 @dataclass

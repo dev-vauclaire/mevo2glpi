@@ -445,6 +445,7 @@ version = "0.1.0"
 source = { editable = "apps/database-migrations" }
 dependencies = [
     { name = "alembic" },
+    { name = "glpi-ticketing-common" },
     { name = "glpi-ticketing-database" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
@@ -453,6 +454,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.16,<2" },
+    { name = "glpi-ticketing-common", editable = "packages/common" },
     { name = "glpi-ticketing-database", editable = "packages/database" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },

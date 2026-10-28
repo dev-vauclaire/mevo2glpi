@@ -37,6 +37,7 @@ def test_build_application_wires_settings_into_fastapi(tmp_path: Path) -> None:
 
     config = application.state.web_config
     assert config.audio_root == settings.audio_root.resolve()
+    assert config.release_identity == settings.release_identity
     assert not hasattr(config, "max_upload_bytes")
 
 
@@ -98,6 +99,30 @@ def test_run_cli_returns_success_after_server_stops(tmp_path: Path) -> None:
 
     assert exit_code is WebExitCode.SUCCESS
     assert observed_settings == [settings]
+
+
+def test_run_cli_logs_only_non_sensitive_release_identity(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _settings(
+        tmp_path,
+        app_environment="production",
+        app_release="v0.2.0",
+        app_commit_sha="bd88d901f4569ea8ee455c53b20920b0e1140ee2",
+    )
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_cli(
+            settings_factory=lambda: settings,
+            application_runner=lambda _settings: None,
+        )
+
+    assert exit_code is WebExitCode.SUCCESS
+    assert "app_environment=production" in caplog.text
+    assert "app_release=v0.2.0" in caplog.text
+    assert "app_commit_sha=bd88d901f4569ea8ee455c53b20920b0e1140ee2" in caplog.text
+    assert "postgresql+psycopg" not in caplog.text
 
 
 def test_run_cli_does_not_log_invalid_database_url(

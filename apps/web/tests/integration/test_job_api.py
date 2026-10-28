@@ -13,6 +13,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from glpi_ticketing_common.release_identity import (
+    DeploymentEnvironment,
+    ReleaseIdentity,
+)
 from glpi_ticketing_database import (
     AudioRetention,
     JobStatus,
@@ -35,6 +39,11 @@ pytestmark = pytest.mark.database
 
 SYNTHETIC_AUDIO = b"RIFF\x10\x00\x00\x00WAVEfmt \x00\x00\x00\x00data"
 OBSERVED_AT = datetime(2026, 8, 29, 12, tzinfo=UTC)
+RELEASE_IDENTITY = ReleaseIdentity(
+    environment=DeploymentEnvironment.STAGING,
+    release="main",
+    commit_sha="bd88d901f4569ea8ee455c53b20920b0e1140ee2",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +85,7 @@ def job_api_context(
             thresholds=thresholds,
             clock=lambda: OBSERVED_AT,
         ),
+        release_identity=RELEASE_IDENTITY,
     )
     with TestClient(app) as client:
         yield JobApiContext(

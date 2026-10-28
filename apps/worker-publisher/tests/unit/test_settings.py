@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 import glpi_ticketing_worker_publisher.settings as settings_module
+from glpi_ticketing_common import DeploymentEnvironment
 from glpi_ticketing_worker_publisher.settings import (
     MAX_ATTACHMENT_BYTES,
     OFFICIAL_GRAPH_BASE_URL,
@@ -21,6 +22,7 @@ ENTRA_VARIABLES = (
     "PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH",
     "PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE",
 )
+COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
 
 
 @pytest.fixture
@@ -73,6 +75,22 @@ def test_settings_load_two_distinct_pem_paths_and_runtime_defaults(
     )
     assert settings.publisher_log_level is PublisherLogLevel.INFO
     assert settings.publisher_max_attachment_bytes == MAX_ATTACHMENT_BYTES
+
+
+def test_settings_load_release_identity_from_environment(
+    publisher_environment: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del publisher_environment
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_RELEASE", "v0.2.0")
+    monkeypatch.setenv("APP_COMMIT_SHA", COMMIT_SHA)
+
+    settings = PublisherSettings()
+
+    assert settings.release_identity.environment is DeploymentEnvironment.PRODUCTION
+    assert settings.release_identity.release == "v0.2.0"
+    assert settings.release_identity.commit_sha == COMMIT_SHA
 
 
 def test_private_key_passphrase_is_preserved_verbatim(

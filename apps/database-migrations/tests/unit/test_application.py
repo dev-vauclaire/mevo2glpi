@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy import Engine
 from sqlalchemy.exc import OperationalError
 
+from glpi_ticketing_common import DeploymentEnvironment
 from glpi_ticketing_database.engine import DatabaseConfigurationError
 from glpi_ticketing_database.models import Base
 from glpi_ticketing_database_migrations.application import (
@@ -28,6 +29,7 @@ from glpi_ticketing_database_migrations.application import (
 from glpi_ticketing_database_migrations.settings import MigrationSettings
 
 DATABASE_URL = "postgresql+psycopg://migration:secret@database/mvp"
+COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
 
 
 def _settings(**overrides: object) -> MigrationSettings:
@@ -211,6 +213,27 @@ def test_run_cli_returns_success() -> None:
 
     assert exit_code is MigrationExitCode.SUCCESS
     assert observed == [settings]
+
+
+def test_run_cli_logs_the_validated_release_identity(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _settings(
+        app_environment=DeploymentEnvironment.PRODUCTION,
+        app_release="v0.2.0",
+        app_commit_sha=COMMIT_SHA,
+    )
+
+    with caplog.at_level(logging.INFO):
+        exit_code = run_cli(
+            settings_factory=lambda: settings,
+            application_runner=lambda _settings: None,
+        )
+
+    assert exit_code is MigrationExitCode.SUCCESS
+    assert "app_environment=production" in caplog.text
+    assert "app_release=v0.2.0" in caplog.text
+    assert f"app_commit_sha={COMMIT_SHA}" in caplog.text
 
 
 def test_run_cli_classifies_expected_failures() -> None:

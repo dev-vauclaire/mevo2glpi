@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from glpi_ticketing_common.release_identity import DeploymentEnvironment
 from glpi_ticketing_web.settings import WebSettings
 
 DATABASE_URL = "postgresql+psycopg://web:password@database:5432/jobs"
@@ -24,6 +25,9 @@ def test_web_settings_expose_canonical_storage_and_required_database(
         "DASHBOARD_PENDING_ALERT_AFTER_SECONDS",
         "DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS",
         "DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS",
+        "APP_ENVIRONMENT",
+        "APP_RELEASE",
+        "APP_COMMIT_SHA",
     ):
         monkeypatch.delenv(variable_name, raising=False)
         monkeypatch.delenv(variable_name.lower(), raising=False)
@@ -43,6 +47,10 @@ def test_web_settings_expose_canonical_storage_and_required_database(
     assert settings.dashboard_pending_alert_after_seconds == 900.0
     assert settings.dashboard_retry_overdue_grace_seconds == 60.0
     assert settings.dashboard_retention_deadline_grace_seconds == 120.0
+    assert settings.app_environment is DeploymentEnvironment.DEVELOPMENT
+    assert settings.app_release == "development"
+    assert settings.app_commit_sha == "unknown"
+    assert settings.release_identity.short_commit_sha == "unknown"
     assert not hasattr(settings, "audio_pending_dir")
     assert not hasattr(settings, "audio_completed_dir")
 
@@ -62,6 +70,12 @@ def test_web_settings_read_environment_overrides(
     monkeypatch.setenv("DASHBOARD_PENDING_ALERT_AFTER_SECONDS", "600")
     monkeypatch.setenv("DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS", "30")
     monkeypatch.setenv("DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS", "90")
+    monkeypatch.setenv("APP_ENVIRONMENT", "staging")
+    monkeypatch.setenv("APP_RELEASE", "main")
+    monkeypatch.setenv(
+        "APP_COMMIT_SHA",
+        "BD88D901F4569EA8EE455C53B20920B0E1140EE2",
+    )
 
     settings = WebSettings(_env_file=None)
 
@@ -75,6 +89,26 @@ def test_web_settings_read_environment_overrides(
     assert settings.dashboard_pending_alert_after_seconds == 600
     assert settings.dashboard_retry_overdue_grace_seconds == 30
     assert settings.dashboard_retention_deadline_grace_seconds == 90
+    assert settings.app_environment is DeploymentEnvironment.STAGING
+    assert settings.app_release == "main"
+    assert settings.app_commit_sha == "BD88D901F4569EA8EE455C53B20920B0E1140EE2"
+    assert settings.release_identity.commit_sha == (
+        "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
+    )
+
+
+def test_web_settings_reject_inconsistent_release_identity_without_echoing_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_sha = "never-log-this-invalid-sha"
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_RELEASE", "v0.2.0")
+    monkeypatch.setenv("APP_COMMIT_SHA", invalid_sha)
+
+    with pytest.raises(ValidationError) as captured_error:
+        WebSettings(database_url=DATABASE_URL, _env_file=None)
+
+    assert invalid_sha not in str(captured_error.value)
 
 
 @pytest.mark.parametrize(

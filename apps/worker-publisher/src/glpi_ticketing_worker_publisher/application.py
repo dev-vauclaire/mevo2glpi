@@ -107,7 +107,13 @@ def run_cli(
 
     configure_publisher_logging(settings.publisher_log_level)
     stop_event = Event()
-    LOGGER.info("publisher worker starting")
+    release_identity = settings.release_identity
+    LOGGER.info(
+        "publisher worker starting app_environment=%s app_release=%s app_commit_sha=%s",
+        release_identity.environment.value,
+        release_identity.release,
+        release_identity.commit_sha,
+    )
     try:
         with signal_context_factory(stop_event):
             application_runner(settings, stop_event)

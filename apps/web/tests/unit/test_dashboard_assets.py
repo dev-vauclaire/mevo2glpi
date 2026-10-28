@@ -19,6 +19,13 @@ def test_index_exposes_read_only_dashboard_and_operator_retry() -> None:
     assert "data-worker-cards" in template
     assert "data-alert-list" in template
     assert "data-alert-empty" in template
+    assert "data-release-identity" in template
+    assert "{{ release_environment }}" in template
+    assert "{{ release_name }}" in template
+    assert "{{ release_short_commit_sha }}" in template
+    assert "Traitement des demandes audio" not in template
+    assert "Réseau interne" not in template
+    assert "<h1>GLPI Ticketing Automation</h1>" in template
     assert 'type="module"' in template
     assert "path='/js/app.js'" in template
 

@@ -7,7 +7,7 @@
       name="description"
       content="Suivi opérationnel des demandes de création de tickets GLPI."
     >
-    <title>Automatisation des tickets GLPI</title>
+    <title>GLPI Ticketing Automation</title>
     <link rel="stylesheet" href="{{ request.url_for('static', path='/css/app.css') }}">
     <script
       type="module"
@@ -17,11 +17,15 @@
   <body>
     <header class="app-header">
       <div class="app-header__content">
-        <div>
-          <p class="eyebrow">GLPI Ticketing Automation</p>
-          <h1>Traitement des demandes audio</h1>
-        </div>
-        <p class="environment-badge">Réseau interne</p>
+        <h1>GLPI Ticketing Automation</h1>
+        <p
+          class="environment-badge"
+          data-release-identity
+          title="Commit {{ release_commit_sha }}"
+        >
+          {{ release_environment }} · {{ release_name }} ·
+          {{ release_short_commit_sha }}
+        </p>
       </div>
     </header>
 

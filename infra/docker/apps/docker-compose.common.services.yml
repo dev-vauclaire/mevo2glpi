@@ -21,7 +21,12 @@ x-application-runtime: &application-runtime
       max-size: 10m
       max-file: "3"
 
-x-database-environment: &database-environment
+x-release-build-args: &release-build-args
+  IMAGE_VERSION: ${APP_RELEASE:?Set APP_RELEASE to the deployed Git ref}
+  VCS_REF: ${APP_COMMIT_SHA:?Set APP_COMMIT_SHA to the deployed full Git SHA}
+
+x-shared-environment: &shared-environment
+  APP_ENVIRONMENT: ${APP_ENVIRONMENT:?Set APP_ENVIRONMENT}
   DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the external PostgreSQL database}
   PGSSLROOTCERT: /etc/ssl/certs/gta-ca-bundle.pem
 
@@ -31,8 +36,10 @@ services:
     build:
       context: ../../..
       dockerfile: infra/docker/apps/database-migrations/Dockerfile
+      args:
+        <<: *release-build-args
     environment:
-      <<: *database-environment
+      <<: *shared-environment
       DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
       DATABASE_READY_TIMEOUT_SECONDS: ${DATABASE_READY_TIMEOUT_SECONDS:-60}
       DATABASE_READY_INTERVAL_SECONDS: ${DATABASE_READY_INTERVAL_SECONDS:-1}
@@ -49,8 +56,10 @@ services:
     build:
       context: ../../..
       dockerfile: infra/docker/apps/web/Dockerfile
+      args:
+        <<: *release-build-args
     environment:
-      <<: *database-environment
+      <<: *shared-environment
       AUDIO_ROOT: /data/audios
       WEB_HOST: 0.0.0.0
       WEB_PORT: "8000"
@@ -80,8 +89,10 @@ services:
     build:
       context: ../../..
       dockerfile: infra/docker/apps/worker-automation/Dockerfile
+      args:
+        <<: *release-build-args
     environment:
-      <<: *database-environment
+      <<: *shared-environment
       AUDIO_ROOT: /data/audios
       WORKER_LOG_LEVEL: ${WORKER_LOG_LEVEL:-INFO}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL to the public Dokploy URL}
@@ -120,8 +131,10 @@ services:
     build:
       context: ../../..
       dockerfile: infra/docker/apps/worker-publisher/Dockerfile
+      args:
+        <<: *release-build-args
     environment:
-      <<: *database-environment
+      <<: *shared-environment
       AUDIO_ROOT: /data/audios
       DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
       PUBLISHER_LOG_LEVEL: ${PUBLISHER_LOG_LEVEL:-INFO}
@@ -154,8 +167,10 @@ services:
     build:
       context: ../../..
       dockerfile: infra/docker/apps/worker-retention/Dockerfile
+      args:
+        <<: *release-build-args
     environment:
-      <<: *database-environment
+      <<: *shared-environment
       AUDIO_ROOT: /data/audios
       DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
       WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-10}

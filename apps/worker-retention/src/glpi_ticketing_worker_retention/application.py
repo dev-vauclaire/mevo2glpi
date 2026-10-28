@@ -93,7 +93,13 @@ def run_cli(
         return RetentionWorkerExitCode.UNEXPECTED_ERROR
 
     stop_event = Event()
-    LOGGER.info("retention worker starting")
+    release_identity = settings.release_identity
+    LOGGER.info(
+        "retention worker starting app_environment=%s app_release=%s app_commit_sha=%s",
+        release_identity.environment.value,
+        release_identity.release,
+        release_identity.commit_sha,
+    )
     try:
         with signal_context_factory(stop_event):
             application_runner(settings, stop_event)

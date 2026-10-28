@@ -15,6 +15,7 @@ elle est assemblée dans la stack Docker Compose du MVP.
 | Route | Entrée | Sortie nominale |
 | --- | --- | --- |
 | `GET /health` | aucune | `200`, liveness du processus uniquement |
+| `GET /api/version` | aucune | environnement, release et SHA Git complet du déploiement |
 | `GET /` | aucune | dashboard interne en consultation |
 | `GET /api/jobs` | `state`, UUID exact, `limit`, curseur optionnels | page triée par dernière transition décroissante |
 | `GET /api/jobs/{uuid}` | UUID canonique | détail persistant et rétention, ou `404` |
@@ -28,6 +29,10 @@ retourne `405 Method Not Allowed`. La pagination utilise un curseur opaque fond�
 sur `(updated_at, uuid)` ; le client ne doit ni l'interpréter ni le fabriquer.
 
 Le dashboard lit séparément l'état des jobs et l'instantané d'observabilité.
+Son header affiche l'environnement, la release et les 12 premiers caractères
+du SHA Git. L'endpoint `/api/version` expose le SHA complet avec
+`Cache-Control: no-store` pour permettre une vérification opérateur fiable ;
+il ne contient ni secret ni donnée métier. `/health` reste une simple liveness.
 Il affiche toujours une carte pour chacun des workers `publisher`, `automation`
 et `retention`, même si aucun heartbeat n'a encore été publié. La carte du
 publisher expose son UUID d'ingestion mail courant, lorsqu'il existe. Les
@@ -184,6 +189,9 @@ d'authentification applicative.
 | `WEB_HOST` | `127.0.0.1` | adresse IP d'écoute |
 | `WEB_PORT` | `8000` | port Uvicorn |
 | `WEB_TRUST_PROXY_HEADERS` | `false` | confiance explicite dans le reverse proxy |
+| `APP_ENVIRONMENT` | `development` | environnement : `development`, `staging` ou `production` |
+| `APP_RELEASE` | `development` | branche `main` en staging ou tag stable `vX.Y.Z` en production |
+| `APP_COMMIT_SHA` | `unknown` | SHA Git complet obligatoire hors développement local |
 | `WORKER_HEARTBEAT_INTERVAL_SECONDS` | `10` | cadence attendue des checkpoints, utilisée pour valider le seuil stale |
 | `DASHBOARD_WORKER_STALE_AFTER_SECONDS` | `45` | absence de checkpoint avant alerte worker |
 | `DASHBOARD_PENDING_ALERT_AFTER_SECONDS` | `900` | durée depuis la dernière entrée en `pending` avant alerte |

@@ -111,7 +111,13 @@ def run_cli(
 
     logging_configurator(settings.worker_log_level)
     stop_event = Event()
-    LOGGER.info("worker starting")
+    release_identity = settings.release_identity
+    LOGGER.info(
+        "worker starting app_environment=%s app_release=%s app_commit_sha=%s",
+        release_identity.environment.value,
+        release_identity.release,
+        release_identity.commit_sha,
+    )
     try:
         with signal_context_factory(stop_event):
             application_runner(settings, stop_event)

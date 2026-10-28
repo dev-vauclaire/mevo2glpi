@@ -7,6 +7,7 @@ from threading import Event
 
 import pytest
 
+from glpi_ticketing_common import DeploymentEnvironment, ReleaseIdentity
 from glpi_ticketing_worker_publisher.application import (
     PublisherAlreadyRunningError,
     PublisherExitCode,
@@ -16,6 +17,7 @@ from glpi_ticketing_worker_publisher.application import (
 from glpi_ticketing_worker_publisher.settings import PublisherLogLevel
 
 SYNTHETIC_SECRET = "never-log-publisher-secret"
+COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
 
 
 @contextmanager
@@ -25,6 +27,11 @@ def _signals(_stop_event: Event) -> Iterator[None]:
 
 class _Settings:
     publisher_log_level = PublisherLogLevel.DEBUG
+    release_identity = ReleaseIdentity(
+        environment=DeploymentEnvironment.PRODUCTION,
+        release="v0.2.0",
+        commit_sha=COMMIT_SHA,
+    )
 
 
 def test_debug_logging_keeps_http_urls_disabled() -> None:
@@ -64,3 +71,19 @@ def test_singleton_conflict_has_a_stable_exit_code_without_error_message(
 
     assert result is PublisherExitCode.SINGLETON_CONFLICT
     assert SYNTHETIC_SECRET not in caplog.text
+
+
+def test_run_cli_logs_the_validated_release_identity(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.INFO):
+        result = run_cli(
+            settings_factory=lambda: _Settings(),  # type: ignore[arg-type,return-value]
+            application_runner=lambda _settings, _stop_event: None,
+            signal_context_factory=_signals,
+        )
+
+    assert result is PublisherExitCode.SUCCESS
+    assert "app_environment=production" in caplog.text
+    assert "app_release=v0.2.0" in caplog.text
+    assert f"app_commit_sha={COMMIT_SHA}" in caplog.text

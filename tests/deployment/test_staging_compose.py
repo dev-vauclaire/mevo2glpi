@@ -12,6 +12,7 @@ from .conftest import (
     APPS_DOCKER_ROOT,
     COMMON_COMPOSE_SERVICES_FILE,
     STAGING_COMPOSE_FILE,
+    SYNTHETIC_APP_COMMIT_SHA,
 )
 
 pytestmark = pytest.mark.deployment
@@ -77,6 +78,9 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
 
     assert set(documented_values) == interpolated_names
     assert documented_values["COMPOSE_PROJECT_NAME"] == "gta-staging"
+    assert documented_values["APP_ENVIRONMENT"] == "staging"
+    assert documented_values["APP_RELEASE"] == "main"
+    assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
     assert documented_values["AUDIO_VOLUME_NAME"].startswith("gta-staging-")
     assert documented_values["DATABASE_NETWORK_NAME"].startswith("gta-staging-")
     assert documented_values["PROVIDERS_NETWORK_NAME"] == (
@@ -127,6 +131,19 @@ def test_staging_manifest_uses_external_database_and_provider_networks(
         "providers",
     }
     assert set(services["worker-retention"]["networks"]) == {"database"}
+
+
+def test_staging_services_share_the_release_identity(
+    render_staging_compose: Callable[[], dict[str, object]],
+) -> None:
+    services = _services(render_staging_compose())
+
+    for service in services.values():
+        assert service["build"]["args"] == {
+            "IMAGE_VERSION": "main",
+            "VCS_REF": SYNTHETIC_APP_COMMIT_SHA,
+        }
+        assert service["environment"]["APP_ENVIRONMENT"] == "staging"
 
 
 def test_staging_uses_the_separated_provider_simulators(

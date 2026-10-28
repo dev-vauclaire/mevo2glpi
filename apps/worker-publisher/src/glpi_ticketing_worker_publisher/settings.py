@@ -11,6 +11,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+from glpi_ticketing_common import DeploymentEnvironment, ReleaseIdentity
+
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 OFFICIAL_GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
@@ -43,6 +45,9 @@ class PublisherSettings(BaseSettings):
         frozen=True,
     )
 
+    app_environment: DeploymentEnvironment = DeploymentEnvironment.DEVELOPMENT
+    app_release: str = "development"
+    app_commit_sha: str = "unknown"
     publisher_graph_auth_mode: PublisherGraphAuthMode = (
         PublisherGraphAuthMode.ENTRA_CERTIFICATE
     )
@@ -232,6 +237,21 @@ class PublisherSettings(BaseSettings):
         ):
             raise ValueError("The private key and certificate must use distinct files")
         return self
+
+    @model_validator(mode="after")
+    def validate_release_identity(self) -> Self:
+        """Reject an incoherent environment, release and Git revision."""
+        _ = self.release_identity
+        return self
+
+    @property
+    def release_identity(self) -> ReleaseIdentity:
+        """Return the validated non-sensitive identity of this process."""
+        return ReleaseIdentity(
+            environment=self.app_environment,
+            release=self.app_release,
+            commit_sha=self.app_commit_sha,
+        )
 
 
 def _validate_readable_file(path: Path, *, variable_name: str) -> Path:

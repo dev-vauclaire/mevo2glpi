@@ -19,6 +19,8 @@ from .conftest import (
     COMMON_COMPOSE_SERVICES_FILE,
     CUSTOM_SERVICES,
     DOCKER_ROOT,
+    SYNTHETIC_APP_COMMIT_SHA,
+    SYNTHETIC_APP_RELEASE,
     DeploymentEnvironment,
     clean_environment,
     run_command,
@@ -139,6 +141,9 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     assert "# Application web" in example_source
     assert "# Worker d'automatisation" in example_source
     assert "# Worker de rétention" in example_source
+    assert documented_values["APP_ENVIRONMENT"] == "production"
+    assert documented_values["APP_RELEASE"] == "CHANGE_ME"
+    assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
 
     secret_names = {
         "LEGACY_TRANSCRIPTION_API_KEY",
@@ -173,6 +178,19 @@ def test_production_manifest_builds_the_five_expected_images(
         build = services[service_name]["build"]
         assert build["context"].endswith("glpi-ticketing-automation")
         assert build["dockerfile"] == dockerfile
+        assert build["args"] == {
+            "IMAGE_VERSION": SYNTHETIC_APP_RELEASE,
+            "VCS_REF": SYNTHETIC_APP_COMMIT_SHA,
+        }
+
+
+def test_production_services_share_the_release_environment(
+    render_compose: Callable[[], dict[str, object]],
+) -> None:
+    services = _services(render_compose())
+
+    for service in services.values():
+        assert service["environment"]["APP_ENVIRONMENT"] == "production"
 
 
 def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
@@ -196,6 +214,27 @@ def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
         for member in members:
             manifest = f"{member}/pyproject.toml"
             assert f"COPY {manifest} {manifest}" in dockerfile
+
+
+def test_application_dockerfiles_embed_the_release_identity() -> None:
+    for application_name in (
+        "database-migrations",
+        "web",
+        "worker-automation",
+        "worker-publisher",
+        "worker-retention",
+    ):
+        dockerfile = (APPS_DOCKER_ROOT / application_name / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        assert "ARG IMAGE_VERSION\n" in dockerfile
+        assert "ARG VCS_REF\n" in dockerfile
+        assert "ARG IMAGE_VERSION=" not in dockerfile
+        assert "ARG VCS_REF=" not in dockerfile
+        assert 'org.opencontainers.image.version="${IMAGE_VERSION}"' in dockerfile
+        assert 'org.opencontainers.image.revision="${VCS_REF}"' in dockerfile
+        assert "ENV APP_RELEASE=${IMAGE_VERSION}" in dockerfile
+        assert "APP_COMMIT_SHA=${VCS_REF}" in dockerfile
 
 
 def test_production_manifest_separates_proxy_and_database_networks(
@@ -439,3 +478,19 @@ def test_images_contain_no_ephemeral_runtime_secret(
     service_name: str,
 ) -> None:
     deployment_environment.assert_image_contains_no_runtime_secret(service_name)
+
+
+@pytest.mark.parametrize("service_name", CUSTOM_SERVICES)
+def test_images_report_the_synthetic_release_identity(
+    deployment_environment: DeploymentEnvironment,
+    service_name: str,
+) -> None:
+    image = deployment_environment.inspect_built_image_for_service(service_name)
+    config = image["Config"]
+    labels = config["Labels"]
+    environment = config["Env"]
+
+    assert labels["org.opencontainers.image.version"] == SYNTHETIC_APP_RELEASE
+    assert labels["org.opencontainers.image.revision"] == SYNTHETIC_APP_COMMIT_SHA
+    assert f"APP_RELEASE={SYNTHETIC_APP_RELEASE}" in environment
+    assert f"APP_COMMIT_SHA={SYNTHETIC_APP_COMMIT_SHA}" in environment

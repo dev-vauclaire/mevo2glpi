@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from glpi_ticketing_common import DeploymentEnvironment
 from glpi_ticketing_worker_retention.settings import RetentionWorkerSettings
 
 DATABASE_URL = "postgresql+psycopg://retention:password@database:5432/jobs"
@@ -18,6 +19,7 @@ GLPI_REQUIRED_ENVIRONMENT = {
     "GLPI_CLIENT_ID": "synthetic-client-id",
     "GLPI_CLIENT_SECRET": "synthetic-client-secret",
 }
+COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
 
 
 @pytest.fixture(autouse=True)
@@ -83,6 +85,9 @@ def test_settings_read_environment_overrides(
 ) -> None:
     audio_root = tmp_path / "audio"
     overrides = {
+        "APP_ENVIRONMENT": "production",
+        "APP_RELEASE": "v0.2.0",
+        "APP_COMMIT_SHA": COMMIT_SHA,
         "AUDIO_ROOT": str(audio_root),
         "DATABASE_CONNECT_TIMEOUT_SECONDS": "9",
         "WORKER_HEARTBEAT_INTERVAL_SECONDS": "8.5",
@@ -98,6 +103,9 @@ def test_settings_read_environment_overrides(
 
     settings = RetentionWorkerSettings(_env_file=None)
 
+    assert settings.release_identity.environment is DeploymentEnvironment.PRODUCTION
+    assert settings.release_identity.release == "v0.2.0"
+    assert settings.release_identity.commit_sha == COMMIT_SHA
     assert settings.audio_root == audio_root
     assert settings.database_connect_timeout_seconds == 9
     assert settings.worker_heartbeat_interval_seconds == 8.5

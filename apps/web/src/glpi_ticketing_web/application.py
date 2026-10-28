@@ -99,6 +99,7 @@ def build_application(settings: WebSettings) -> FastAPI:
                 session_factory,
                 thresholds=observability_thresholds,
             ),
+            release_identity=settings.release_identity,
             shutdown_callback=engine.dispose,
         )
     except (DatabaseConfigurationError, OSError, RuntimeError, ValueError):
@@ -150,7 +151,13 @@ def run_cli(
         )
         return WebExitCode.UNEXPECTED_ERROR
 
-    LOGGER.info("web server starting")
+    release_identity = settings.release_identity
+    LOGGER.info(
+        "web server starting app_environment=%s app_release=%s app_commit_sha=%s",
+        release_identity.environment.value,
+        release_identity.release,
+        release_identity.commit_sha,
+    )
     try:
         application_runner(settings)
     except WebConfigurationError:
