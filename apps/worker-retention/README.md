@@ -232,7 +232,7 @@ uv run --package glpi-ticketing-worker-retention \
   python -m glpi_ticketing_worker_retention
 ```
 
-Le [Dockerfile du worker](../../infra/docker/worker-retention/Dockerfile)
+Le [Dockerfile du worker](../../infra/docker/apps/worker-retention/Dockerfile)
 installe l'application sans dépendances de développement et l'exécute en
 non-root. Dans Compose, `/data/audios` est monté en lecture-écriture car ce
 worker est l'unique application chargée de la quarantaine et de la suppression

@@ -67,7 +67,7 @@ HTTP partagé ou par le navigateur.
 
 ## Image et stockage Docker
 
-Le [Dockerfile web](../../infra/docker/web/Dockerfile) produit une image
+Le [Dockerfile web](../../infra/docker/apps/web/Dockerfile) produit une image
 multi-stage non-root contenant uniquement l'environnement Python installé
 depuis `uv.lock`. Dans Compose, le web monte le volume canonique
 `/data/audios` uniquement pour valider les retries et servir les audios

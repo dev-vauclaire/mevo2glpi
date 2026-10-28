@@ -10,7 +10,7 @@ def test_migration_image_context_contains_only_required_workspace_sources() -> N
         (repository_root / ".dockerignore").read_text(encoding="utf-8").splitlines()
     )
     dockerfile = (
-        repository_root / "infra/docker/database-migrations/Dockerfile"
+        repository_root / "infra/docker/apps/database-migrations/Dockerfile"
     ).read_text(encoding="utf-8")
     workspace = tomllib.loads(
         (repository_root / "pyproject.toml").read_text(encoding="utf-8")
@@ -33,7 +33,7 @@ def test_migration_image_context_contains_only_required_workspace_sources() -> N
 def test_migration_runtime_is_locked_one_shot_and_non_root() -> None:
     repository_root = Path(__file__).resolve().parents[4]
     dockerfile = (
-        repository_root / "infra/docker/database-migrations/Dockerfile"
+        repository_root / "infra/docker/apps/database-migrations/Dockerfile"
     ).read_text(encoding="utf-8")
     runtime = dockerfile.split("FROM ${PYTHON_IMAGE} AS runtime", maxsplit=1)[1]
 

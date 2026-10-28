@@ -371,7 +371,7 @@ et termine avec le code `3`.
 Deux modèles sont fournis :
 
 - [.env.example](.env.example) pour lancer les processus depuis la racine ;
-- [infra/docker/.env.example](infra/docker/.env.example) pour Dokploy, avec les
+- [infra/docker/apps/.env.example](infra/docker/apps/.env.example) pour Dokploy, avec les
   variables commentées et regroupées par service.
 
 Les principales variables sont :
@@ -400,7 +400,7 @@ lecture seule.
 ## Déploiement Dokploy
 
 Le seul manifeste à donner à Dokploy est
-[infra/docker/docker-compose.prod.yml](infra/docker/docker-compose.prod.yml).
+[infra/docker/apps/docker-compose.prod.yml](infra/docker/apps/docker-compose.prod.yml).
 Il déclare les cinq services directement afin que Dokploy puisse les découvrir,
 puis réutilise leur configuration commune avec `extends` :
 
@@ -435,9 +435,9 @@ sémantique standard de Docker Compose.
    ce certificat public exact dans **Certificates & secrets** de l'application
    Entra ; la clé privée ne doit jamais être intégrée à l'image ou au dépôt.
 7. Créer dans Dokploy un service **Docker Compose** depuis ce dépôt et utiliser
-   le chemin `./infra/docker/docker-compose.prod.yml`.
+   le chemin `./infra/docker/apps/docker-compose.prod.yml`.
 8. Copier toutes les variables de
-   [infra/docker/.env.example](infra/docker/.env.example) dans l'onglet
+   [infra/docker/apps/.env.example](infra/docker/apps/.env.example) dans l'onglet
    **Environment**, puis remplacer les valeurs `CHANGE_ME`.
 9. Attacher PostgreSQL au réseau indiqué par `DATABASE_NETWORK_NAME`.
 10. Ajouter au service `web` un domaine Dokploy pointant vers le port
@@ -477,8 +477,8 @@ Le contrat Compose peut être vérifié sans démarrer les services :
 
 ```bash
 docker compose \
-  --env-file ./infra/docker/.env.example \
-  --file infra/docker/docker-compose.prod.yml \
+  --env-file ./infra/docker/apps/.env.example \
+  --file infra/docker/apps/docker-compose.prod.yml \
   config --quiet
 ```
 

@@ -39,7 +39,7 @@ ne dépend donc pas du répertoire courant du processus.
 
 ## Image et déploiement
 
-Le [Dockerfile de migration](../../infra/docker/database-migrations/Dockerfile)
+Le [Dockerfile de migration](../../infra/docker/apps/database-migrations/Dockerfile)
 construit une image multi-stage verrouillée par `uv.lock`, sans dépendances de
 développement ni installation editable. Le runtime non-root exécute uniquement
 `glpi-ticketing-database-migrations`, puis s'arrête : le service Compose est un

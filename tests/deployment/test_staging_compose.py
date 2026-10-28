@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 
 from .conftest import (
+    APPS_DOCKER_ROOT,
     COMMON_COMPOSE_SERVICES_FILE,
-    DOCKER_ROOT,
     STAGING_COMPOSE_FILE,
 )
 
@@ -67,7 +67,9 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
             COMMON_COMPOSE_SERVICES_FILE,
         )
     )
-    example_source = (DOCKER_ROOT / "staging.env.example").read_text(encoding="utf-8")
+    example_source = (APPS_DOCKER_ROOT / "staging.env.example").read_text(
+        encoding="utf-8"
+    )
     interpolated_names = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose_source))
     documented_values = dict(
         re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", example_source, re.MULTILINE)

@@ -80,7 +80,9 @@ réarmement explicite d'un job `failed` ou `blocked`.
 │   ├── common/                   stockage canonique, purge et backoff
 │   ├── database/                 modèles SQLAlchemy et repositories
 │   └── glpi-client/              client GLPI v2.3.0 partagé
-├── infra/docker/                 images et Compose de production Dokploy
+├── infra/docker/
+│   ├── apps/                    images et Compose des applications
+│   └── providers/               simulateurs externes du staging
 ├── tests/
 │   ├── deployment/               contrats statiques et smoke tests Compose
 │   └── e2e/                      recette aval sans tenant Microsoft réel
@@ -433,7 +435,7 @@ métier restent pilotés par PostgreSQL.
 Le point d'entrée est :
 
 ```text
-infra/docker/docker-compose.prod.yml
+infra/docker/apps/docker-compose.prod.yml
 ```
 
 Il déclare les cinq applications et charge la configuration de services avec

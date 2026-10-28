@@ -437,7 +437,7 @@ La forme module est équivalente :
 uv run python -m glpi_ticketing_worker_automation
 ```
 
-Le [Dockerfile du worker](../../infra/docker/worker-automation/Dockerfile)
+Le [Dockerfile du worker](../../infra/docker/apps/worker-automation/Dockerfile)
 installe cette application sans dépendances de développement et l'exécute en
 non-root. Le volume partagé `/data/audios` est monté en lecture seule : le
 worker inspecte et transmet les octets, mais ne peut ni les modifier ni les

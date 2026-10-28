@@ -33,6 +33,13 @@ dist/
 !/infra/docker/web/*.env.example
 /infra/docker/worker/*.env*
 !/infra/docker/worker/*.env.example
+/infra/docker/apps/.env
+/infra/docker/apps/.env.*
+!/infra/docker/apps/.env.example
+/infra/docker/apps/web/*.env*
+!/infra/docker/apps/web/*.env.example
+/infra/docker/apps/worker/*.env*
+!/infra/docker/apps/worker/*.env.example
 /infra/docker/nginx/*.crt
 /infra/docker/nginx/*.pem
 /infra/docker/nginx/*.key
@@ -40,6 +47,8 @@ dist/
 /infra/docker/nginx/*.credentials.env
 /infra/docker/docker-compose.local.yaml
 /infra/docker/runtime/
+/infra/docker/apps/docker-compose.local.yaml
+/infra/docker/apps/runtime/
 /infra/docker/environments/*/compose.env
 /infra/docker/environments/*/services/*.env
 /infra/docker/environments/*/secrets/

@@ -25,7 +25,7 @@ Deux projets Compose partagent uniquement le réseau Docker externe
 
 - `infra/docker/providers/docker-compose.providers.yml` déploie les deux
   simulateurs ;
-- `infra/docker/docker-compose.staging.yml` déploie les cinq applications.
+- `infra/docker/apps/docker-compose.staging.yml` déploie les cinq applications.
 
 PostgreSQL reste un service externe dédié au staging. Le GLPI de test n'est pas
 déployé par ce dépôt.
@@ -59,10 +59,10 @@ certificat serveur.
 Créer un projet Docker Compose Dokploy avec :
 
 ```text
-./infra/docker/docker-compose.staging.yml
+./infra/docker/apps/docker-compose.staging.yml
 ```
 
-Copier les variables de `infra/docker/staging.env.example` dans l'onglet
+Copier les variables de `infra/docker/apps/staging.env.example` dans l'onglet
 Environment, puis remplacer tous les placeholders. En particulier :
 
 - `PROVIDERS_NETWORK_NAME` doit être identique dans les deux projets ;

@@ -148,7 +148,7 @@ processus verrouillé de vérifier régulièrement une demande d'arrêt. Après
 correction de la configuration ou des droits Entra ID, redémarrez le worker.
 
 Pour Dokploy, utilisez les variables hôte décrites dans
-[`infra/docker/.env.example`](../../infra/docker/.env.example) :
+[`infra/docker/apps/.env.example`](../../infra/docker/apps/.env.example) :
 `PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH` et
 `PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH`. Le Compose les monte vers les
 chemins internes attendus par le processus.
@@ -283,8 +283,8 @@ l'image du publisher sans démarrer ses appels Graph :
 
 ```bash
 docker compose \
-  --env-file infra/docker/.env \
-  -f infra/docker/docker-compose.prod.yml \
+  --env-file infra/docker/apps/.env \
+  -f infra/docker/apps/docker-compose.prod.yml \
   run --rm --no-deps worker-publisher \
   glpi-ticketing-publisher-replay --help
 ```

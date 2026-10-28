@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterator
 import pytest
 from tests.support.mvp_compose import (
     ALL_SERVICES,
+    APPS_DOCKER_ROOT,
     BASE_COMPOSE_FILE,
     COMMON_COMPOSE_SERVICES_FILE,
     CUSTOM_SERVICES,
@@ -66,7 +67,7 @@ def render_compose() -> Callable[[], dict[str, object]]:
                 "docker",
                 "compose",
                 "--env-file",
-                str(DOCKER_ROOT / ".env.example"),
+                str(APPS_DOCKER_ROOT / ".env.example"),
                 "-f",
                 str(BASE_COMPOSE_FILE),
                 "config",
@@ -94,7 +95,7 @@ def render_staging_compose() -> Callable[[], dict[str, object]]:
                 "docker",
                 "compose",
                 "--env-file",
-                str(DOCKER_ROOT / "staging.env.example"),
+                str(APPS_DOCKER_ROOT / "staging.env.example"),
                 "-f",
                 str(STAGING_COMPOSE_FILE),
                 "config",
@@ -142,6 +143,7 @@ def deployment_environment(
 
 __all__ = [
     "ALL_SERVICES",
+    "APPS_DOCKER_ROOT",
     "BASE_COMPOSE_FILE",
     "COMMON_COMPOSE_SERVICES_FILE",
     "CUSTOM_SERVICES",

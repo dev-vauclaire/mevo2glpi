@@ -9,8 +9,7 @@ on:
       - .github/workflows/ci-apps.yml
       - apps/**
       - conftest.py
-      - infra/docker/**
-      - "!infra/docker/providers/**"
+      - infra/docker/apps/**
       - packages/**
       - pyproject.toml
       - tests/**
@@ -23,8 +22,7 @@ on:
       - .github/workflows/ci-apps.yml
       - apps/**
       - conftest.py
-      - infra/docker/**
-      - "!infra/docker/providers/**"
+      - infra/docker/apps/**
       - packages/**
       - pyproject.toml
       - tests/**
@@ -94,15 +92,15 @@ jobs:
       - name: Valider le manifeste Docker Compose de production
         run: >-
           docker compose
-          --env-file ./infra/docker/.env.example
-          --file infra/docker/docker-compose.prod.yml
+          --env-file ./infra/docker/apps/.env.example
+          --file infra/docker/apps/docker-compose.prod.yml
           config --quiet
 
       - name: Valider le manifeste Docker Compose de staging
         run: >-
           docker compose
-          --env-file ./infra/docker/staging.env.example
-          --file infra/docker/docker-compose.staging.yml
+          --env-file ./infra/docker/apps/staging.env.example
+          --file infra/docker/apps/docker-compose.staging.yml
           config --quiet
 
       - name: Valider PostgreSQL et les migrations

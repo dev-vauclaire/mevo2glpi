@@ -14,6 +14,7 @@ import pytest
 
 from .conftest import (
     ALL_SERVICES,
+    APPS_DOCKER_ROOT,
     BASE_COMPOSE_FILE,
     COMMON_COMPOSE_SERVICES_FILE,
     CUSTOM_SERVICES,
@@ -40,13 +41,13 @@ def _volume_for(service: dict[str, Any], target: str) -> dict[str, Any] | None:
 
 
 def test_production_manifest_contains_only_the_five_applications() -> None:
-    assert BASE_COMPOSE_FILE == DOCKER_ROOT / "docker-compose.prod.yml"
+    assert BASE_COMPOSE_FILE == APPS_DOCKER_ROOT / "docker-compose.prod.yml"
     assert BASE_COMPOSE_FILE.is_file()
     assert COMMON_COMPOSE_SERVICES_FILE == (
-        DOCKER_ROOT / "docker-compose.common.services.yml"
+        APPS_DOCKER_ROOT / "docker-compose.common.services.yml"
     )
     assert COMMON_COMPOSE_SERVICES_FILE.is_file()
-    assert (DOCKER_ROOT / ".env.example").is_file()
+    assert (APPS_DOCKER_ROOT / ".env.example").is_file()
 
 
 def test_production_entrypoint_uses_portable_service_extends() -> None:
@@ -93,9 +94,9 @@ def test_dokploy_domain_patch_merges_with_web_configuration(tmp_path: Path) -> N
             "docker",
             "compose",
             "--project-directory",
-            str(DOCKER_ROOT),
+            str(APPS_DOCKER_ROOT),
             "--env-file",
-            str(DOCKER_ROOT / ".env.example"),
+            str(APPS_DOCKER_ROOT / ".env.example"),
             "--file",
             str(patched_compose_file),
             "config",
@@ -109,7 +110,7 @@ def test_dokploy_domain_patch_merges_with_web_configuration(tmp_path: Path) -> N
     web = services["web"]
 
     assert set(services) == set(CUSTOM_SERVICES)
-    assert web["build"]["dockerfile"] == "infra/docker/web/Dockerfile"
+    assert web["build"]["dockerfile"] == "infra/docker/apps/web/Dockerfile"
     assert web["read_only"] is True
     assert web["depends_on"]["database-migrations"]["condition"] == (
         "service_completed_successfully"
@@ -126,7 +127,7 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
             COMMON_COMPOSE_SERVICES_FILE.read_text(encoding="utf-8"),
         )
     )
-    example_source = (DOCKER_ROOT / ".env.example").read_text(encoding="utf-8")
+    example_source = (APPS_DOCKER_ROOT / ".env.example").read_text(encoding="utf-8")
     interpolated_names = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose_source))
     documented_values = dict(
         re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", example_source, re.MULTILINE)
@@ -162,11 +163,11 @@ def test_production_manifest_builds_the_five_expected_images(
     assert "nginx" not in services
 
     expected_dockerfiles = {
-        "database-migrations": "infra/docker/database-migrations/Dockerfile",
-        "web": "infra/docker/web/Dockerfile",
-        "worker-automation": "infra/docker/worker-automation/Dockerfile",
-        "worker-publisher": "infra/docker/worker-publisher/Dockerfile",
-        "worker-retention": "infra/docker/worker-retention/Dockerfile",
+        "database-migrations": "infra/docker/apps/database-migrations/Dockerfile",
+        "web": "infra/docker/apps/web/Dockerfile",
+        "worker-automation": "infra/docker/apps/worker-automation/Dockerfile",
+        "worker-publisher": "infra/docker/apps/worker-publisher/Dockerfile",
+        "worker-retention": "infra/docker/apps/worker-retention/Dockerfile",
     }
     for service_name, dockerfile in expected_dockerfiles.items():
         build = services[service_name]["build"]
@@ -188,7 +189,7 @@ def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
         "worker-publisher",
         "worker-retention",
     ):
-        dockerfile = (DOCKER_ROOT / application_name / "Dockerfile").read_text(
+        dockerfile = (APPS_DOCKER_ROOT / application_name / "Dockerfile").read_text(
             encoding="utf-8"
         )
         assert "COPY pyproject.toml uv.lock README.md ./" in dockerfile

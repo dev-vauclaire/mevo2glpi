@@ -10,7 +10,7 @@ def test_worker_image_context_includes_its_workspace_packages() -> None:
         (repository_root / ".dockerignore").read_text(encoding="utf-8").splitlines()
     )
     dockerfile = (
-        repository_root / "infra/docker/worker-automation/Dockerfile"
+        repository_root / "infra/docker/apps/worker-automation/Dockerfile"
     ).read_text(encoding="utf-8")
     workspace = tomllib.loads(
         (repository_root / "pyproject.toml").read_text(encoding="utf-8")
@@ -31,7 +31,7 @@ def test_worker_image_context_includes_its_workspace_packages() -> None:
 def test_worker_runtime_image_is_locked_minimal_and_non_root() -> None:
     repository_root = Path(__file__).resolve().parents[4]
     dockerfile = (
-        repository_root / "infra/docker/worker-automation/Dockerfile"
+        repository_root / "infra/docker/apps/worker-automation/Dockerfile"
     ).read_text(encoding="utf-8")
     runtime = dockerfile.split("FROM ${PYTHON_IMAGE} AS runtime", maxsplit=1)[1]
 

@@ -9,7 +9,7 @@ def test_web_image_context_includes_its_workspace_packages() -> None:
     dockerignore_rules = set(
         (repository_root / ".dockerignore").read_text(encoding="utf-8").splitlines()
     )
-    dockerfile = (repository_root / "infra/docker/web/Dockerfile").read_text(
+    dockerfile = (repository_root / "infra/docker/apps/web/Dockerfile").read_text(
         encoding="utf-8"
     )
     workspace = tomllib.loads(

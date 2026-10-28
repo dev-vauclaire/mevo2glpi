@@ -29,8 +29,8 @@ services:
   database-migrations:
     <<: *application-runtime
     build:
-      context: ../..
-      dockerfile: infra/docker/database-migrations/Dockerfile
+      context: ../../..
+      dockerfile: infra/docker/apps/database-migrations/Dockerfile
     environment:
       <<: *database-environment
       DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
@@ -47,8 +47,8 @@ services:
   web:
     <<: *application-runtime
     build:
-      context: ../..
-      dockerfile: infra/docker/web/Dockerfile
+      context: ../../..
+      dockerfile: infra/docker/apps/web/Dockerfile
     environment:
       <<: *database-environment
       AUDIO_ROOT: /data/audios
@@ -78,8 +78,8 @@ services:
   worker-automation:
     <<: *application-runtime
     build:
-      context: ../..
-      dockerfile: infra/docker/worker-automation/Dockerfile
+      context: ../../..
+      dockerfile: infra/docker/apps/worker-automation/Dockerfile
     environment:
       <<: *database-environment
       AUDIO_ROOT: /data/audios
@@ -118,8 +118,8 @@ services:
   worker-publisher:
     <<: *application-runtime
     build:
-      context: ../..
-      dockerfile: infra/docker/worker-publisher/Dockerfile
+      context: ../../..
+      dockerfile: infra/docker/apps/worker-publisher/Dockerfile
     environment:
       <<: *database-environment
       AUDIO_ROOT: /data/audios
@@ -152,8 +152,8 @@ services:
   worker-retention:
     <<: *application-runtime
     build:
-      context: ../..
-      dockerfile: infra/docker/worker-retention/Dockerfile
+      context: ../../..
+      dockerfile: infra/docker/apps/worker-retention/Dockerfile
     environment:
       <<: *database-environment
       AUDIO_ROOT: /data/audios

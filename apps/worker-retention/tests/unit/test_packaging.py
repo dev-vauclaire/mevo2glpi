@@ -24,7 +24,7 @@ def test_retention_image_context_and_runtime_are_minimal() -> None:
         (repository_root / ".dockerignore").read_text(encoding="utf-8").splitlines()
     )
     dockerfile = (
-        repository_root / "infra/docker/worker-retention/Dockerfile"
+        repository_root / "infra/docker/apps/worker-retention/Dockerfile"
     ).read_text(encoding="utf-8")
     workspace = tomllib.loads(
         (repository_root / "pyproject.toml").read_text(encoding="utf-8")

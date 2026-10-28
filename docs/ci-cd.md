@@ -100,8 +100,8 @@ uv run --all-packages pytest -m database -vv --maxfail=1
 Le manifeste Compose peut être rendu sans démarrer les services :
 
 ```bash
-docker compose --env-file ./infra/docker/.env.example --file infra/docker/docker-compose.prod.yml config --quiet
-docker compose --env-file ./infra/docker/staging.env.example --file infra/docker/docker-compose.staging.yml config --quiet
+docker compose --env-file ./infra/docker/apps/.env.example --file infra/docker/apps/docker-compose.prod.yml config --quiet
+docker compose --env-file ./infra/docker/apps/staging.env.example --file infra/docker/apps/docker-compose.staging.yml config --quiet
 docker compose --env-file ./infra/docker/providers/providers.env.example --file infra/docker/providers/docker-compose.providers.yml config --quiet
 ```
 
