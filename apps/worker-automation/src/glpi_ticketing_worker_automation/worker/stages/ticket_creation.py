@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from glpi_ticketing_database import ErrorScope, JobStage
@@ -72,6 +73,7 @@ class TicketCreationStage:
         job: JobSnapshotProtocol,
         *,
         transcription: str,
+        opened_at: datetime,
     ) -> TicketCreationStageResult:
         """Return a persisted ticket ID or an observable failure boundary."""
 
@@ -95,6 +97,7 @@ class TicketCreationStage:
                 audio_uuid=audio_uuid,
                 transcription=transcription,
                 audio_url=audio_url,
+                opened_at=opened_at,
                 defaults=self._ticket_defaults,
             )
         except (TypeError, ValueError):

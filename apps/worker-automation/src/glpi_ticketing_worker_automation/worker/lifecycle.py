@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TypeVar
 from uuid import UUID
 
@@ -12,17 +13,30 @@ from sqlalchemy.orm import Session
 from glpi_ticketing_database import (
     AudioRetentionRepository,
     ErrorScope,
-    JobAcquisition,
     JobEventActor,
     JobEventType,
     JobSnapshot,
     JobStage,
+    JobStatus,
+    MailIngestionDisposition,
+    MailIngestionRepository,
+    MailIngestionSnapshot,
     RetentionPolicy,
     TicketCreationJobEventRepository,
     TicketCreationJobRepository,
 )
 
 _ResultT = TypeVar("_ResultT")
+
+
+@dataclass(frozen=True, slots=True)
+class AutomationJobAcquisition:
+    """Acquired job enriched with immutable source-message metadata."""
+
+    job: JobSnapshot
+    previous_status: JobStatus
+    resumed: bool
+    source_received_at: datetime | None
 
 
 class AutomationJobLifecycleService:
@@ -42,12 +56,19 @@ class AutomationJobLifecycleService:
         retention_repository_factory: Callable[
             [Session], AudioRetentionRepository
         ] = AudioRetentionRepository,
+        mail_ingestion_repository_factory: Callable[
+            [Session], MailIngestionRepository
+        ] = MailIngestionRepository,
     ) -> None:
         for value, field_name in (
             (session_factory, "session_factory"),
             (job_repository_factory, "job_repository_factory"),
             (event_repository_factory, "event_repository_factory"),
             (retention_repository_factory, "retention_repository_factory"),
+            (
+                mail_ingestion_repository_factory,
+                "mail_ingestion_repository_factory",
+            ),
         ):
             if not callable(value):
                 raise TypeError(f"{field_name} must be callable")
@@ -59,16 +80,22 @@ class AutomationJobLifecycleService:
         self._job_repository_factory = job_repository_factory
         self._event_repository_factory = event_repository_factory
         self._retention_repository_factory = retention_repository_factory
+        self._mail_ingestion_repository_factory = mail_ingestion_repository_factory
 
-    def resume_or_claim_next(self, now: datetime) -> JobAcquisition | None:
+    def resume_or_claim_next(self, now: datetime) -> AutomationJobAcquisition | None:
         """Acquire one job and append the corresponding audit event atomically."""
 
-        def operation(session: Session) -> JobAcquisition | None:
+        def operation(session: Session) -> AutomationJobAcquisition | None:
             acquisition = self._job_repository_factory(session).resume_or_claim_next(
                 now
             )
             if acquisition is None:
                 return None
+            source_ingestion = None
+            if acquisition.job.glpi_ticket_id is None:
+                source_ingestion = self._mail_ingestion_repository_factory(
+                    session
+                ).get_by_uuid(acquisition.job.uuid)
             self._append_event(
                 session,
                 acquisition.job,
@@ -79,7 +106,15 @@ class AutomationJobLifecycleService:
                 ),
                 occurred_at=now,
             )
-            return acquisition
+            return AutomationJobAcquisition(
+                job=acquisition.job,
+                previous_status=acquisition.previous_status,
+                resumed=acquisition.resumed,
+                source_received_at=_source_received_at(
+                    source_ingestion,
+                    acquisition.job.uuid,
+                ),
+            )
 
         return self._transaction(operation)
 
@@ -342,4 +377,23 @@ def _no_op() -> None:
     return None
 
 
-__all__ = ["AutomationJobLifecycleService"]
+def _source_received_at(
+    source_ingestion: MailIngestionSnapshot | None,
+    job_uuid: UUID,
+) -> datetime | None:
+    """Return trusted UTC source time or ``None`` for an inconsistent link."""
+    if source_ingestion is None:
+        return None
+    if source_ingestion.uuid != job_uuid:
+        return None
+    if source_ingestion.job_uuid != job_uuid:
+        return None
+    if source_ingestion.disposition is not MailIngestionDisposition.ACCEPTED:
+        return None
+    received_at = source_ingestion.received_at
+    if not isinstance(received_at, datetime) or received_at.utcoffset() is None:
+        return None
+    return received_at.astimezone(UTC)
+
+
+__all__ = ["AutomationJobAcquisition", "AutomationJobLifecycleService"]

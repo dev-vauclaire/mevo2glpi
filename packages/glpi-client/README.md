@@ -21,6 +21,11 @@ le client, fournissent les secrets OAuth et construisent les commandes métier.
 Les valeurs fixes du ticket sont validées une fois dans `GlpiTicketDefaults`,
 puis transportées par `GlpiTicketCreateCommand` ; elles ne font pas partie de
 l'état du client HTTP.
+La commande exige également une date d'ouverture UTC. Le client la convertit
+avec `Europe/Paris` et l'envoie dans le champ métier GLPI `date` au format
+RFC 3339. Il ne renseigne jamais `date_creation`, réservé à l'horodatage
+technique de l'insertion par GLPI. La dépendance `tzdata` rend les règles de
+changement d'heure disponibles dans les images Python minimales.
 Les exceptions ne conservent ni corps HTTP brut ni secret.
 
 En niveau `DEBUG`, le client émet pour une erreur de transport un diagnostic

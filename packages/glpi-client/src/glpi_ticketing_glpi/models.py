@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from enum import IntEnum, StrEnum
 from typing import NewType
 from urllib.parse import urlsplit
@@ -108,6 +109,7 @@ class GlpiTicketCreateCommand:
     audio_uuid: UUID
     transcription: str = field(repr=False)
     audio_url: str
+    opened_at: datetime
     defaults: GlpiTicketDefaults
 
     def __post_init__(self) -> None:
@@ -123,6 +125,7 @@ class GlpiTicketCreateCommand:
         ):
             raise ValueError("transcription contains unsupported control characters")
         _validate_audio_url(self.audio_url)
+        _validate_utc_datetime(self.opened_at, "opened_at")
         if not isinstance(self.defaults, GlpiTicketDefaults):
             raise TypeError("defaults must be a GlpiTicketDefaults")
 
@@ -189,3 +192,12 @@ def _validate_audio_url(audio_url: object) -> None:
         raise ValueError("audio_url must be an absolute HTTP URL")
     if parsed_url.username or parsed_url.password:
         raise ValueError("audio_url must not contain credentials")
+
+
+def _validate_utc_datetime(value: object, field_name: str) -> None:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{field_name} must be a datetime")
+    if value.utcoffset() is None:
+        raise ValueError(f"{field_name} must be timezone-aware")
+    if value.utcoffset() != timedelta(0):
+        raise ValueError(f"{field_name} must be in UTC")

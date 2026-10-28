@@ -25,6 +25,7 @@ class JobAcquisitionProtocol(Protocol):
     """Lifecycle result describing the job selected in one transaction."""
 
     job: JobSnapshotProtocol
+    source_received_at: datetime | None
 
 
 class JobLifecycleProtocol(Protocol):

@@ -16,6 +16,7 @@ from glpi_ticketing_database import (
     InvalidJobTransitionError,
     JobStage,
     JobStatus,
+    MailIngestionDisposition,
 )
 from glpi_ticketing_glpi import GlpiTicketDefaults, TicketLevel, TicketType
 from glpi_ticketing_worker_automation.transcription import (
@@ -36,6 +37,7 @@ from glpi_ticketing_worker_automation.worker import (
 AUDIO_UUID = UUID("123e4567-e89b-42d3-a456-426614174000")
 STORAGE_KEY = f"{AUDIO_UUID}.wav"
 NOW = datetime(2026, 8, 28, 10, 0, tzinfo=UTC)
+SOURCE_RECEIVED_AT = datetime(2026, 8, 27, 7, 30, tzinfo=UTC)
 TRANSCRIPTION = "Contenu confidentiel de la transcription"
 SECRET = "temporary-secret-must-not-be-logged"
 SYNTHETIC_AUDIO = b"RIFF-test-audio"
@@ -63,12 +65,27 @@ class FakeJob:
 @dataclass(frozen=True, slots=True)
 class FakeAcquisition:
     job: FakeJob
+    previous_status: JobStatus = JobStatus.PENDING
     resumed: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class FakeMailIngestion:
+    uuid: UUID = AUDIO_UUID
+    job_uuid: UUID = AUDIO_UUID
+    disposition: MailIngestionDisposition = MailIngestionDisposition.ACCEPTED
+    received_at: datetime = SOURCE_RECEIVED_AT
+
+
 class FakeState:
-    def __init__(self, job: FakeJob | None = None) -> None:
+    def __init__(
+        self,
+        job: FakeJob | None = None,
+        *,
+        source_received_at: datetime | None = SOURCE_RECEIVED_AT,
+    ) -> None:
         self.job = job or FakeJob()
+        self.source_received_at = source_received_at
         self.eligible = True
         self.active_transactions = 0
         self.repository_calls: list[tuple[object, ...]] = []
@@ -236,6 +253,18 @@ class FakeTicketCreationJobRepository:
         return self._state.job
 
 
+class FakeMailIngestionRepository:
+    def __init__(self, session: FakeSession) -> None:
+        self._state = session.state
+
+    def get_by_uuid(self, job_uuid: UUID) -> FakeMailIngestion | None:
+        assert self._state.active_transactions == 1
+        self._state.repository_calls.append(("get_ingestion_by_uuid", job_uuid))
+        if self._state.source_received_at is None:
+            return None
+        return FakeMailIngestion(received_at=self._state.source_received_at)
+
+
 class FakeTicketCreationJobEventRepository:
     def __init__(self, session: FakeSession) -> None:
         self._state = session.state
@@ -316,6 +345,7 @@ def build_worker(
         job_repository_factory=FakeTicketCreationJobRepository,  # type: ignore[arg-type]
         event_repository_factory=FakeTicketCreationJobEventRepository,  # type: ignore[arg-type]
         retention_repository_factory=FakeAudioRetentionRepository,  # type: ignore[arg-type]
+        mail_ingestion_repository_factory=FakeMailIngestionRepository,  # type: ignore[arg-type]
     )
     transitions = JobTransitionService(
         lifecycle=lifecycle,

@@ -3,7 +3,7 @@
 from glpi_ticketing_database import ErrorScope, JobStage
 
 from .audio import AudioInspector
-from .lifecycle import AutomationJobLifecycleService
+from .lifecycle import AutomationJobAcquisition, AutomationJobLifecycleService
 from .outcomes import (
     BlockedOutcome,
     CompletedOutcome,
@@ -27,6 +27,7 @@ __all__ = [
     "AudioInspector",
     "AutomationWorker",
     "AutomationWorkerProtocol",
+    "AutomationJobAcquisition",
     "AutomationJobLifecycleService",
     "BlockedOutcome",
     "CompletedOutcome",

@@ -37,9 +37,13 @@ try {
     $username = required_test_environment('GLPI_TEST_USERNAME');
     $password = required_test_environment('GLPI_TEST_PASSWORD');
     $clientName = required_test_environment('GLPI_TEST_OAUTH_CLIENT_NAME');
+    $timezone = required_test_environment('GLPI_TEST_TIMEZONE');
 
     assert_test_only_name($username, 'GLPI_TEST_USERNAME');
     assert_test_only_name($clientName, 'GLPI_TEST_OAUTH_CLIENT_NAME');
+    if ($timezone !== 'Europe/Paris') {
+        throw new RuntimeException('GLPI_TEST_TIMEZONE must be Europe/Paris');
+    }
 
     $stage = 'boot_glpi';
     $glpiRoot = '/var/www/glpi';
@@ -83,6 +87,7 @@ try {
             'password' => $password,
             'password2' => $password,
             'is_active' => 1,
+            'timezone' => $timezone,
         ]);
         if ($userId === false || $userId === 0) {
             throw new RuntimeException('The GLPI test user could not be created');
@@ -94,8 +99,24 @@ try {
         }
     }
 
+    if ((string) ($user->fields['timezone'] ?? '') !== $timezone) {
+        $updated = $user->update([
+            'id' => (int) $user->getID(),
+            'timezone' => $timezone,
+        ]);
+        if (!$updated) {
+            throw new RuntimeException('The GLPI test user timezone could not be set');
+        }
+
+        $user = new User();
+        if (!$user->getFromDBByCrit($userCriteria)) {
+            throw new RuntimeException('The updated GLPI test user could not be loaded');
+        }
+    }
+
     if (
         (int) ($user->fields['is_active'] ?? 0) !== 1
+        || (string) ($user->fields['timezone'] ?? '') !== $timezone
         || !Auth::checkPassword($password, (string) ($user->fields['password'] ?? ''))
     ) {
         throw new RuntimeException('The GLPI test user is not usable');
@@ -150,6 +171,7 @@ try {
         'oauth_client_id' => (int) $oauthClient->getID(),
         'grant_type' => 'password',
         'scope' => 'api',
+        'timezone' => $timezone,
     ];
 
     fwrite(

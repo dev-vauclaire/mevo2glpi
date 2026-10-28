@@ -28,6 +28,7 @@ services:
       db:
         condition: service_healthy
     environment:
+      TZ: Europe/Paris
       GLPI_CRONTAB_ENABLED: "0"
       GLPI_DB_HOST: ${GLPI_DB_HOST:?GLPI_DB_HOST is required}
       GLPI_DB_PORT: ${GLPI_DB_PORT:?GLPI_DB_PORT is required}
@@ -38,6 +39,7 @@ services:
       GLPI_TEST_PASSWORD: ${GLPI_TEST_PASSWORD:?GLPI_TEST_PASSWORD is required}
       GLPI_TEST_OAUTH_CLIENT_NAME: ${GLPI_TEST_OAUTH_CLIENT_NAME:?GLPI_TEST_OAUTH_CLIENT_NAME is required}
       GLPI_TEST_REQUEST_SOURCE_NAME: ${GLPI_TEST_REQUEST_SOURCE_NAME:?GLPI_TEST_REQUEST_SOURCE_NAME is required}
+      GLPI_TEST_TIMEZONE: ${GLPI_TEST_TIMEZONE:?GLPI_TEST_TIMEZONE is required}
     ports:
       - target: 80
         published: 0

@@ -104,7 +104,7 @@ def test_retry_backoff_series_is_shared_across_transcription_and_glpi(
 def test_processing_job_with_ticket_finalizes_without_external_call(
     tmp_path: Path,
 ) -> None:
-    state = FakeState(FakeJob(glpi_ticket_id=42))
+    state = FakeState(FakeJob(glpi_ticket_id=42), source_received_at=None)
     audio_path = write_audio(tmp_path)
     transcriber = FakeTranscriber(state, [])
     glpi_client = FakeGlpiClient(state, [])

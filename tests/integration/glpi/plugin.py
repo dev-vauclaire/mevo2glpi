@@ -58,6 +58,7 @@ class OAuthBootstrapResult:
     oauth_client_id: int
     grant_type: str
     scope: str
+    timezone: str
 
     def is_identical_to(self, other: OAuthBootstrapResult) -> bool:
         """Compare two results without exposing credentials in pytest output."""
@@ -70,6 +71,7 @@ class OAuthBootstrapResult:
             and self.oauth_client_id == other.oauth_client_id
             and self.grant_type == other.grant_type
             and self.scope == other.scope
+            and self.timezone == other.timezone
         )
 
 
@@ -190,6 +192,7 @@ def _new_environment() -> dict[str, str]:
         "GLPI_TEST_PASSWORD": f"T!9a-{secrets.token_urlsafe(32)}",
         "GLPI_TEST_OAUTH_CLIENT_NAME": f"glpi-test-oauth-{suffix}",
         "GLPI_TEST_REQUEST_SOURCE_NAME": "MEVO",
+        "GLPI_TEST_TIMEZONE": "Europe/Paris",
     }
 
 
@@ -233,6 +236,7 @@ def _parse_bootstrap_result(stdout: str) -> OAuthBootstrapResult:
         "oauth_client_id",
         "grant_type",
         "scope",
+        "timezone",
     }
     try:
         payload = json.loads(stdout)
@@ -536,6 +540,7 @@ def _assert_expected_credentials(
         and hmac.compare_digest(result.password, environment["GLPI_TEST_PASSWORD"])
         and result.grant_type == "password"
         and result.scope == "api"
+        and result.timezone == environment["GLPI_TEST_TIMEZONE"]
     )
     if not matches:
         raise RuntimeError("GLPI bootstrap credentials do not match the test contract")

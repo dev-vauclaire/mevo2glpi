@@ -234,6 +234,7 @@ def _create_ticket(
                 audio_uuid=audio_uuid,
                 transcription="Transcription synthétique du test de rétention.",
                 audio_url=f"https://audio.example.test/{audio_uuid}.wav",
+                opened_at=NOW,
                 defaults=GlpiTicketDefaults(
                     title="Demande audio de rétention",
                     ticket_type=TicketType.REQUEST,

@@ -8,13 +8,14 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_database import JobStatus
+from glpi_ticketing_database import ErrorScope, JobStage, JobStatus
 from glpi_ticketing_glpi import (
     GlpiOperation,
     GlpiTicketCreateCommand,
     GlpiTransportError,
 )
 from glpi_ticketing_worker_automation.worker import (
+    BlockedOutcome,
     CompletedOutcome,
     IdleOutcome,
     RetryOutcome,
@@ -24,6 +25,7 @@ from glpi_ticketing_worker_automation.worker import (
 from ._pipeline_fakes import (
     AUDIO_UUID,
     SECRET,
+    SOURCE_RECEIVED_AT,
     SYNTHETIC_AUDIO,
     TICKET_DEFAULTS,
     TRANSCRIPTION,
@@ -54,6 +56,7 @@ def test_success_persists_ticket_before_completion_and_keeps_audio(
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
     assert [call[0] for call in state.repository_calls] == [
         "resume_or_claim_next",
+        "get_ingestion_by_uuid",
         "record_transcription_succeeded",
         "record_ticket_confirmed",
         "mark_completed",
@@ -64,6 +67,7 @@ def test_success_persists_ticket_before_completion_and_keeps_audio(
             audio_uuid=AUDIO_UUID,
             transcription=TRANSCRIPTION,
             audio_url=f"https://audio.test/audios/{AUDIO_UUID}",
+            opened_at=SOURCE_RECEIVED_AT,
             defaults=TICKET_DEFAULTS,
         )
     ]
@@ -78,7 +82,10 @@ def test_job_started_hook_runs_after_acquisition_transaction(
 
     def record_started_job(audio_uuid: UUID) -> None:
         assert state.active_transactions == 0
-        assert repository_call_names(state) == ["resume_or_claim_next"]
+        assert repository_call_names(state) == [
+            "resume_or_claim_next",
+            "get_ingestion_by_uuid",
+        ]
         started_jobs.append(audio_uuid)
 
     worker = build_worker(
@@ -118,7 +125,10 @@ def test_job_started_hook_failure_stops_before_external_calls(tmp_path: Path) ->
 
     def fail_job_started(_audio_uuid: UUID) -> None:
         assert state.active_transactions == 0
-        assert repository_call_names(state) == ["resume_or_claim_next"]
+        assert repository_call_names(state) == [
+            "resume_or_claim_next",
+            "get_ingestion_by_uuid",
+        ]
         raise expected_error
 
     worker = build_worker(
@@ -161,7 +171,10 @@ def test_ownership_loss_after_transcription_prevents_glpi_and_transitions(
     assert guard.calls == 4
     assert transcriber.calls == [audio_path]
     assert glpi_client.calls == []
-    assert repository_call_names(state) == ["resume_or_claim_next"]
+    assert repository_call_names(state) == [
+        "resume_or_claim_next",
+        "get_ingestion_by_uuid",
+    ]
     assert state.eligible is True
 
 
@@ -187,6 +200,36 @@ def test_glpi_retry_does_not_retain_transcription_between_attempts(
     assert isinstance(first_outcome, RetryOutcome)
     assert isinstance(second_outcome, CompletedOutcome)
     assert transcriber.calls == [audio_path, audio_path]
+    assert [call.opened_at for call in glpi_client.calls] == [
+        SOURCE_RECEIVED_AT,
+        SOURCE_RECEIVED_AT,
+    ]
+
+
+def test_missing_source_date_blocks_before_audio_and_external_calls(
+    tmp_path: Path,
+) -> None:
+    state = FakeState(source_received_at=None)
+    audio_path = write_audio(tmp_path)
+    transcriber = FakeTranscriber(state, [])
+    glpi_client = FakeGlpiClient(state, [])
+    worker = build_worker(tmp_path, state, transcriber, glpi_client)
+
+    outcome = worker.run_once()
+
+    assert isinstance(outcome, BlockedOutcome)
+    assert outcome.stage is JobStage.TRANSCRIPTION
+    assert outcome.failure.scope is ErrorScope.JOB
+    assert outcome.failure.category == "data_integrity"
+    assert outcome.failure.technical_code == "source_received_at_missing"
+    assert transcriber.calls == []
+    assert glpi_client.calls == []
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    assert repository_call_names(state) == [
+        "resume_or_claim_next",
+        "get_ingestion_by_uuid",
+        "mark_blocked",
+    ]
 
 
 def test_worker_logs_uuid_but_never_transcription(

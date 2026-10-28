@@ -3,6 +3,7 @@ import logging
 import math
 import ssl
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta, timezone
 from inspect import signature
 from urllib.parse import parse_qs
 from uuid import UUID
@@ -53,6 +54,7 @@ TICKET_TYPE = TicketType(1)
 REQUEST_SOURCE_ID = 7
 TICKET_URGENCY = TicketLevel(2)
 TICKET_IMPACT = TicketLevel(3)
+OPENED_AT = datetime(2026, 8, 31, 9, 18, 53, tzinfo=UTC)
 DEFAULTS = GlpiTicketDefaults(
     title=TICKET_TITLE,
     ticket_type=TICKET_TYPE,
@@ -91,11 +93,13 @@ def make_ticket_command(
     transcription: object = TRANSCRIPTION,
     audio_url: object = AUDIO_URL,
     audio_uuid: object = AUDIO_UUID,
+    opened_at: object = OPENED_AT,
 ) -> GlpiTicketCreateCommand:
     return GlpiTicketCreateCommand(
         audio_uuid=audio_uuid,  # type: ignore[arg-type]
         transcription=transcription,  # type: ignore[arg-type]
         audio_url=audio_url,  # type: ignore[arg-type]
+        opened_at=opened_at,  # type: ignore[arg-type]
         defaults=DEFAULTS,
     )
 
@@ -728,6 +732,8 @@ def test_ensure_ticket_searches_then_creates_with_the_expected_payload() -> None
         assert payload["name"] == TICKET_TITLE
         assert str(AUDIO_UUID) not in payload["name"]
         assert payload["external_id"] == str(AUDIO_UUID)
+        assert payload["date"] == "2026-08-31T11:18:53+02:00"
+        assert "date_creation" not in payload
         assert payload["type"] == 1
         assert payload["request_type"] == {"id": REQUEST_SOURCE_ID}
         assert payload["urgency"] == 2
@@ -749,6 +755,38 @@ def test_ensure_ticket_searches_then_creates_with_the_expected_payload() -> None
 
     assert ticket_id == 73
     assert [request.method for request in requests] == ["POST", "GET", "POST"]
+
+
+@pytest.mark.parametrize(
+    ("opened_at", "expected_glpi_date"),
+    [
+        (
+            datetime(2026, 8, 31, 9, 18, 53, 987654, tzinfo=UTC),
+            "2026-08-31T11:18:53+02:00",
+        ),
+        (
+            datetime(2026, 12, 31, 9, 18, 53, 987654, tzinfo=UTC),
+            "2026-12-31T10:18:53+01:00",
+        ),
+    ],
+)
+def test_ensure_ticket_serializes_opening_date_in_europe_paris(
+    opened_at: datetime,
+    expected_glpi_date: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        payload = json.loads(request.content)
+        assert payload["date"] == expected_glpi_date
+        assert "date_creation" not in payload
+        return httpx.Response(201, json={"id": 73})
+
+    client, http_client = make_glpi_client(handler)
+    with http_client:
+        assert client.ensure_ticket(make_ticket_command(opened_at=opened_at)) == 73
 
 
 def test_ownership_loss_after_search_prevents_ticket_creation() -> None:
@@ -1394,6 +1432,20 @@ def test_get_ticket_rejects_invalid_identifiers_without_request(
         ("audio_url", "relative/audio.wav"),
         ("audio_url", "ftp://storage.example.test/audio.wav"),
         ("audio_url", "https://user:password@storage.example.test/audio.wav"),
+        ("opened_at", "2026-08-31T09:18:53Z"),
+        ("opened_at", datetime(2026, 8, 31, 9, 18, 53)),
+        (
+            "opened_at",
+            datetime(
+                2026,
+                8,
+                31,
+                11,
+                18,
+                53,
+                tzinfo=timezone(timedelta(hours=2)),
+            ),
+        ),
         ("defaults", object()),
     ],
 )
@@ -1405,6 +1457,7 @@ def test_ticket_create_command_rejects_invalid_values(
         "audio_uuid": AUDIO_UUID,
         "transcription": TRANSCRIPTION,
         "audio_url": AUDIO_URL,
+        "opened_at": OPENED_AT,
         "defaults": DEFAULTS,
     }
     arguments[field] = invalid_value

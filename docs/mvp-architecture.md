@@ -310,9 +310,11 @@ flowchart TD
     Lock --> Select[Priorité : processing, retry dû, pending]
     Select --> HasTicket{glpi_ticket_id présent ?}
     HasTicket -->|oui| Finalize[Finalisation]
-    HasTicket -->|non| Read[Système : lire et vérifier l'audio]
+    HasTicket -->|non| SourceDate{Date Exchange liée et valide ?}
+    SourceDate -->|non| Blocked[SQL : blocked data_integrity]
+    SourceDate -->|oui| Read[Système : lire et vérifier l'audio]
     Read --> Transcribe[HTTP : soumettre puis poller Transcribe AI]
-    Transcribe --> GLPI[HTTP : retrouver ou créer le ticket GLPI]
+    Transcribe --> GLPI[HTTP : créer avec date d'ouverture Europe/Paris]
     GLPI --> Persist[SQL : persister glpi_ticket_id]
     Persist --> Finalize
     Finalize --> Complete[SQL : completed + rétention + événement]
@@ -322,6 +324,14 @@ La transcription n'est pas persistée. Un redémarrage retranscrit donc tout job
 sans `glpi_ticket_id`, même si une étape de transcription avait déjà réussi.
 L'identifiant provider est persisté dès la soumission, mais ne remplace pas le
 contenu de transcription.
+
+La date d'ouverture du ticket provient exclusivement de
+`mail_ingestions.received_at`, conservée en UTC. Le service applicatif relit
+l'ingestion liée dans la transaction d'acquisition du job, puis le client GLPI
+convertit cet instant avec le fuseau IANA `Europe/Paris` et renseigne le champ
+métier `date`. `date_creation` reste l'horodatage technique géré par GLPI. Une
+date source absente ou incohérente bloque le job avant tout appel externe ;
+aucune date de traitement n'est utilisée comme repli.
 
 `glpi_ticket_id` constitue la frontière de durabilité GLPI. Dès qu'il est
 persisté, le worker considère la création confirmée et reprend directement la

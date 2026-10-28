@@ -173,6 +173,7 @@ def test_glpi_api_contract_is_pinned_to_v2_3_0(glpi_environment) -> None:
     request_type_properties = _require_mapping(request_type_schema, "properties")
     request_type_id_schema = _require_mapping(request_type_properties, "id")
     request_type_name_schema = _require_mapping(request_type_properties, "name")
+    opening_date_schema = _require_mapping(ticket_properties, "date")
 
     assert status_schema.get("type") == "object"
     assert status_id_schema.get("type") == "integer"
@@ -184,6 +185,9 @@ def test_glpi_api_contract_is_pinned_to_v2_3_0(glpi_environment) -> None:
     assert request_type_id_schema.get("type") == "integer"
     assert request_type_id_schema.get("format") == "int64"
     assert request_type_name_schema.get("type") == "string"
+    assert opening_date_schema.get("type") == "string"
+    assert opening_date_schema.get("format") == "date-time"
+    assert opening_date_schema.get("readOnly") is not True
 
 
 def test_oauth_bootstrap_is_idempotent(glpi_environment) -> None:
@@ -250,6 +254,8 @@ def test_custom_image_contains_no_real_secret(glpi_environment) -> None:
     assert "new RequestType" in request_source_bootstrap
     assert "$requestType->add" in request_source_bootstrap
     assert "$requestType->update" in request_source_bootstrap
+    assert "Europe/Paris" in bootstrap
+    assert "$user->update" in bootstrap
     assert "INSERT " not in status_helper
     assert "UPDATE " not in status_helper
     assert "DELETE " not in status_helper

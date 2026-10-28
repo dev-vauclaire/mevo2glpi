@@ -16,11 +16,13 @@ from glpi_ticketing_common.audio_files import publish_audio
 from glpi_ticketing_database import (
     AudioExtension,
     AudioRetention,
+    DiscoveredMail,
     ErrorScope,
     JobEventActor,
     JobEventType,
     JobStage,
     JobStatus,
+    MailIngestionRepository,
     PendingJob,
     RetentionPolicy,
     RetentionStatus,
@@ -54,6 +56,8 @@ from glpi_ticketing_worker_automation.worker import (
 pytestmark = pytest.mark.database
 
 NOW = datetime(2026, 8, 28, 10, 0, tzinfo=UTC)
+SOURCE_RECEIVED_AT = datetime(2026, 8, 27, 7, 30, tzinfo=UTC)
+MAILBOX_ID = UUID("78f1f5c0-c798-4af9-9876-f61ef00d996c")
 SYNTHETIC_AUDIO = b"RIFF-persistent-worker-integration"
 TRANSCRIPTION = "Transcription réservée au ticket de test"
 
@@ -175,6 +179,7 @@ def test_pending_job_completes_with_events_retention_and_unchanged_audio(
     outcome = worker.run_once()
 
     assert outcome == CompletedOutcome(audio_uuid=audio_uuid, ticket_id=42)
+    assert [command.opened_at for command in glpi_client.calls] == [SOURCE_RECEIVED_AT]
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
     assert list(tmp_path.iterdir()) == [audio_path]
 
@@ -465,6 +470,41 @@ def test_replaced_audio_size_is_blocked_before_external_calls(
     assert job.last_error_code == "audio_size_mismatch"
 
 
+def test_missing_mail_ingestion_blocks_before_audio_and_external_calls(
+    migrated_engine,
+    tmp_path: Path,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    audio_uuid, audio_path = _add_pending_job(
+        session_factory,
+        tmp_path,
+        with_source_ingestion=False,
+    )
+    transcriber = FailIfCalledTranscriber()
+    glpi_client = FailIfCalledGlpiClient()
+
+    outcome = _worker(
+        session_factory,
+        tmp_path,
+        transcriber,
+        glpi_client,
+        MutableClock(NOW),
+    ).run_once()
+
+    assert isinstance(outcome, BlockedOutcome)
+    assert outcome.failure.scope is ErrorScope.JOB
+    assert outcome.failure.category == "data_integrity"
+    assert outcome.failure.technical_code == "source_received_at_missing"
+    assert transcriber.calls == 0
+    assert glpi_client.calls == 0
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+    with session_factory() as session:
+        job = session.get(TicketCreationJob, audio_uuid)
+    assert job is not None
+    assert job.status == JobStatus.BLOCKED.value
+    assert job.last_error_code == "source_received_at_missing"
+
+
 def test_completion_event_failure_rolls_back_status_and_retention_together(
     migrated_engine,
     tmp_path: Path,
@@ -570,11 +610,37 @@ def test_terminal_event_failure_rolls_back_job_and_retention_together(
     assert terminal_events == []
 
 
-def _add_pending_job(session_factory, audio_root: Path) -> tuple[UUID, Path]:
+def _add_pending_job(
+    session_factory,
+    audio_root: Path,
+    *,
+    with_source_ingestion: bool = True,
+) -> tuple[UUID, Path]:
     audio_uuid = uuid4()
     storage_key = f"{audio_uuid}.wav"
     published = publish_audio(audio_root, storage_key, BytesIO(SYNTHETIC_AUDIO))
     with session_factory.begin() as session:
+        ingestion_repository = MailIngestionRepository(session)
+        if with_source_ingestion:
+            ingestion_repository.add_discovered(
+                DiscoveredMail(
+                    uuid=audio_uuid,
+                    mailbox_id=MAILBOX_ID,
+                    message_id=f"message-{audio_uuid}",
+                    received_at=SOURCE_RECEIVED_AT,
+                ),
+                now=NOW,
+            )
+            acquisition = ingestion_repository.resume_or_claim_next(NOW)
+            assert acquisition is not None
+            assert acquisition.ingestion.uuid == audio_uuid
+            ingestion_repository.record_attachment_validated(
+                audio_uuid,
+                attachment_id=f"attachment-{audio_uuid}",
+                audio_extension=AudioExtension.WAV,
+                attachment_size_bytes=published.size_bytes,
+                now=NOW,
+            )
         pending = PendingJob(
             uuid=audio_uuid,
             storage_key=storage_key,
@@ -582,13 +648,24 @@ def _add_pending_job(session_factory, audio_root: Path) -> tuple[UUID, Path]:
             audio_size_bytes=published.size_bytes,
         )
         snapshot = TicketCreationJobRepository(session).add_pending(pending)
+        if with_source_ingestion:
+            ingestion_repository.record_accepted(
+                audio_uuid,
+                job_uuid=audio_uuid,
+                now=NOW,
+            )
+            ingestion_repository.record_completed(audio_uuid, now=NOW)
         TicketCreationJobEventRepository(session).append(
             snapshot.uuid,
             occurred_at=snapshot.created_at,
             status=snapshot.status,
             stage=snapshot.stage,
             event_type=JobEventType.JOB_CREATED,
-            actor=JobEventActor.WEB,
+            actor=(
+                JobEventActor.WORKER_PUBLISHER
+                if with_source_ingestion
+                else JobEventActor.WEB
+            ),
         )
     return audio_uuid, published.path
 

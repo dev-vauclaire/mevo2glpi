@@ -19,10 +19,12 @@ from glpi_ticketing_common.audio_files import publish_audio
 from glpi_ticketing_database import (
     AudioExtension,
     AudioRetention,
+    DiscoveredMail,
     JobEventActor,
     JobEventType,
     JobStage,
     JobStatus,
+    MailIngestionRepository,
     PendingJob,
     RetentionStatus,
     TicketCreationJob,
@@ -53,6 +55,10 @@ PIPELINE_TIMEOUT_SECONDS = 15 * 60.0
 GLPI_HTTP_TIMEOUT_SECONDS = 30.0
 PUBLIC_BASE_URL = "https://audio.e2e.test/poc"
 TICKET_TITLE = "Demande issue du pipeline E2E"
+SOURCE_RECEIVED_AT = datetime(2026, 1, 15, 8, 30, tzinfo=UTC)
+PUBLISH_TIME = datetime(2026, 10, 28, 8, tzinfo=UTC)
+MAILBOX_ID = UUID("78f1f5c0-c798-4af9-9876-f61ef00d996c")
+EXPECTED_PARIS_OPENING_WALL_TIME = datetime(2026, 1, 15, 9, 30)
 FIRST_PARAGRAPH_PATTERN = re.compile(r"\A\s*<p>(.*?)</p>", flags=re.DOTALL)
 
 
@@ -79,6 +85,26 @@ def test_worker_transcribes_audio_creates_ticket_and_completes_job(
     session_factory = create_session_factory(engine)
     try:
         with session_factory.begin() as session:
+            ingestion_repository = MailIngestionRepository(session)
+            ingestion_repository.add_discovered(
+                DiscoveredMail(
+                    uuid=audio_uuid,
+                    mailbox_id=MAILBOX_ID,
+                    message_id=f"message-{audio_uuid}",
+                    received_at=SOURCE_RECEIVED_AT,
+                ),
+                now=PUBLISH_TIME,
+            )
+            acquisition = ingestion_repository.resume_or_claim_next(PUBLISH_TIME)
+            assert acquisition is not None
+            assert acquisition.ingestion.uuid == audio_uuid
+            ingestion_repository.record_attachment_validated(
+                audio_uuid,
+                attachment_id=f"attachment-{audio_uuid}",
+                audio_extension=AudioExtension.WAV,
+                attachment_size_bytes=published.size_bytes,
+                now=PUBLISH_TIME,
+            )
             snapshot = TicketCreationJobRepository(session).add_pending(
                 PendingJob(
                     uuid=audio_uuid,
@@ -87,13 +113,19 @@ def test_worker_transcribes_audio_creates_ticket_and_completes_job(
                     audio_size_bytes=published.size_bytes,
                 )
             )
+            ingestion_repository.record_accepted(
+                audio_uuid,
+                job_uuid=audio_uuid,
+                now=PUBLISH_TIME,
+            )
+            ingestion_repository.record_completed(audio_uuid, now=PUBLISH_TIME)
             TicketCreationJobEventRepository(session).append(
                 snapshot.uuid,
                 occurred_at=snapshot.created_at,
                 status=snapshot.status,
                 stage=snapshot.stage,
                 event_type=JobEventType.JOB_CREATED,
-                actor=JobEventActor.WEB,
+                actor=JobEventActor.WORKER_PUBLISHER,
             )
 
         settings = _build_settings(
@@ -156,6 +188,15 @@ def test_worker_transcribes_audio_creates_ticket_and_completes_job(
         pytest.fail("The GLPI ticket does not match the worker outcome")
     if ticket.get("external_id") != str(audio_uuid):
         pytest.fail("The GLPI ticket external_id does not match the audio UUID")
+    ticket_date = ticket.get("date")
+    if not isinstance(ticket_date, str):
+        pytest.fail("The GLPI ticket has no opening date")
+    try:
+        opening_date = datetime.fromisoformat(ticket_date)
+    except ValueError:
+        pytest.fail("The GLPI ticket opening date is invalid")
+    if opening_date.replace(tzinfo=None) != EXPECTED_PARIS_OPENING_WALL_TIME:
+        pytest.fail("The GLPI ticket opening date does not match the Exchange date")
 
     content = ticket.get("content")
     if not isinstance(content, str):

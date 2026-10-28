@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import httpx
@@ -33,6 +35,8 @@ TEST_TICKET_TITLE = "Demande issue d'un audio de test"
 TEST_TICKET_TYPE = TicketType.INCIDENT
 TEST_TICKET_URGENCY = TicketLevel.LOW
 TEST_TICKET_IMPACT = TicketLevel.MEDIUM
+TEST_OPENED_AT = datetime(2026, 1, 15, 8, 30, tzinfo=UTC)
+EXPECTED_PARIS_WALL_TIME = datetime(2026, 1, 15, 9, 30)
 
 
 def _new_glpi_client(glpi_environment, http_client: httpx.Client) -> GlpiClient:
@@ -78,14 +82,20 @@ def test_glpi_client_creates_one_ticket_per_audio_uuid(glpi_environment) -> None
         audio_uuid=audio_uuid,
         transcription=transcription,
         audio_url=audio_url,
+        opened_at=TEST_OPENED_AT,
         defaults=_ticket_defaults(glpi_environment),
     )
+    conflicting_retry_command = replace(
+        command,
+        opened_at=TEST_OPENED_AT + timedelta(days=1),
+    )
 
+    creation_window_start = datetime.now(UTC)
     with httpx.Client() as http_client:
         client = _new_glpi_client(glpi_environment, http_client)
         token = client.authenticate()
         first_ticket_id = client.ensure_ticket(command)
-        second_ticket_id = client.ensure_ticket(command)
+        second_ticket_id = client.ensure_ticket(conflicting_retry_command)
         snapshot = client.get_ticket(first_ticket_id)
 
         response = http_client.get(
@@ -103,6 +113,7 @@ def test_glpi_client_creates_one_ticket_per_audio_uuid(glpi_environment) -> None
             timeout=GLPI_HTTP_TIMEOUT_SECONDS,
             follow_redirects=False,
         )
+    creation_window_end = datetime.now(UTC)
 
     if response.status_code not in {httpx.codes.OK, httpx.codes.PARTIAL_CONTENT}:
         pytest.fail(
@@ -151,6 +162,19 @@ def test_glpi_client_creates_one_ticket_per_audio_uuid(glpi_environment) -> None
     assert ticket.get("urgency") == int(TEST_TICKET_URGENCY)
     assert ticket.get("impact") == int(TEST_TICKET_IMPACT)
     assert ticket.get("priority") in {level.value for level in TicketLevel}
+    opening_date = _require_aware_datetime(ticket, "date")
+    technical_creation_date = _require_aware_datetime(ticket, "date_creation")
+    # GLPI 11.0.7 deliberately converts the RFC 3339 input to its naive
+    # business format before persistence. Its API then labels the stored wall
+    # time with the server offset, so the meaningful contract here is the
+    # Europe/Paris wall time; the unit test separately pins the outbound +01:00.
+    assert opening_date.replace(tzinfo=None) == EXPECTED_PARIS_WALL_TIME
+    assert (
+        creation_window_start - timedelta(seconds=2)
+        <= technical_creation_date.astimezone(UTC)
+        <= creation_window_end + timedelta(seconds=2)
+    )
+    assert technical_creation_date != opening_date
 
 
 def test_get_ticket_tracks_initial_solved_and_closed_status(glpi_environment) -> None:
@@ -159,6 +183,7 @@ def test_get_ticket_tracks_initial_solved_and_closed_status(glpi_environment) ->
         audio_uuid=audio_uuid,
         transcription="Transcription reservee aux transitions GLPI de test.",
         audio_url=f"https://audio.example.test/recordings/{audio_uuid}.wav",
+        opened_at=TEST_OPENED_AT,
         defaults=_ticket_defaults(glpi_environment),
     )
 
@@ -200,3 +225,19 @@ def test_get_ticket_raises_dedicated_not_found_error(glpi_environment) -> None:
     assert error.category is GlpiErrorCategory.NOT_FOUND
     assert error.technical_code == "ticket_not_found"
     assert error.retryable is False
+
+
+def _require_aware_datetime(
+    payload: Mapping[str, object],
+    field_name: str,
+) -> datetime:
+    value = payload.get(field_name)
+    if not isinstance(value, str):
+        pytest.fail(f"The GLPI ticket has no valid {field_name}")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        pytest.fail(f"The GLPI ticket returned an invalid {field_name}")
+    if parsed.utcoffset() is None:
+        pytest.fail(f"The GLPI ticket returned a naive {field_name}")
+    return parsed

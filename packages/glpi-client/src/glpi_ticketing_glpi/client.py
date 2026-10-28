@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TypeVar
+from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import SecretStr
@@ -48,6 +49,7 @@ TICKET_REJECTION_VIOLATIONS = {
     "content": frozenset({"maxLength", "pattern"}),
     "external_id": frozenset({"maxLength", "pattern"}),
 }
+GLPI_TICKET_TIMEZONE = ZoneInfo("Europe/Paris")
 
 _ResultT = TypeVar("_ResultT")
 
@@ -326,6 +328,7 @@ class GlpiClient:
                         "name": command.defaults.title,
                         "content": _build_ticket_content(command),
                         "external_id": external_id,
+                        "date": _serialize_ticket_opening_date(command),
                         "type": int(command.defaults.ticket_type),
                         "request_type": {
                             "id": command.defaults.request_source_id,
@@ -502,6 +505,12 @@ def _build_ticket_content(command: GlpiTicketCreateCommand) -> str:
     transcription = "<br>\n".join(transcription.splitlines())
     audio_url = html.escape(command.audio_url, quote=True)
     return f'<p>{transcription}</p><p>Audio : <a href="{audio_url}">{audio_url}</a></p>'
+
+
+def _serialize_ticket_opening_date(command: GlpiTicketCreateCommand) -> str:
+    return command.opened_at.astimezone(GLPI_TICKET_TIMEZONE).isoformat(
+        timespec="seconds"
+    )
 
 
 def _decode_object(

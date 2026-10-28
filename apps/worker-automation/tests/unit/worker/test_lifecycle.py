@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, create_autospec
 from uuid import UUID
 
@@ -17,36 +18,55 @@ from glpi_ticketing_database import (
     JobSnapshot,
     JobStage,
     JobStatus,
+    MailIngestionDisposition,
     RetentionPolicy,
 )
-from glpi_ticketing_worker_automation.worker import AutomationJobLifecycleService
+from glpi_ticketing_worker_automation.worker import (
+    AutomationJobAcquisition,
+    AutomationJobLifecycleService,
+)
 
 JOB_UUID = UUID("123e4567-e89b-42d3-a456-426614174000")
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
+SOURCE_RECEIVED_AT = datetime(2026, 8, 27, 7, 30, tzinfo=UTC)
 
 
 def test_claim_and_event_are_orchestrated_in_one_application_transaction() -> None:
     session = create_autospec(Session, instance=True)
     job_repository = MagicMock()
     event_repository = MagicMock()
+    mail_repository = MagicMock()
     acquisition = JobAcquisition(
         job=_snapshot(status=JobStatus.PROCESSING, stage=JobStage.TRANSCRIPTION),
         previous_status=JobStatus.PENDING,
         resumed=False,
     )
     job_repository.resume_or_claim_next.return_value = acquisition
+    mail_repository.get_by_uuid.return_value = SimpleNamespace(
+        uuid=JOB_UUID,
+        job_uuid=JOB_UUID,
+        disposition=MailIngestionDisposition.ACCEPTED,
+        received_at=SOURCE_RECEIVED_AT,
+    )
     guards: list[str] = []
     service = _service(
         session,
         job_repository=job_repository,
         event_repository=event_repository,
+        mail_repository=mail_repository,
         ownership_guard=lambda: guards.append("guard"),
     )
 
     result = service.resume_or_claim_next(NOW)
 
-    assert result == acquisition
+    assert result == AutomationJobAcquisition(
+        job=acquisition.job,
+        previous_status=JobStatus.PENDING,
+        resumed=False,
+        source_received_at=SOURCE_RECEIVED_AT,
+    )
     job_repository.resume_or_claim_next.assert_called_once_with(NOW)
+    mail_repository.get_by_uuid.assert_called_once_with(JOB_UUID)
     event_repository.append.assert_called_once_with(
         JOB_UUID,
         occurred_at=NOW,
@@ -61,6 +81,69 @@ def test_claim_and_event_are_orchestrated_in_one_application_transaction() -> No
     session.begin.assert_called_once_with()
     session.close.assert_called_once_with()
     assert guards == ["guard", "guard"]
+
+
+def test_claim_without_matching_mail_ingestion_has_no_source_date() -> None:
+    session = create_autospec(Session, instance=True)
+    job_repository = MagicMock()
+    event_repository = MagicMock()
+    mail_repository = MagicMock()
+    acquisition = JobAcquisition(
+        job=_snapshot(status=JobStatus.PROCESSING, stage=JobStage.TRANSCRIPTION),
+        previous_status=JobStatus.PENDING,
+        resumed=False,
+    )
+    job_repository.resume_or_claim_next.return_value = acquisition
+    mail_repository.get_by_uuid.return_value = None
+    service = _service(
+        session,
+        job_repository=job_repository,
+        event_repository=event_repository,
+        mail_repository=mail_repository,
+    )
+
+    result = service.resume_or_claim_next(NOW)
+
+    assert result is not None
+    assert result.source_received_at is None
+    event_repository.append.assert_called_once()
+
+
+def test_claim_normalizes_aware_source_date_to_utc() -> None:
+    session = create_autospec(Session, instance=True)
+    job_repository = MagicMock()
+    event_repository = MagicMock()
+    mail_repository = MagicMock()
+    acquisition = JobAcquisition(
+        job=_snapshot(status=JobStatus.PROCESSING, stage=JobStage.TRANSCRIPTION),
+        previous_status=JobStatus.PENDING,
+        resumed=False,
+    )
+    job_repository.resume_or_claim_next.return_value = acquisition
+    mail_repository.get_by_uuid.return_value = SimpleNamespace(
+        uuid=JOB_UUID,
+        job_uuid=JOB_UUID,
+        disposition=MailIngestionDisposition.ACCEPTED,
+        received_at=datetime(
+            2026,
+            8,
+            27,
+            9,
+            30,
+            tzinfo=timezone(timedelta(hours=2)),
+        ),
+    )
+    service = _service(
+        session,
+        job_repository=job_repository,
+        event_repository=event_repository,
+        mail_repository=mail_repository,
+    )
+
+    result = service.resume_or_claim_next(NOW)
+
+    assert result is not None
+    assert result.source_received_at == SOURCE_RECEIVED_AT
 
 
 def test_idempotent_submission_does_not_duplicate_its_event() -> None:
@@ -197,6 +280,7 @@ def _service(
     job_repository: MagicMock,
     event_repository: MagicMock,
     retention_repository: MagicMock | None = None,
+    mail_repository: MagicMock | None = None,
     ownership_guard=None,
 ) -> AutomationJobLifecycleService:
     return AutomationJobLifecycleService(
@@ -206,6 +290,9 @@ def _service(
         event_repository_factory=lambda _session: event_repository,
         retention_repository_factory=lambda _session: (
             retention_repository if retention_repository is not None else MagicMock()
+        ),
+        mail_ingestion_repository_factory=lambda _session: (
+            mail_repository if mail_repository is not None else MagicMock()
         ),
     )
 

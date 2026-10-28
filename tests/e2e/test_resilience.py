@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 from uuid import UUID
@@ -404,6 +405,7 @@ def _precreate_glpi_ticket(
         audio_uuid=audio_uuid,
         transcription="Synthetic pre-created ticket for worker crash recovery.",
         audio_url=f"{public_base_url}/audios/{audio_uuid}",
+        opened_at=datetime(2026, 8, 29, 10, tzinfo=UTC),
         defaults=GlpiTicketDefaults(
             title="Synthetic audio request",
             ticket_type=TicketType.REQUEST,

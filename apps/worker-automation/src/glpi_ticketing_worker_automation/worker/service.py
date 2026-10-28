@@ -7,7 +7,7 @@ import math
 from collections.abc import Callable
 from uuid import UUID
 
-from glpi_ticketing_database import JobStage
+from glpi_ticketing_database import ErrorScope, JobStage
 
 from .audio import AudioInspector
 from .outcomes import FailureDetails, IdleOutcome, RunOutcome
@@ -80,6 +80,18 @@ class AutomationWorker:
         self._on_job_started(audio_uuid)
         LOGGER.info("audio processing started audio_uuid=%s", audio_uuid)
 
+        source_received_at = acquisition.source_received_at
+        if job.glpi_ticket_id is None and source_received_at is None:
+            return self._transitions.block(
+                audio_uuid,
+                stage=JobStage.TRANSCRIPTION,
+                failure=FailureDetails(
+                    scope=ErrorScope.JOB,
+                    category="data_integrity",
+                    technical_code="source_received_at_missing",
+                ),
+            )
+
         audio = self._audio_inspector.inspect(job)
         if isinstance(audio, FailureDetails):
             stage = (
@@ -97,6 +109,8 @@ class AutomationWorker:
         if job.glpi_ticket_id is not None:
             return self._transitions.complete(audio_uuid, job.glpi_ticket_id)
 
+        assert source_received_at is not None
+
         transcription = self._transcription_stage.execute(job, audio)
         if not isinstance(transcription, TranscriptionSuccess):
             return transcription
@@ -104,6 +118,7 @@ class AutomationWorker:
         ticket = self._ticket_creation_stage.execute(
             job,
             transcription=transcription.transcription,
+            opened_at=source_received_at,
         )
         if not isinstance(ticket, TicketCreationSuccess):
             return ticket

@@ -129,9 +129,11 @@ from glpi_ticketing_common.audio_files import (
 )
 from glpi_ticketing_database import (
     AudioExtension,
+    DiscoveredMail,
     JobEventActor,
     JobEventType,
     JobStatus,
+    MailIngestionRepository,
     PendingJob,
     TicketCreationJobEventRepository,
     TicketCreationJobRepository,
@@ -151,17 +153,45 @@ try:
     engine = create_database_engine(os.environ["DATABASE_URL"])
     session_factory = create_session_factory(engine)
     with session_factory.begin() as session:
+        now = datetime.now(UTC)
+        audio_extension = AudioExtension(extension)
+        mail_repository = MailIngestionRepository(session)
+        mail_repository.add_discovered(
+            DiscoveredMail(
+                uuid=audio_uuid,
+                mailbox_id=UUID("00000000-0000-4000-8000-000000000003"),
+                message_id=f"e2e-message-{audio_uuid}",
+                received_at=now,
+            ),
+            now=now,
+        )
+        acquisition = mail_repository.resume_or_claim_next(now)
+        if acquisition is None or acquisition.ingestion.uuid != audio_uuid:
+            raise RuntimeError("test mail ingestion could not be acquired")
+        mail_repository.record_attachment_validated(
+            audio_uuid,
+            attachment_id=f"e2e-attachment-{audio_uuid}",
+            audio_extension=audio_extension,
+            attachment_size_bytes=published.size_bytes,
+            now=now,
+        )
         TicketCreationJobRepository(session).add_pending(
             PendingJob(
                 uuid=audio_uuid,
                 storage_key=storage_key,
-                audio_extension=AudioExtension(extension),
+                audio_extension=audio_extension,
                 audio_size_bytes=published.size_bytes,
             )
         )
+        mail_repository.record_accepted(
+            audio_uuid,
+            job_uuid=audio_uuid,
+            now=now,
+        )
+        mail_repository.record_completed(audio_uuid, now=now)
         TicketCreationJobEventRepository(session).append(
             audio_uuid,
-            occurred_at=datetime.now(UTC),
+            occurred_at=now,
             status=JobStatus.PENDING,
             stage=None,
             event_type=JobEventType.JOB_CREATED,

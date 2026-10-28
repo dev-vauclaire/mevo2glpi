@@ -79,8 +79,10 @@ flowchart TD
     Select -->|pending| Claim
     Select -->|aucun| Idle[Attendre l'intervalle idle]
     Idle --> Select
-    Resume --> Read[Résoudre et inspecter la storage_key]
-    Claim --> Read
+    Resume --> SourceDate{Ticket connu ou date Exchange valide ?}
+    Claim --> SourceDate
+    SourceDate -->|oui| Read[Résoudre et inspecter la storage_key]
+    SourceDate -->|non| JobBlocked
     Read --> TicketKnown{glpi_ticket_id connu ?}
 
     TicketKnown -->|oui| Finalize[Finaliser sans appel réseau]
@@ -116,6 +118,8 @@ Chaque mutation SQL est validée avant l'étape suivante. Aucune transaction ne
 reste ouverte pendant un appel Transcribe AI, un polling, un appel GLPI ou un
 sommeil. Les frontières de reprise importantes sont donc durables :
 
+- la date de réception Exchange est relue depuis l'ingestion liée au job dans
+  la même transaction que son acquisition ;
 - l'identifiant du job Transcribe AI est persisté immédiatement après le
   `POST`, avant le premier `GET` de polling ;
 - l'identifiant GLPI est persisté avant la transition `completed` ;
@@ -127,6 +131,15 @@ job `processing` sans `glpi_ticket_id`. Si l'identifiant GLPI est déjà présen
 le worker reprend directement la finalisation sans rappeler Transcribe AI ni
 GLPI. `ensure_ticket()` réconcilie les autres reprises grâce à
 `external_id = audio_uuid`.
+
+Pour un nouveau ticket, `mail_ingestions.received_at` reste la source de vérité
+UTC. Le client la convertit avec le fuseau IANA `Europe/Paris` avant de
+renseigner la date d'ouverture métier `date` de GLPI. Il ne modifie jamais
+`date_creation`, qui conserve l'heure technique d'insertion dans GLPI. Une
+ingestion absente ou incohérente bloque le job avec le code expurgé
+`source_received_at_missing`, sans inventer de date de repli et avant tout appel
+à Transcribe AI ou GLPI. Un ticket dont l'identifiant est déjà persisté reste
+finalisé sans dépendre de cette métadonnée.
 
 Si la persistance de l'identifiant Transcribe AI échoue juste après un `POST`
 accepté, l'exception d'origine est remplacée par le code expurgé
