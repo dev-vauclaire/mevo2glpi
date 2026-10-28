@@ -57,6 +57,7 @@ def render_compose() -> Callable[[], dict[str, object]]:
             "GLPI_PASSWORD": providers.glpi_password,
             "GLPI_CLIENT_ID": providers.glpi_client_id,
             "GLPI_CLIENT_SECRET": providers.glpi_client_secret,
+            "GLPI_TICKET_REQUEST_SOURCE_ID": str(providers.glpi_request_source_id),
             "PUBLISHER_ENTRA_TENANT_ID": "00000000-0000-4000-8000-000000000001",
             "PUBLISHER_ENTRA_CLIENT_ID": "00000000-0000-4000-8000-000000000002",
             "PUBLISHER_MAILBOX_ID": "00000000-0000-4000-8000-000000000003",

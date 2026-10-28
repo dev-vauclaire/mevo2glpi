@@ -48,6 +48,7 @@ def e2e_environment(
         glpi_password=credentials.password,
         glpi_client_id=credentials.client_id,
         glpi_client_secret=credentials.client_secret,
+        glpi_request_source_id=glpi_environment.request_source.id,
     )
     runtime_root = tmp_path_factory.mktemp("gta-mvp-e2e")
     environment = create_mvp_compose_environment(

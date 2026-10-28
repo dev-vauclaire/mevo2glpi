@@ -159,6 +159,7 @@ def build_automation_worker(
             ticket_defaults=GlpiTicketDefaults(
                 title=settings.glpi_ticket_title,
                 ticket_type=settings.glpi_ticket_type,
+                request_source_id=settings.glpi_ticket_request_source_id,
                 urgency=settings.glpi_ticket_urgency,
                 impact=settings.glpi_ticket_impact,
             ),

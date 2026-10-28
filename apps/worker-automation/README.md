@@ -389,6 +389,7 @@ Les variables obligatoires sont chargées depuis l'environnement ou `.env` :
 | `GLPI_USERNAME`, `GLPI_PASSWORD` | Utilisateur du grant OAuth Password. |
 | `GLPI_CLIENT_ID`, `GLPI_CLIENT_SECRET` | Client OAuth GLPI. |
 | `GLPI_TICKET_TITLE` | Titre fixe des tickets. |
+| `GLPI_TICKET_REQUEST_SOURCE_ID` | Identifiant positif de la source MEVO dans l'instance GLPI ciblée. |
 | `GLPI_TICKET_URGENCY`, `GLPI_TICKET_IMPACT` | Niveaux GLPI de 1 à 5. |
 
 Principaux réglages optionnels :
@@ -416,6 +417,8 @@ Principaux réglages optionnels :
 
 Les secrets utilisent `SecretStr` et les erreurs de validation ne recopient
 pas les valeurs reçues. Aucun secret réel ne doit être ajouté au dépôt.
+L'identifiant de source est propre à chaque environnement : le worker le
+transmet à GLPI dans `request_type.id` sans effectuer de recherche par nom.
 
 Pour diagnostiquer temporairement un `transport_error` GLPI, définir
 `WORKER_LOG_LEVEL=DEBUG` puis redéployer le worker. Le diagnostic indique

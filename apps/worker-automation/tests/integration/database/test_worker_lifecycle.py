@@ -639,6 +639,7 @@ def _worker(
             ticket_defaults=GlpiTicketDefaults(
                 title="Demande issue d'un appel audio",
                 ticket_type=TicketType.REQUEST,
+                request_source_id=42,
                 urgency=TicketLevel.LOW,
                 impact=TicketLevel.MEDIUM,
             ),

@@ -327,6 +327,9 @@ class GlpiClient:
                         "content": _build_ticket_content(command),
                         "external_id": external_id,
                         "type": int(command.defaults.ticket_type),
+                        "request_type": {
+                            "id": command.defaults.request_source_id,
+                        },
                         "urgency": int(command.defaults.urgency),
                         "impact": int(command.defaults.impact),
                     },

@@ -200,6 +200,7 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     ticket_defaults = ticket_stage_arguments["ticket_defaults"]
     assert ticket_defaults.title == settings.glpi_ticket_title
     assert ticket_defaults.ticket_type is settings.glpi_ticket_type
+    assert ticket_defaults.request_source_id == settings.glpi_ticket_request_source_id
     assert ticket_defaults.urgency is settings.glpi_ticket_urgency
     assert ticket_defaults.impact is settings.glpi_ticket_impact
 

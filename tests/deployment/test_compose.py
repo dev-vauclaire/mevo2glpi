@@ -145,6 +145,9 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     assert documented_values["APP_RELEASE"] == "CHANGE_ME"
     assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
     assert documented_values["GLPI_TICKET_TYPE"] == "1"
+    assert documented_values["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
+        "CHANGE_ME_WITH_THE_PRODUCTION_MEVO_REQUEST_SOURCE_ID"
+    )
 
     secret_names = {
         "LEGACY_TRANSCRIPTION_API_KEY",
@@ -337,6 +340,7 @@ def test_web_receives_no_provider_credentials(
     automation_environment = services["worker-automation"]["environment"]
     assert automation_environment["WORKER_LOG_LEVEL"] == "INFO"
     assert automation_environment["GLPI_TICKET_TYPE"] == "1"
+    assert automation_environment["GLPI_TICKET_REQUEST_SOURCE_ID"] == "42"
     assert (
         "LEGACY_TRANSCRIPTION_API_KEY"
         not in services["worker-retention"]["environment"]
@@ -349,6 +353,10 @@ def test_web_receives_no_provider_credentials(
         name.startswith(("GLPI_", "LEGACY_TRANSCRIPTION_"))
         for name in publisher_environment
     )
+    for service_name in ("database-migrations", "web", "worker-retention"):
+        assert (
+            "GLPI_TICKET_REQUEST_SOURCE_ID" not in services[service_name]["environment"]
+        )
 
 
 def test_ca_bundle_is_read_only_and_used_without_disabling_tls(

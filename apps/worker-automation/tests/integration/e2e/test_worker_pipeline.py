@@ -206,6 +206,7 @@ def _build_settings(
         glpi_http_timeout_seconds=GLPI_HTTP_TIMEOUT_SECONDS,
         glpi_ticket_title=TICKET_TITLE,
         glpi_ticket_type=TicketType.REQUEST,
+        glpi_ticket_request_source_id=glpi_environment.request_source.id,
         glpi_ticket_urgency=TicketLevel.LOW,
         glpi_ticket_impact=TicketLevel.MEDIUM,
         _env_file=None,

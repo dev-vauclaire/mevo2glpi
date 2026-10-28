@@ -43,12 +43,6 @@ ANTI_FAN_OUT_OBSERVATION_SECONDS = 2.0
 AUTOMATION_SERVICE = "worker-automation"
 TRANSCRIBE_API_SERVICE = "api"
 TRANSCRIBE_BATCH_WORKER_SERVICE = "mono-voice-worker"
-PRECREATED_TICKET_DEFAULTS = GlpiTicketDefaults(
-    title="Synthetic audio request",
-    ticket_type=TicketType.REQUEST,
-    urgency=TicketLevel.MEDIUM,
-    impact=TicketLevel.MEDIUM,
-)
 
 
 class TranscribeAiEnvironment(Protocol):
@@ -410,7 +404,13 @@ def _precreate_glpi_ticket(
         audio_uuid=audio_uuid,
         transcription="Synthetic pre-created ticket for worker crash recovery.",
         audio_url=f"{public_base_url}/audios/{audio_uuid}",
-        defaults=PRECREATED_TICKET_DEFAULTS,
+        defaults=GlpiTicketDefaults(
+            title="Synthetic audio request",
+            ticket_type=TicketType.REQUEST,
+            request_source_id=environment.request_source.id,
+            urgency=TicketLevel.MEDIUM,
+            impact=TicketLevel.MEDIUM,
+        ),
     )
     with httpx.Client() as http_client:
         client = GlpiClient(

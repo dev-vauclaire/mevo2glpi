@@ -82,6 +82,9 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     assert documented_values["APP_RELEASE"] == "main"
     assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
     assert documented_values["GLPI_TICKET_TYPE"] == "1"
+    assert documented_values["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
+        "CHANGE_ME_WITH_THE_STAGING_MEVO_REQUEST_SOURCE_ID"
+    )
     assert documented_values["AUDIO_VOLUME_NAME"].startswith("gta-staging-")
     assert documented_values["DATABASE_NETWORK_NAME"].startswith("gta-staging-")
     assert documented_values["PROVIDERS_NETWORK_NAME"] == (
@@ -162,6 +165,9 @@ def test_staging_uses_the_separated_provider_simulators(
         "http://gta-staging-transcribe-ai:8080"
     )
     assert automation_environment["GLPI_TICKET_TYPE"] == "1"
+    assert automation_environment["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
+        "CHANGE_ME_WITH_THE_STAGING_MEVO_REQUEST_SOURCE_ID"
+    )
     assert "LEGACY_TRANSCRIPTION_API_KEY" in automation_environment
     assert not any(
         name.startswith("PUBLISHER_ENTRA_") for name in publisher_environment
@@ -225,6 +231,12 @@ def test_staging_credentials_follow_least_privilege(
     assert "LEGACY_TRANSCRIPTION_API_KEY" in automation_environment
     assert not any(name.startswith("GLPI_") for name in web_environment)
     assert "LEGACY_TRANSCRIPTION_API_KEY" not in web_environment
+    for environment in (
+        publisher_environment,
+        retention_environment,
+        web_environment,
+    ):
+        assert "GLPI_TICKET_REQUEST_SOURCE_ID" not in environment
 
 
 def test_staging_workers_depend_only_on_database_migrations(

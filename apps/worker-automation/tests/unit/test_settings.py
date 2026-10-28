@@ -16,6 +16,7 @@ GLPI_CLIENT_ID = "synthetic-client-id"
 GLPI_CLIENT_SECRET = "synthetic-client-secret"
 GLPI_TICKET_TITLE = "Demande issue d'un message audio"
 GLPI_TICKET_TYPE = "2"
+GLPI_TICKET_REQUEST_SOURCE_ID = "42"
 GLPI_TICKET_LEVEL = "3"
 DATABASE_URL = "postgresql+psycopg://worker:password@database:5432/jobs"
 COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
@@ -35,6 +36,10 @@ def configure_required_worker_settings(
     monkeypatch.setenv("GLPI_CLIENT_SECRET", GLPI_CLIENT_SECRET)
     monkeypatch.setenv("GLPI_TICKET_TITLE", GLPI_TICKET_TITLE)
     monkeypatch.setenv("GLPI_TICKET_TYPE", GLPI_TICKET_TYPE)
+    monkeypatch.setenv(
+        "GLPI_TICKET_REQUEST_SOURCE_ID",
+        GLPI_TICKET_REQUEST_SOURCE_ID,
+    )
     monkeypatch.setenv("GLPI_TICKET_URGENCY", GLPI_TICKET_LEVEL)
     monkeypatch.setenv("GLPI_TICKET_IMPACT", GLPI_TICKET_LEVEL)
     monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
@@ -349,6 +354,7 @@ def test_glpi_settings_are_typed_and_request_remains_configurable(
         glpi_client_secret="worker-client-secret",
         glpi_http_timeout_seconds=4.5,
         glpi_ticket_title="Demande audio",
+        glpi_ticket_request_source_id=42,
         glpi_ticket_urgency=4,
         glpi_ticket_impact=3,
         _env_file=None,
@@ -362,6 +368,7 @@ def test_glpi_settings_are_typed_and_request_remains_configurable(
     assert settings.glpi_http_timeout_seconds == 4.5
     assert settings.glpi_ticket_title == "Demande audio"
     assert settings.glpi_ticket_type is TicketType.REQUEST
+    assert settings.glpi_ticket_request_source_id == 42
     assert isinstance(settings.glpi_ticket_urgency, TicketLevel)
     assert int(settings.glpi_ticket_urgency) == 4
     assert int(settings.glpi_ticket_impact) == 3
@@ -376,6 +383,7 @@ def test_glpi_settings_are_typed_and_request_remains_configurable(
         ("GLPI_CLIENT_ID", "glpi_client_id"),
         ("GLPI_CLIENT_SECRET", "glpi_client_secret"),
         ("GLPI_TICKET_TITLE", "glpi_ticket_title"),
+        ("GLPI_TICKET_REQUEST_SOURCE_ID", "glpi_ticket_request_source_id"),
         ("GLPI_TICKET_URGENCY", "glpi_ticket_urgency"),
         ("GLPI_TICKET_IMPACT", "glpi_ticket_impact"),
     ],
@@ -479,6 +487,21 @@ def test_glpi_ticket_enums_reject_values_outside_the_contract(
                 **{field_name: invalid_value},
                 _env_file=None,
             )
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [True, False, 0, -1, "not-an-integer"],
+)
+def test_glpi_ticket_request_source_id_must_be_a_positive_integer(
+    invalid_value: object,
+) -> None:
+    with pytest.raises(ValidationError, match="glpi_ticket_request_source_id"):
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            glpi_ticket_request_source_id=invalid_value,
+            _env_file=None,
+        )
 
 
 def test_glpi_http_timeout_must_be_positive_and_finite() -> None:

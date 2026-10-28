@@ -82,6 +82,7 @@ class GlpiTicketDefaults:
 
     title: str
     ticket_type: TicketType
+    request_source_id: int
     urgency: TicketLevel
     impact: TicketLevel
 
@@ -89,6 +90,12 @@ class GlpiTicketDefaults:
         _validate_title(self.title)
         if not isinstance(self.ticket_type, TicketType):
             raise TypeError("ticket_type must be a TicketType")
+        if isinstance(self.request_source_id, bool) or not isinstance(
+            self.request_source_id, int
+        ):
+            raise TypeError("request_source_id must be an integer")
+        if self.request_source_id <= 0:
+            raise ValueError("request_source_id must be a positive integer")
         for field_name in ("urgency", "impact"):
             if not isinstance(getattr(self, field_name), TicketLevel):
                 raise TypeError(f"{field_name} must be a TicketLevel")

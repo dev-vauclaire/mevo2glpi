@@ -47,6 +47,7 @@ def worker_settings_factory(
             "glpi_http_timeout_seconds": 5.5,
             "glpi_ticket_title": "Demande audio",
             "glpi_ticket_type": 2,
+            "glpi_ticket_request_source_id": 42,
             "glpi_ticket_urgency": 4,
             "glpi_ticket_impact": 3,
         }

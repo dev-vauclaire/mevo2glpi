@@ -36,6 +36,10 @@ GLPI_NETWORK_LOGICAL_NAME = "glpi_test"
 GLPI_INTERNAL_BASE_URL = "http://glpi"
 GLPI_CONTROLLABLE_SERVICES = frozenset({GLPI_SERVICE_NAME})
 GLPI_BOOTSTRAP_COMMAND = ["php", "/opt/glpi-test/bootstrap_oauth.php"]
+GLPI_REQUEST_SOURCE_BOOTSTRAP_COMMAND = [
+    "php",
+    "/opt/glpi-test/bootstrap_request_source.php",
+]
 GLPI_SET_TICKET_STATUS_COMMAND = [
     "php",
     "/opt/glpi-test/set_ticket_status.php",
@@ -70,6 +74,20 @@ class OAuthBootstrapResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RequestSourceBootstrapResult:
+    """Stable request source returned by the idempotent GLPI bootstrap."""
+
+    id: int
+    name: str
+    is_active: bool
+    is_ticketheader: bool
+
+    def is_identical_to(self, other: RequestSourceBootstrapResult) -> bool:
+        """Compare the business identity and visibility flags."""
+        return self == other
+
+
+@dataclass(frozen=True, slots=True)
 class TicketStatusTransitionResult:
     """Minimal result returned by the test-only GLPI transition helper."""
 
@@ -88,6 +106,8 @@ class GlpiTestEnvironment:
     version: str
     first_bootstrap: OAuthBootstrapResult = field(repr=False)
     second_bootstrap: OAuthBootstrapResult = field(repr=False)
+    first_request_source: RequestSourceBootstrapResult
+    second_request_source: RequestSourceBootstrapResult
     image_metadata: str = field(repr=False)
     ephemeral_secrets: tuple[str, ...] = field(repr=False)
     _compose: DockerCompose = field(repr=False, compare=False)
@@ -96,6 +116,10 @@ class GlpiTestEnvironment:
     @property
     def credentials(self) -> OAuthBootstrapResult:
         return self.first_bootstrap
+
+    @property
+    def request_source(self) -> RequestSourceBootstrapResult:
+        return self.first_request_source
 
     def exec_glpi(self, command: list[str]) -> tuple[str, str, int]:
         """Run a diagnostic command in the already-running GLPI container."""
@@ -165,6 +189,7 @@ def _new_environment() -> dict[str, str]:
         "GLPI_TEST_USERNAME": f"glpi-test-user-{suffix}",
         "GLPI_TEST_PASSWORD": f"T!9a-{secrets.token_urlsafe(32)}",
         "GLPI_TEST_OAUTH_CLIENT_NAME": f"glpi-test-oauth-{suffix}",
+        "GLPI_TEST_REQUEST_SOURCE_NAME": "MEVO",
     }
 
 
@@ -231,6 +256,37 @@ def _parse_bootstrap_result(stdout: str) -> OAuthBootstrapResult:
     return OAuthBootstrapResult(**payload)
 
 
+def _parse_request_source_result(stdout: str) -> RequestSourceBootstrapResult:
+    expected_keys = {"id", "name", "is_active", "is_ticketheader"}
+    try:
+        payload = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError) as exception:
+        raise RuntimeError(
+            "GLPI request source bootstrap did not return valid JSON"
+        ) from exception
+
+    if not isinstance(payload, dict) or set(payload) != expected_keys:
+        raise RuntimeError(
+            "GLPI request source bootstrap returned an unexpected JSON contract"
+        )
+    source_id = payload["id"]
+    name = payload["name"]
+    if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id <= 0:
+        raise RuntimeError(
+            "GLPI request source bootstrap returned an invalid identifier"
+        )
+    if not isinstance(name, str) or not name or name != name.strip():
+        raise RuntimeError("GLPI request source bootstrap returned an invalid name")
+    if not all(
+        isinstance(payload[key], bool) for key in ("is_active", "is_ticketheader")
+    ):
+        raise RuntimeError(
+            "GLPI request source bootstrap returned invalid visibility flags"
+        )
+
+    return RequestSourceBootstrapResult(**payload)
+
+
 def _parse_ticket_status_transition(stdout: str) -> TicketStatusTransitionResult:
     try:
         payload = json.loads(stdout)
@@ -279,6 +335,23 @@ def _run_bootstrap(
         raise RuntimeError("GLPI OAuth bootstrap failed with a non-zero exit code")
 
     return _parse_bootstrap_result(stdout)
+
+
+def _run_request_source_bootstrap(
+    compose: DockerCompose,
+    docker_client: DockerClient,
+) -> RequestSourceBootstrapResult:
+    stdout, _, exit_code = _exec_glpi(
+        compose,
+        docker_client,
+        GLPI_REQUEST_SOURCE_BOOTSTRAP_COMMAND,
+    )
+    if exit_code != 0:
+        raise RuntimeError(
+            "GLPI request source bootstrap failed with a non-zero exit code"
+        )
+
+    return _parse_request_source_result(stdout)
 
 
 def _read_glpi_version(
@@ -468,6 +541,20 @@ def _assert_expected_credentials(
         raise RuntimeError("GLPI bootstrap credentials do not match the test contract")
 
 
+def _assert_expected_request_source(
+    result: RequestSourceBootstrapResult,
+    environment: Mapping[str, str],
+) -> None:
+    if (
+        result.name != environment["GLPI_TEST_REQUEST_SOURCE_NAME"]
+        or not result.is_active
+        or not result.is_ticketheader
+    ):
+        raise RuntimeError(
+            "GLPI request source bootstrap does not match the test contract"
+        )
+
+
 @pytest.fixture(scope="session")
 def _prevent_parallel_glpi_suite() -> Iterator[None]:
     if os.environ.get("PYTEST_XDIST_WORKER") is not None:
@@ -560,6 +647,17 @@ def glpi_environment(
             _assert_expected_credentials(first_bootstrap, environment)
             _assert_expected_credentials(second_bootstrap, environment)
 
+            first_request_source = _run_request_source_bootstrap(
+                compose,
+                docker_client,
+            )
+            second_request_source = _run_request_source_bootstrap(
+                compose,
+                docker_client,
+            )
+            _assert_expected_request_source(first_request_source, environment)
+            _assert_expected_request_source(second_request_source, environment)
+
             _wait_for_http(
                 f"{base_url}/api.php/v2.3.0/doc.json",
                 timeout_seconds=GLPI_API_READY_TIMEOUT_SECONDS,
@@ -588,6 +686,8 @@ def glpi_environment(
                 version=version,
                 first_bootstrap=first_bootstrap,
                 second_bootstrap=second_bootstrap,
+                first_request_source=first_request_source,
+                second_request_source=second_request_source,
                 image_metadata=image_metadata,
                 ephemeral_secrets=ephemeral_secrets,
                 _compose=compose,

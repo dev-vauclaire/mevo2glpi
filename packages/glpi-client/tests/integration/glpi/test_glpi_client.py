@@ -33,12 +33,6 @@ TEST_TICKET_TITLE = "Demande issue d'un audio de test"
 TEST_TICKET_TYPE = TicketType.INCIDENT
 TEST_TICKET_URGENCY = TicketLevel.LOW
 TEST_TICKET_IMPACT = TicketLevel.MEDIUM
-TEST_TICKET_DEFAULTS = GlpiTicketDefaults(
-    title=TEST_TICKET_TITLE,
-    ticket_type=TEST_TICKET_TYPE,
-    urgency=TEST_TICKET_URGENCY,
-    impact=TEST_TICKET_IMPACT,
-)
 
 
 def _new_glpi_client(glpi_environment, http_client: httpx.Client) -> GlpiClient:
@@ -51,6 +45,16 @@ def _new_glpi_client(glpi_environment, http_client: httpx.Client) -> GlpiClient:
         client_secret=SecretStr(credentials.client_secret),
         http_client=http_client,
         timeout=GLPI_HTTP_TIMEOUT_SECONDS,
+    )
+
+
+def _ticket_defaults(glpi_environment) -> GlpiTicketDefaults:
+    return GlpiTicketDefaults(
+        title=TEST_TICKET_TITLE,
+        ticket_type=TEST_TICKET_TYPE,
+        request_source_id=glpi_environment.request_source.id,
+        urgency=TEST_TICKET_URGENCY,
+        impact=TEST_TICKET_IMPACT,
     )
 
 
@@ -74,7 +78,7 @@ def test_glpi_client_creates_one_ticket_per_audio_uuid(glpi_environment) -> None
         audio_uuid=audio_uuid,
         transcription=transcription,
         audio_url=audio_url,
-        defaults=TEST_TICKET_DEFAULTS,
+        defaults=_ticket_defaults(glpi_environment),
     )
 
     with httpx.Client() as http_client:
@@ -127,6 +131,9 @@ def test_glpi_client_creates_one_ticket_per_audio_uuid(glpi_environment) -> None
         pytest.fail("The created GLPI ticket does not contain the transcription")
     if audio_url not in content:
         pytest.fail("The created GLPI ticket does not contain the audio URL")
+    request_type = ticket.get("request_type")
+    if not isinstance(request_type, Mapping):
+        pytest.fail("The created GLPI ticket has an invalid request source")
 
     assert first_ticket_id == second_ticket_id
     assert int(first_ticket_id) > 0
@@ -139,6 +146,8 @@ def test_glpi_client_creates_one_ticket_per_audio_uuid(glpi_environment) -> None
     assert ticket.get("name") == TEST_TICKET_TITLE
     assert str(audio_uuid) not in str(ticket.get("name"))
     assert ticket.get("type") == int(TEST_TICKET_TYPE)
+    assert request_type.get("id") == glpi_environment.request_source.id
+    assert request_type.get("name") == glpi_environment.request_source.name
     assert ticket.get("urgency") == int(TEST_TICKET_URGENCY)
     assert ticket.get("impact") == int(TEST_TICKET_IMPACT)
     assert ticket.get("priority") in {level.value for level in TicketLevel}
@@ -150,7 +159,7 @@ def test_get_ticket_tracks_initial_solved_and_closed_status(glpi_environment) ->
         audio_uuid=audio_uuid,
         transcription="Transcription reservee aux transitions GLPI de test.",
         audio_url=f"https://audio.example.test/recordings/{audio_uuid}.wav",
-        defaults=TEST_TICKET_DEFAULTS,
+        defaults=_ticket_defaults(glpi_environment),
     )
 
     with httpx.Client() as http_client:

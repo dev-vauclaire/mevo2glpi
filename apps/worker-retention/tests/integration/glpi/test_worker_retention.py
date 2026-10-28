@@ -57,12 +57,6 @@ NOW = datetime(2026, 8, 29, 10, tzinfo=UTC)
 ACTIVATED_AT = NOW - timedelta(days=1)
 HARD_DELETE_AT = NOW + timedelta(days=30)
 AUDIO_CONTENT = b"RIFF-retention-glpi-integration"
-TICKET_DEFAULTS = GlpiTicketDefaults(
-    title="Demande audio de rétention",
-    ticket_type=TicketType.REQUEST,
-    urgency=TicketLevel.LOW,
-    impact=TicketLevel.MEDIUM,
-)
 
 
 def test_solved_ticket_keeps_audio_and_reschedules_retention(
@@ -76,7 +70,11 @@ def test_solved_ticket_keeps_audio_and_reschedules_retention(
 
     with httpx.Client() as http_client:
         glpi_client = _glpi_client(glpi_environment, http_client)
-        ticket_id = _create_ticket(glpi_client, job_uuid)
+        ticket_id = _create_ticket(
+            glpi_client,
+            job_uuid,
+            glpi_environment.request_source.id,
+        )
         glpi_environment.set_ticket_status(int(ticket_id), TicketStatus.SOLVED)
         _add_completed_retention(session_factory, job_uuid, int(ticket_id))
         worker = _worker(
@@ -118,7 +116,11 @@ def test_closed_correlated_ticket_purges_audio_and_persists_events(
 
     with httpx.Client() as http_client:
         glpi_client = _glpi_client(glpi_environment, http_client)
-        ticket_id = _create_ticket(glpi_client, job_uuid)
+        ticket_id = _create_ticket(
+            glpi_client,
+            job_uuid,
+            glpi_environment.request_source.id,
+        )
         glpi_environment.set_ticket_status(int(ticket_id), TicketStatus.CLOSED)
         _add_completed_retention(session_factory, job_uuid, int(ticket_id))
         worker = _worker(
@@ -165,7 +167,11 @@ def test_ticket_correlated_to_another_uuid_blocks_retention_and_keeps_audio(
 
     with httpx.Client() as http_client:
         glpi_client = _glpi_client(glpi_environment, http_client)
-        ticket_id = _create_ticket(glpi_client, remote_job_uuid)
+        ticket_id = _create_ticket(
+            glpi_client,
+            remote_job_uuid,
+            glpi_environment.request_source.id,
+        )
         _add_completed_retention(
             session_factory,
             local_job_uuid,
@@ -217,14 +223,24 @@ def _glpi_client(
     )
 
 
-def _create_ticket(client: GlpiClient, audio_uuid: UUID) -> int:
+def _create_ticket(
+    client: GlpiClient,
+    audio_uuid: UUID,
+    request_source_id: int,
+) -> int:
     return int(
         client.ensure_ticket(
             GlpiTicketCreateCommand(
                 audio_uuid=audio_uuid,
                 transcription="Transcription synthétique du test de rétention.",
                 audio_url=f"https://audio.example.test/{audio_uuid}.wav",
-                defaults=TICKET_DEFAULTS,
+                defaults=GlpiTicketDefaults(
+                    title="Demande audio de rétention",
+                    ticket_type=TicketType.REQUEST,
+                    request_source_id=request_source_id,
+                    urgency=TicketLevel.LOW,
+                    impact=TicketLevel.MEDIUM,
+                ),
             )
         )
     )

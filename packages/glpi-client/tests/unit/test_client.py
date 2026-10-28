@@ -50,11 +50,13 @@ AUDIO_URL = (
 )
 TICKET_TITLE = "Demande issue d'un appel audio"
 TICKET_TYPE = TicketType(1)
+REQUEST_SOURCE_ID = 7
 TICKET_URGENCY = TicketLevel(2)
 TICKET_IMPACT = TicketLevel(3)
 DEFAULTS = GlpiTicketDefaults(
     title=TICKET_TITLE,
     ticket_type=TICKET_TYPE,
+    request_source_id=REQUEST_SOURCE_ID,
     urgency=TICKET_URGENCY,
     impact=TICKET_IMPACT,
 )
@@ -727,6 +729,7 @@ def test_ensure_ticket_searches_then_creates_with_the_expected_payload() -> None
         assert str(AUDIO_UUID) not in payload["name"]
         assert payload["external_id"] == str(AUDIO_UUID)
         assert payload["type"] == 1
+        assert payload["request_type"] == {"id": REQUEST_SOURCE_ID}
         assert payload["urgency"] == 2
         assert payload["impact"] == 3
         assert "priority" not in payload
@@ -1439,6 +1442,7 @@ def test_ticket_defaults_reject_invalid_ticket_values(
     default_arguments: dict[str, object] = {
         "title": TICKET_TITLE,
         "ticket_type": TICKET_TYPE,
+        "request_source_id": REQUEST_SOURCE_ID,
         "urgency": TICKET_URGENCY,
         "impact": TICKET_IMPACT,
     }
@@ -1446,3 +1450,33 @@ def test_ticket_defaults_reject_invalid_ticket_values(
 
     with pytest.raises((TypeError, ValueError)):
         GlpiTicketDefaults(**default_arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("invalid_request_source_id", [True, False, "7", 7.0, None])
+def test_ticket_defaults_rejects_non_integer_request_source_id(
+    invalid_request_source_id: object,
+) -> None:
+    with pytest.raises(TypeError, match="request_source_id must be an integer"):
+        GlpiTicketDefaults(
+            title=TICKET_TITLE,
+            ticket_type=TICKET_TYPE,
+            request_source_id=invalid_request_source_id,  # type: ignore[arg-type]
+            urgency=TICKET_URGENCY,
+            impact=TICKET_IMPACT,
+        )
+
+
+@pytest.mark.parametrize("invalid_request_source_id", [0, -1])
+def test_ticket_defaults_rejects_non_positive_request_source_id(
+    invalid_request_source_id: int,
+) -> None:
+    with pytest.raises(
+        ValueError, match="request_source_id must be a positive integer"
+    ):
+        GlpiTicketDefaults(
+            title=TICKET_TITLE,
+            ticket_type=TICKET_TYPE,
+            request_source_id=invalid_request_source_id,
+            urgency=TICKET_URGENCY,
+            impact=TICKET_IMPACT,
+        )

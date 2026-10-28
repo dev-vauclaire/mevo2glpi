@@ -102,6 +102,7 @@ class WorkerSettings(BaseSettings):
     )
     glpi_ticket_title: str = Field(min_length=1, max_length=255)
     glpi_ticket_type: TicketType = TicketType.INCIDENT
+    glpi_ticket_request_source_id: int = Field(gt=0)
     glpi_ticket_urgency: TicketLevel
     glpi_ticket_impact: TicketLevel
 
@@ -132,11 +133,12 @@ class WorkerSettings(BaseSettings):
         "failed_retention_days",
         "blocked_retention_days",
         "retention_check_interval_hours",
+        "glpi_ticket_request_source_id",
         mode="before",
     )
     @classmethod
     def reject_boolean_integer_settings(cls, value: object) -> object:
-        """Reject booleans instead of silently treating them as durations."""
+        """Reject booleans instead of silently treating them as integers."""
         if isinstance(value, bool):
             raise ValueError("Integer settings cannot be booleans")
         return value

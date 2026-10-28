@@ -85,6 +85,7 @@ class ProviderConfiguration:
     glpi_password: str = field(repr=False)
     glpi_client_id: str
     glpi_client_secret: str = field(repr=False)
+    glpi_request_source_id: int
 
     @classmethod
     def synthetic(cls) -> ProviderConfiguration:
@@ -97,6 +98,7 @@ class ProviderConfiguration:
             glpi_password=secrets.token_hex(24),
             glpi_client_id="synthetic-client",
             glpi_client_secret=secrets.token_hex(24),
+            glpi_request_source_id=42,
         )
 
     @property
@@ -622,6 +624,9 @@ def create_mvp_compose_environment(
         "GLPI_HTTP_TIMEOUT_SECONDS": "30",
         "GLPI_TICKET_TITLE": "Synthetic audio request",
         "GLPI_TICKET_TYPE": "1",
+        "GLPI_TICKET_REQUEST_SOURCE_ID": str(
+            provider_configuration.glpi_request_source_id
+        ),
         "GLPI_TICKET_URGENCY": "3",
         "GLPI_TICKET_IMPACT": "3",
         "RETENTION_POLL_INTERVAL_SECONDS": "0.2",
