@@ -1,4 +1,4 @@
-"""Validate the Dokploy staging contract with external provider services."""
+"""Validate staging with separate simulator and transcription stacks."""
 
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ def test_staging_entrypoint_exposes_only_the_five_applications() -> None:
 
     for removed_service in (
         "provider-simulator",
+        "parakeet",
         "glpi-db",
         "glpi",
         "glpi-bootstrap",
@@ -87,9 +88,14 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     )
     assert documented_values["AUDIO_VOLUME_NAME"].startswith("gta-staging-")
     assert documented_values["DATABASE_NETWORK_NAME"].startswith("gta-staging-")
-    assert documented_values["PROVIDERS_NETWORK_NAME"] == (
-        "gta-staging-providers-network"
+    assert documented_values["SIMULATORS_NETWORK_NAME"] == (
+        "gta-staging-simulators-network"
     )
+    assert documented_values["TRANSCRIPTION_NETWORK_NAME"] == (
+        "gta-staging-transcription-network"
+    )
+    assert documented_values["TRANSCRIPTION_PROVIDER"] == "openai_compatible"
+    assert documented_values["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "120"
     assert documented_values["GLPI_BASE_URL"].startswith("https://")
     assert "PUBLISHER_ENTRA_CLIENT_ID" not in documented_values
     assert "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH" not in documented_values
@@ -103,7 +109,7 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     )
 
 
-def test_staging_manifest_uses_external_database_and_provider_networks(
+def test_staging_manifest_uses_separate_external_dependency_networks(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:
     config = render_staging_compose()
@@ -115,12 +121,19 @@ def test_staging_manifest_uses_external_database_and_provider_networks(
     assert config["networks"]["database"]["external"] is True
     assert config["networks"]["dokploy-network"]["name"] == "dokploy-network"
     assert config["networks"]["dokploy-network"]["external"] is True
-    assert config["networks"]["providers"]["name"] == ("gta-staging-providers-network")
-    assert config["networks"]["providers"]["external"] is True
+    assert config["networks"]["simulators"]["name"] == (
+        "gta-staging-simulators-network"
+    )
+    assert config["networks"]["simulators"]["external"] is True
+    assert config["networks"]["transcription"]["name"] == (
+        "gta-staging-transcription-network"
+    )
+    assert config["networks"]["transcription"]["external"] is True
     assert set(config["networks"]) == {
         "database",
         "dokploy-network",
-        "providers",
+        "simulators",
+        "transcription",
     }
     assert config["volumes"] == {"audio-data": {"name": "gta-staging-audio-data"}}
 
@@ -128,11 +141,12 @@ def test_staging_manifest_uses_external_database_and_provider_networks(
     assert set(services["web"]["networks"]) == {"database", "dokploy-network"}
     assert set(services["worker-automation"]["networks"]) == {
         "database",
-        "providers",
+        "simulators",
+        "transcription",
     }
     assert set(services["worker-publisher"]["networks"]) == {
         "database",
-        "providers",
+        "simulators",
     }
     assert set(services["worker-retention"]["networks"]) == {"database"}
 
@@ -150,7 +164,7 @@ def test_staging_services_share_the_release_identity(
         assert service["environment"]["APP_ENVIRONMENT"] == "staging"
 
 
-def test_staging_uses_the_separated_provider_simulators(
+def test_staging_uses_the_separated_simulator_and_transcription_services(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:
     services = _services(render_staging_compose())
@@ -164,11 +178,21 @@ def test_staging_uses_the_separated_provider_simulators(
     assert automation_environment["LEGACY_TRANSCRIPTION_BASE_URL"] == (
         "http://gta-staging-transcribe-ai:8080"
     )
+    assert automation_environment["TRANSCRIPTION_PROVIDER"] == "openai_compatible"
+    assert automation_environment["OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL"] == (
+        "http://gta-staging-parakeet:5092/v1"
+    )
+    assert automation_environment["OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL"] == (
+        "parakeet-tdt-0.6b"
+    )
+    assert automation_environment["OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE"] == "fr"
+    assert automation_environment["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "120"
     assert automation_environment["GLPI_TICKET_TYPE"] == "1"
     assert automation_environment["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
         "CHANGE_ME_WITH_THE_STAGING_MEVO_REQUEST_SOURCE_ID"
     )
     assert "LEGACY_TRANSCRIPTION_API_KEY" in automation_environment
+    assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" in automation_environment
     assert not any(
         name.startswith("PUBLISHER_ENTRA_") for name in publisher_environment
     )
@@ -226,11 +250,15 @@ def test_staging_credentials_follow_least_privilege(
 
     assert "TRANSCRIBE_AI_SIMULATOR_API_KEY" not in publisher_environment
     assert "LEGACY_TRANSCRIPTION_API_KEY" not in publisher_environment
+    assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" not in publisher_environment
     assert not any(name.startswith("GLPI_") for name in publisher_environment)
     assert "LEGACY_TRANSCRIPTION_API_KEY" not in retention_environment
     assert "LEGACY_TRANSCRIPTION_API_KEY" in automation_environment
+    assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" not in retention_environment
+    assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" in automation_environment
     assert not any(name.startswith("GLPI_") for name in web_environment)
     assert "LEGACY_TRANSCRIPTION_API_KEY" not in web_environment
+    assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" not in web_environment
     for environment in (
         publisher_environment,
         retention_environment,

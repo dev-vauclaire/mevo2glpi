@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from uuid import UUID
 
@@ -18,6 +18,7 @@ from glpi_ticketing_glpi import (
     GlpiTicketRejectedError,
 )
 
+from ...title_generation import TitleGeneratorProtocol
 from ..outcomes import FailureDetails, RunOutcome
 from ..ports import JobLifecycleProtocol, JobSnapshotProtocol
 from ..transitions import JobTransitionService
@@ -46,6 +47,7 @@ class TicketCreationStage:
         transitions: JobTransitionService,
         audio_url_for: Callable[[UUID], str],
         ticket_defaults: GlpiTicketDefaults,
+        title_generator: TitleGeneratorProtocol,
         ownership_guard: Callable[[], None] | None = None,
     ) -> None:
         if not callable(getattr(glpi_client, "ensure_ticket", None)):
@@ -58,6 +60,8 @@ class TicketCreationStage:
             raise TypeError("audio_url_for must be callable")
         if not isinstance(ticket_defaults, GlpiTicketDefaults):
             raise TypeError("ticket_defaults must be a GlpiTicketDefaults")
+        if not callable(getattr(title_generator, "generate", None)):
+            raise TypeError("title_generator must expose generate()")
         if ownership_guard is not None and not callable(ownership_guard):
             raise TypeError("ownership_guard must be callable")
 
@@ -66,6 +70,7 @@ class TicketCreationStage:
         self._transitions = transitions
         self._audio_url_for = audio_url_for
         self._ticket_defaults = ticket_defaults
+        self._title_generator = title_generator
         self._ownership_guard = ownership_guard or _no_op
 
     def execute(
@@ -93,12 +98,13 @@ class TicketCreationStage:
             )
 
         try:
+            generated_title = self._title_generator.generate(transcription)
             command = GlpiTicketCreateCommand(
                 audio_uuid=audio_uuid,
                 transcription=transcription,
                 audio_url=audio_url,
                 opened_at=opened_at,
-                defaults=self._ticket_defaults,
+                defaults=replace(self._ticket_defaults, title=generated_title),
             )
         except (TypeError, ValueError):
             return self._transitions.block(

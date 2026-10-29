@@ -1,4 +1,4 @@
-"""Exercise real clients against the two containerized provider simulators."""
+"""Exercise real clients against the two containerized staging simulators."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from pydantic import SecretStr
 
 from glpi_ticketing_worker_automation.transcription import (
     JobStatus,
-    TranscriptionClient,
+    LegacyTranscriptionClient,
 )
 from glpi_ticketing_worker_publisher.graph import (
     GraphClient,
@@ -28,8 +28,8 @@ from glpi_ticketing_worker_publisher.graph import (
 )
 
 from .conftest import (
-    PROVIDERS_COMPOSE_FILE,
-    PROVIDERS_ENV_FILE,
+    SIMULATORS_COMPOSE_FILE,
+    SIMULATORS_ENV_FILE,
     clean_environment,
     run_command,
 )
@@ -41,7 +41,7 @@ pytestmark = [
 
 
 @dataclass(slots=True)
-class StagingProviderEnvironment:
+class StagingSimulatorEnvironment:
     """Own two isolated simulator containers and synthetic credentials."""
 
     project_name: str
@@ -52,7 +52,7 @@ class StagingProviderEnvironment:
     transcription_api_key: str = field(repr=False)
     graph_host_port: int
     transcription_host_port: int
-    providers_network_name: str
+    simulators_network_name: str
 
     def compose(
         self,
@@ -69,7 +69,7 @@ class StagingProviderEnvironment:
                 "--env-file",
                 str(self.environment_file),
                 "--file",
-                str(PROVIDERS_COMPOSE_FILE),
+                str(SIMULATORS_COMPOSE_FILE),
                 "--file",
                 str(self.override_file),
                 *arguments,
@@ -81,7 +81,7 @@ class StagingProviderEnvironment:
 
 
 def _read_example_environment() -> dict[str, str]:
-    source = PROVIDERS_ENV_FILE.read_text(encoding="utf-8")
+    source = SIMULATORS_ENV_FILE.read_text(encoding="utf-8")
     return dict(re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", source, re.MULTILINE))
 
 
@@ -112,16 +112,16 @@ def _docker_network(command: str, network_name: str, *, check: bool = True) -> N
 
 
 @pytest.fixture(scope="session")
-def staging_provider_environment(
+def staging_simulator_environment(
     tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[StagingProviderEnvironment]:
-    """Build, start and remove two loopback-only provider simulators."""
+) -> Iterator[StagingSimulatorEnvironment]:
+    """Build, start and remove two loopback-only staging simulators."""
     if os.environ.get("PYTEST_XDIST_WORKER") is not None:
-        pytest.fail("The staging provider suite must not run with pytest-xdist")
+        pytest.fail("The staging simulator suite must not run with pytest-xdist")
 
     suffix = secrets.token_hex(6)
-    project_name = f"gta-staging-provider-test-{suffix}"
-    runtime_root = tmp_path_factory.mktemp("gta-staging-provider")
+    project_name = f"gta-staging-simulator-test-{suffix}"
+    runtime_root = tmp_path_factory.mktemp("gta-staging-simulator")
     environment_file = runtime_root / "compose.env"
     override_file = runtime_root / "compose.override.yml"
     admin_token = secrets.token_urlsafe(32)
@@ -130,12 +130,12 @@ def staging_provider_environment(
     transcription_host_port = _reserve_loopback_port()
     while transcription_host_port == graph_host_port:
         transcription_host_port = _reserve_loopback_port()
-    providers_network_name = f"{project_name}-providers"
+    simulators_network_name = f"{project_name}-simulators"
     values = _read_example_environment()
     values.update(
         {
             "COMPOSE_PROJECT_NAME": project_name,
-            "PROVIDERS_NETWORK_NAME": providers_network_name,
+            "SIMULATORS_NETWORK_NAME": simulators_network_name,
             "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN": admin_token,
             "TRANSCRIBE_AI_SIMULATOR_API_KEY": transcription_api_key,
         }
@@ -152,7 +152,7 @@ def staging_provider_environment(
         encoding="utf-8",
     )
     process_environment = clean_environment()
-    environment = StagingProviderEnvironment(
+    environment = StagingSimulatorEnvironment(
         project_name=project_name,
         environment_file=environment_file,
         override_file=override_file,
@@ -161,11 +161,11 @@ def staging_provider_environment(
         transcription_api_key=transcription_api_key,
         graph_host_port=graph_host_port,
         transcription_host_port=transcription_host_port,
-        providers_network_name=providers_network_name,
+        simulators_network_name=simulators_network_name,
     )
 
     try:
-        _docker_network("create", providers_network_name)
+        _docker_network("create", simulators_network_name)
         environment.compose(
             "build",
             "microsoft-graph-simulator",
@@ -186,7 +186,7 @@ def staging_provider_environment(
             "--remove-orphans",
             check=False,
         )
-        _docker_network("rm", providers_network_name, check=False)
+        _docker_network("rm", simulators_network_name, check=False)
         for image_name in (
             f"{project_name}-microsoft-graph-simulator:0.1.0",
             f"{project_name}-transcribe-ai-simulator:0.1.0",
@@ -198,23 +198,23 @@ def staging_provider_environment(
             )
 
 
-def _graph_base_url(environment: StagingProviderEnvironment) -> str:
+def _graph_base_url(environment: StagingSimulatorEnvironment) -> str:
     return f"http://127.0.0.1:{environment.graph_host_port}"
 
 
-def _transcription_base_url(environment: StagingProviderEnvironment) -> str:
+def _transcription_base_url(environment: StagingSimulatorEnvironment) -> str:
     return f"http://127.0.0.1:{environment.transcription_host_port}"
 
 
 def test_real_graph_client_uses_the_microsoft_graph_simulator(
-    staging_provider_environment: StagingProviderEnvironment,
+    staging_simulator_environment: StagingSimulatorEnvironment,
 ) -> None:
-    base_url = _graph_base_url(staging_provider_environment)
+    base_url = _graph_base_url(staging_simulator_environment)
     mailbox_id = "00000000-0000-4000-8000-000000000003"
     with httpx.Client() as admin_client:
         seeded = admin_client.post(
             f"{base_url}/__admin/messages",
-            headers={"X-Admin-Token": staging_provider_environment.admin_token},
+            headers={"X-Admin-Token": staging_simulator_environment.admin_token},
             json={"extension": "ogg"},
             timeout=5,
         )
@@ -251,17 +251,17 @@ def test_real_graph_client_uses_the_microsoft_graph_simulator(
 
 
 def test_real_transcription_client_uses_the_transcribe_ai_simulator(
-    staging_provider_environment: StagingProviderEnvironment,
+    staging_simulator_environment: StagingSimulatorEnvironment,
     tmp_path: Path,
 ) -> None:
-    base_url = _transcription_base_url(staging_provider_environment)
+    base_url = _transcription_base_url(staging_simulator_environment)
 
     audio_path = tmp_path / "synthetic.ogg"
     audio_path.write_bytes(b"OggS-synthetic-provider-contract")
     with httpx.Client() as transcription_http_client:
-        transcription = TranscriptionClient(
+        transcription = LegacyTranscriptionClient(
             base_url=base_url,
-            api_key=SecretStr(staging_provider_environment.transcription_api_key),
+            api_key=SecretStr(staging_simulator_environment.transcription_api_key),
             http_client=transcription_http_client,
             timeout=5,
         )

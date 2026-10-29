@@ -539,7 +539,10 @@ def test_legacy_transcription_settings_are_typed() -> None:
         _env_file=None,
     )
 
+    assert settings.transcription_provider.value == "legacy_polling"
+    assert settings.legacy_transcription_base_url is not None
     assert settings.legacy_transcription_base_url.path == "/prefix"
+    assert settings.legacy_transcription_api_key is not None
     assert (
         settings.legacy_transcription_api_key.get_secret_value() == "synthetic-api-key"
     )
@@ -549,25 +552,71 @@ def test_legacy_transcription_settings_are_typed() -> None:
 
 
 @pytest.mark.parametrize(
-    ("missing_environment_variable", "missing_field"),
+    "missing_environment_variable",
     [
-        ("LEGACY_TRANSCRIPTION_BASE_URL", "legacy_transcription_base_url"),
-        ("LEGACY_TRANSCRIPTION_API_KEY", "legacy_transcription_api_key"),
+        "LEGACY_TRANSCRIPTION_BASE_URL",
+        "LEGACY_TRANSCRIPTION_API_KEY",
     ],
 )
-def test_transcription_credentials_are_required(
+def test_selected_legacy_transcription_credentials_are_required(
     monkeypatch: pytest.MonkeyPatch,
     missing_environment_variable: str,
-    missing_field: str,
 ) -> None:
     monkeypatch.delenv(missing_environment_variable)
 
-    with pytest.raises(ValidationError) as error_info:
+    with pytest.raises(ValidationError, match="legacy polling"):
         WorkerSettings(public_base_url="http://localhost:8000", _env_file=None)
 
-    assert missing_field in {
-        str(error["loc"][0]) for error in error_info.value.errors()
+
+def test_openai_compatible_provider_requires_only_its_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LEGACY_TRANSCRIPTION_BASE_URL")
+    monkeypatch.delenv("LEGACY_TRANSCRIPTION_API_KEY")
+
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        transcription_provider="openai_compatible",
+        openai_compatible_transcription_base_url="http://parakeet:5092/v1",
+        openai_compatible_transcription_api_key="synthetic-provider-key",
+        openai_compatible_transcription_model="parakeet-tdt-0.6b",
+        _env_file=None,
+    )
+
+    assert settings.transcription_provider.value == "openai_compatible"
+    assert settings.legacy_transcription_base_url is None
+    assert settings.legacy_transcription_api_key is None
+    assert settings.openai_compatible_transcription_language == "fr"
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "openai_compatible_transcription_base_url",
+        "openai_compatible_transcription_api_key",
+        "openai_compatible_transcription_model",
+    ],
+)
+def test_selected_openai_compatible_configuration_is_required(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_field: str,
+) -> None:
+    monkeypatch.delenv("LEGACY_TRANSCRIPTION_BASE_URL")
+    monkeypatch.delenv("LEGACY_TRANSCRIPTION_API_KEY")
+    values: dict[str, object] = {
+        "openai_compatible_transcription_base_url": "http://parakeet:5092/v1",
+        "openai_compatible_transcription_api_key": "synthetic-provider-key",
+        "openai_compatible_transcription_model": "parakeet-tdt-0.6b",
     }
+    values.pop(missing_field)
+
+    with pytest.raises(ValidationError, match="OpenAI-compatible"):
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            transcription_provider="openai_compatible",
+            **values,
+            _env_file=None,
+        )
 
 
 def test_transcription_api_key_rejects_control_characters() -> None:

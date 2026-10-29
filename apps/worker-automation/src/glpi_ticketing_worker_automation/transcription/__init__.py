@@ -1,11 +1,10 @@
-"""Provider-independent transcription clients."""
+"""Provider-independent transcription contracts and adapters."""
 
-from .client import TranscriptionClient
 from .contracts import (
+    LegacyTranscriptionClientProtocol,
     TranscriberProtocol,
     TranscriptionBlockedError,
     TranscriptionClientError,
-    TranscriptionClientProtocol,
     TranscriptionHttpError,
     TranscriptionProtocolError,
     TranscriptionRetryRequired,
@@ -14,6 +13,8 @@ from .contracts import (
     TranscriptionTerminalError,
     TranscriptionTransportError,
 )
+from .legacy_client import LegacyTranscriptionClient
+from .legacy_polling import LegacyPollingTranscriber
 from .models import (
     JobSnapshot,
     JobStatus,
@@ -24,8 +25,9 @@ from .models import (
     TranscriptionOperation,
     TranscriptionProvider,
     TranscriptionResult,
+    TranscriptionSegment,
 )
-from .poller import TranscriptionPoller
+from .openai_compatible import OpenAICompatibleTranscriber
 
 __all__ = [
     "JobUuid",
@@ -33,17 +35,19 @@ __all__ = [
     "JobStatus",
     "ResponseLogEntry",
     "Submission",
-    "TranscriptionClient",
+    "LegacyPollingTranscriber",
+    "LegacyTranscriptionClient",
+    "LegacyTranscriptionClientProtocol",
+    "OpenAICompatibleTranscriber",
     "TranscriptionBlockedError",
     "TranscriptionClientError",
-    "TranscriptionClientProtocol",
     "TranscriptionHttpError",
     "TranscriptionErrorCategory",
     "TranscriptionOperation",
-    "TranscriptionPoller",
     "TranscriptionProtocolError",
     "TranscriptionProvider",
     "TranscriptionResult",
+    "TranscriptionSegment",
     "TranscriptionRetryRequired",
     "TranscriptionSubmissionCallbackError",
     "TranscriptionSubmissionRejectedError",

@@ -14,7 +14,6 @@ from glpi_ticketing_worker_automation.transcription import (
 )
 from glpi_ticketing_worker_automation.worker import (
     CompletedOutcome,
-    FailedOutcome,
     RetryOutcome,
 )
 
@@ -57,7 +56,7 @@ def test_unavailable_transcription_is_scheduled_with_capped_backoff(
     assert state.repository_calls[-1][0] == "schedule_retry"
 
 
-def test_terminal_transcription_persists_failed_without_sidecar_or_move(
+def test_terminal_transcription_creates_fallback_ticket_without_sidecar_or_move(
     tmp_path: Path,
 ) -> None:
     state = FakeState()
@@ -69,17 +68,16 @@ def test_terminal_transcription_persists_failed_without_sidecar_or_move(
             state,
             [TranscriptionTerminalError("remote_job_failed", audio_path)],
         ),
-        FakeGlpiClient(state, []),
+        FakeGlpiClient(state, [42]),
     )
 
     outcome = worker.run_once()
 
-    assert isinstance(outcome, FailedOutcome)
-    assert outcome.stage is JobStage.TRANSCRIPTION
+    assert isinstance(outcome, CompletedOutcome)
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
     assert list(tmp_path.glob("*.json")) == []
-    assert state.repository_calls[-1][0] == "mark_failed"
-    assert state.retention_calls[-1][-1]["hard_delete_at"] == NOW + timedelta(days=30)
+    assert state.repository_calls[-1][0] == "mark_completed"
+    assert state.retention_calls[-1][-1]["hard_delete_at"] == NOW + timedelta(days=90)
 
 
 def test_retry_backoff_series_is_shared_across_transcription_and_glpi(

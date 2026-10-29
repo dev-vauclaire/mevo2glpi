@@ -401,6 +401,58 @@ def test_retention_status_id_migration_has_a_symmetric_downgrade(
         )
 
 
+def test_upgrade_from_0006_preserves_events_and_allows_transcription_failure(
+    database_engine: Engine,
+) -> None:
+    _upgrade_to_revision(database_engine, "0006_add_ogg_replay_support")
+    job_uuid = uuid4()
+    with database_engine.begin() as connection:
+        connection.execute(
+            TicketCreationJob.__table__.insert(),
+            {
+                "uuid": job_uuid,
+                "storage_key": f"{job_uuid}.ogg",
+                "audio_extension": "ogg",
+                "audio_size_bytes": 128,
+            },
+        )
+        connection.execute(
+            TicketCreationJobEvent.__table__.insert(),
+            {
+                "job_uuid": job_uuid,
+                "status": "pending",
+                "stage": None,
+                "event_type": "job_created",
+                "actor": "worker_publisher",
+            },
+        )
+
+    upgrade_to_head(database_engine)
+
+    with database_engine.begin() as connection:
+        connection.execute(
+            TicketCreationJobEvent.__table__.insert(),
+            {
+                "job_uuid": job_uuid,
+                "status": "processing",
+                "stage": "glpi_creation",
+                "event_type": "transcription_failed",
+                "error_scope": "job",
+                "error_category": "terminal",
+                "technical_code": "invalid_transcription",
+                "actor": "worker_automation",
+            },
+        )
+        event_types = connection.scalars(
+            select(TicketCreationJobEvent.event_type)
+            .where(TicketCreationJobEvent.job_uuid == job_uuid)
+            .order_by(TicketCreationJobEvent.event_id)
+        ).all()
+
+    assert event_types == ["job_created", "transcription_failed"]
+    assert _current_revision(database_engine) == _single_head()
+
+
 def test_migrated_schema_matches_shared_metadata(database_engine: Engine) -> None:
     upgrade_to_head(database_engine)
 

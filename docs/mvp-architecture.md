@@ -15,7 +15,7 @@ flowchart LR
     DB[(PostgreSQL externe)]
     Audio[(Volume audio partagé)]
     Automation[Worker automation]
-    Transcribe[Transcribe AI]
+    Transcribe[Provider de transcription]
     GLPI[GLPI API v2.3.0]
     Retention[Worker retention]
     Web[Web en lecture seule]
@@ -29,7 +29,7 @@ flowchart LR
 
     Automation -->|SQL : cycle de vie| DB
     Automation -->|système : lecture| Audio
-    Automation -->|HTTP : soumission et polling| Transcribe
+    Automation -->|HTTP : synchrone ou polling encapsulé| Transcribe
     Automation -->|HTTP : OAuth et ticket| GLPI
 
     Retention -->|SQL : politiques et audit| DB
@@ -74,7 +74,7 @@ réarmement explicite d'un job `failed` ou `blocked`.
 │   ├── database-migrations/      application Alembic one-shot
 │   ├── web/                      FastAPI, dashboard et API de consultation
 │   ├── worker-publisher/         Exchange Online / Graph vers job audio
-│   ├── worker-automation/        Transcribe AI vers GLPI
+│   ├── worker-automation/        provider de transcription vers GLPI
 │   └── worker-retention/         politique de conservation des audios
 ├── packages/
 │   ├── common/                   stockage canonique, purge et backoff
@@ -82,7 +82,8 @@ réarmement explicite d'un job `failed` ou `blocked`.
 │   └── glpi-client/              client GLPI v2.3.0 partagé
 ├── infra/docker/
 │   ├── apps/                    images et Compose des applications
-│   └── providers/               simulateurs externes du staging
+│   ├── simulators/              doubles Graph, Transcribe AI et GLPI optionnel
+│   └── transcription/           moteur ASR déployable indépendamment
 ├── tests/
 │   ├── deployment/               contrats statiques et smoke tests Compose
 │   └── e2e/                      recette aval sans tenant Microsoft réel
@@ -145,7 +146,7 @@ cohérence avec le singleton publisher.
 | `audio_extension` | Extension validée ; le publisher produit `wav` ou `ogg`. |
 | `audio_size_bytes` | Taille positive vérifiée avant traitement et téléchargement. |
 | `glpi_ticket_id` | Identifiant positif, persisté dès confirmation de la création GLPI. |
-| `transcription_provider_job_id` | Identifiant du job Transcribe AI, distinct de l'UUID métier. |
+| `transcription_provider_job_id` | Identifiant distant optionnel, utilisé uniquement par le provider historique avec polling. |
 | `attempt_count` | Nombre total monotone de tentatives. |
 | `consecutive_retry_count` | Série d'indisponibilités utilisée par le backoff. |
 | `next_attempt_at` | Échéance d'un retry programmé. |
@@ -313,7 +314,9 @@ flowchart TD
     HasTicket -->|non| SourceDate{Date Exchange liée et valide ?}
     SourceDate -->|non| Blocked[SQL : blocked data_integrity]
     SourceDate -->|oui| Read[Système : lire et vérifier l'audio]
-    Read --> Transcribe[HTTP : soumettre puis poller Transcribe AI]
+    Read --> Transcribe[HTTP : appeler l'adaptateur sélectionné]
+    Transcribe -->|échec audio terminal| Fallback[SQL : transcription_failed + texte explicatif]
+    Fallback --> GLPI
     Transcribe --> GLPI[HTTP : créer avec date d'ouverture Europe/Paris]
     GLPI --> Persist[SQL : persister glpi_ticket_id]
     Persist --> Finalize
@@ -322,8 +325,9 @@ flowchart TD
 
 La transcription n'est pas persistée. Un redémarrage retranscrit donc tout job
 sans `glpi_ticket_id`, même si une étape de transcription avait déjà réussi.
-L'identifiant provider est persisté dès la soumission, mais ne remplace pas le
-contenu de transcription.
+Avec l'adaptateur historique, l'identifiant provider est persisté dès la
+soumission, mais ne remplace pas le contenu de transcription. Un provider
+synchrone n'a aucun identifiant distant à exposer au domaine.
 
 La date d'ouverture du ticket provient exclusivement de
 `mail_ingestions.received_at`, conservée en UTC. Le service applicatif relit
@@ -338,8 +342,10 @@ persisté, le worker considère la création confirmée et reprend directement l
 finalisation. Tant qu'il manque, le client peut réconcilier une création par
 `external_id`; GLPI ne garantit pas son unicité et une ambiguïté bloque le job.
 
-Une indisponibilité produit `retry_scheduled` avec backoff. Un refus terminal
-propre aux données produit `failed`. Une réponse incohérente ou un état propre
+Une indisponibilité produit `retry_scheduled` avec backoff. Un échec terminal
+de transcription produit un ticket explicatif et conserve l'audio sous la
+rétention normale d'un succès. Un rejet terminal GLPI peut encore produire
+`failed`. Une réponse incohérente ou un état propre
 au job impossible à réconcilier produit `blocked`. Une erreur globale
 d'autorisation bloque le worker au niveau système sans reclasser arbitrairement
 le job. Les appels HTTP et le polling n'ouvrent aucune transaction longue.
@@ -492,7 +498,9 @@ La validation est répartie par frontière :
   transactions, verrous et reprises ;
 - faux Microsoft Graph HTTP stateful pour les contrats Graph, la pagination,
   `ImmutableId`, les téléchargements, déplacements et réponses ambiguës ;
-- stacks jetables GLPI et Transcribe AI pour leurs clients ;
+- stacks jetables GLPI et provider historique pour leurs clients ;
+- tests de contrat déterministes du client OpenAI compatible et recette
+  Parakeet CPU en staging ;
 - tests de déploiement pour le rendu, les images, la sécurité et la topologie
   du Compose ;
 - E2E aval pour publisher-boundary -> automation -> GLPI -> web -> retention.

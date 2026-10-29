@@ -171,6 +171,43 @@ def test_idempotent_submission_does_not_duplicate_its_event() -> None:
     event_repository.append.assert_not_called()
 
 
+def test_terminal_transcription_failure_is_audited_before_ticketing() -> None:
+    session = create_autospec(Session, instance=True)
+    job_repository = MagicMock()
+    event_repository = MagicMock()
+    snapshot = _snapshot(
+        status=JobStatus.PROCESSING,
+        stage=JobStage.GLPI_CREATION,
+    )
+    job_repository.advance_after_transcription.return_value = snapshot
+    service = _service(
+        session,
+        job_repository=job_repository,
+        event_repository=event_repository,
+    )
+
+    result = service.record_transcription_failed(
+        JOB_UUID,
+        error_category="terminal",
+        error_code="invalid_transcription",
+        now=NOW,
+    )
+
+    assert result == snapshot
+    job_repository.advance_after_transcription.assert_called_once_with(JOB_UUID, NOW)
+    event_repository.append.assert_called_once_with(
+        JOB_UUID,
+        occurred_at=NOW,
+        status=JobStatus.PROCESSING,
+        stage=JobStage.GLPI_CREATION,
+        event_type=JobEventType.TRANSCRIPTION_FAILED,
+        actor=JobEventActor.WORKER_AUTOMATION,
+        error_scope=ErrorScope.JOB,
+        error_category="terminal",
+        technical_code="invalid_transcription",
+    )
+
+
 def test_completion_orders_job_retention_then_event_in_same_transaction() -> None:
     session = create_autospec(Session, instance=True)
     manager = MagicMock()

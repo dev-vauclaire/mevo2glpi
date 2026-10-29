@@ -1,9 +1,9 @@
-# This image is reserved for the isolated staging providers environment.
+# This image is reserved for the isolated staging simulators environment.
 # Keep the release tag for readability and the manifest-list digest for
 # reproducible builds on both linux/amd64 and linux/arm64 hosts.
 FROM glpi/glpi:11.0.7@sha256:7e100562afe13cce132fe46c0a21ddb94f7ed2c06950da9c4b34ce734a1ad4ac
 
-LABEL org.opencontainers.image.title="GLPI staging providers image" \
+LABEL org.opencontainers.image.title="GLPI staging simulators image" \
       org.opencontainers.image.description="GLPI 11.0.7 with an idempotent staging-only OAuth bootstrap" \
       org.opencontainers.image.version="11.0.7-staging"
 

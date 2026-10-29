@@ -7,7 +7,7 @@ import pytest
 
 from glpi_ticketing_worker_automation.transcription import (
     JobStatus,
-    TranscriptionClient,
+    LegacyTranscriptionClient,
 )
 
 pytestmark = [pytest.mark.transcribe_ai, pytest.mark.timeout(900)]
@@ -21,7 +21,7 @@ def test_transcription_client_completes_containerized_flow(
 ) -> None:
     """Submit an audio and poll the real API until its first completed result."""
     with httpx.Client() as http_client:
-        client = TranscriptionClient(
+        client = LegacyTranscriptionClient(
             base_url=transcribe_ai_environment.base_url,
             api_key=transcribe_ai_environment.api_key,
             http_client=http_client,

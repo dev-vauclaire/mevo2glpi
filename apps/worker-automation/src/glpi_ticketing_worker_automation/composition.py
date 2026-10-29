@@ -16,7 +16,14 @@ from sqlalchemy.orm import Session
 from glpi_ticketing_glpi import GlpiClient, GlpiTicketDefaults
 
 from .settings import WorkerSettings
-from .transcription import TranscriptionClient, TranscriptionPoller
+from .title_generation import DefaultTitleGenerator
+from .transcription import (
+    LegacyPollingTranscriber,
+    LegacyTranscriptionClient,
+    OpenAICompatibleTranscriber,
+    TranscriberProtocol,
+    TranscriptionProvider,
+)
 from .worker import (
     AudioInspector,
     AutomationJobLifecycleService,
@@ -99,19 +106,12 @@ def build_automation_worker(
             datetime.now(UTC),
         )
 
-    transcription_client = TranscriptionClient(
-        base_url=str(settings.legacy_transcription_base_url),
-        api_key=settings.legacy_transcription_api_key,
+    transcriber = _build_transcriber(
+        settings,
         http_client=http_client,
-        timeout=settings.transcription_http_timeout_seconds,
-    )
-    transcriber = TranscriptionPoller(
-        client=transcription_client,
-        poll_interval_seconds=settings.transcription_poll_interval_seconds,
-        job_timeout_seconds=settings.transcription_job_timeout_seconds,
-        sleep=transcription_sleep,
-        should_stop=transcription_should_stop,
-        on_job_submitted=record_transcription_submission,
+        transcription_sleep=transcription_sleep,
+        transcription_should_stop=transcription_should_stop,
+        record_transcription_submission=record_transcription_submission,
     )
     glpi_client = GlpiClient(
         base_url=str(settings.glpi_base_url),
@@ -163,12 +163,64 @@ def build_automation_worker(
                 urgency=settings.glpi_ticket_urgency,
                 impact=settings.glpi_ticket_impact,
             ),
+            title_generator=DefaultTitleGenerator(settings.glpi_ticket_title),
             ownership_guard=ownership_guard,
         ),
         transitions=transitions,
         idle_wait_seconds=settings.worker_idle_interval_seconds,
         on_job_started=on_job_started,
     )
+
+
+def _build_transcriber(
+    settings: WorkerSettings,
+    *,
+    http_client: httpx.Client,
+    transcription_sleep: Callable[[float], None],
+    transcription_should_stop: Callable[[], bool],
+    record_transcription_submission: Callable[[UUID, str], None],
+) -> TranscriberProtocol:
+    """Select one adapter while keeping provider details at the composition root."""
+    if settings.transcription_provider is TranscriptionProvider.LEGACY_POLLING:
+        base_url = settings.legacy_transcription_base_url
+        api_key = settings.legacy_transcription_api_key
+        if base_url is None or api_key is None:
+            raise WorkerConfigurationError(
+                "legacy transcription provider configuration is incomplete"
+            )
+        client = LegacyTranscriptionClient(
+            base_url=str(base_url),
+            api_key=api_key,
+            http_client=http_client,
+            timeout=settings.transcription_http_timeout_seconds,
+        )
+        return LegacyPollingTranscriber(
+            client=client,
+            poll_interval_seconds=settings.transcription_poll_interval_seconds,
+            job_timeout_seconds=settings.transcription_job_timeout_seconds,
+            sleep=transcription_sleep,
+            should_stop=transcription_should_stop,
+            on_job_submitted=record_transcription_submission,
+        )
+
+    if settings.transcription_provider is TranscriptionProvider.OPENAI_COMPATIBLE:
+        base_url = settings.openai_compatible_transcription_base_url
+        api_key = settings.openai_compatible_transcription_api_key
+        model = settings.openai_compatible_transcription_model
+        if base_url is None or api_key is None or model is None:
+            raise WorkerConfigurationError(
+                "OpenAI-compatible transcription provider configuration is incomplete"
+            )
+        return OpenAICompatibleTranscriber(
+            base_url=str(base_url),
+            api_key=api_key,
+            model=model,
+            language=settings.openai_compatible_transcription_language,
+            http_client=http_client,
+            timeout=settings.transcription_http_timeout_seconds,
+        )
+
+    raise WorkerConfigurationError("unsupported transcription provider")
 
 
 def _resolve_existing_directory(directory: object) -> Path:

@@ -1,4 +1,4 @@
-name: CI providers
+name: CI simulateurs et transcription
 
 on:
   pull_request:
@@ -8,7 +8,8 @@ on:
       - .dockerignore
       - .github/workflows/ci-providers.yml
       - conftest.py
-      - infra/docker/providers/**
+      - infra/docker/simulators/**
+      - infra/docker/transcription/**
       - providers/**
       - pyproject.toml
       - uv.lock
@@ -19,7 +20,8 @@ on:
       - .dockerignore
       - .github/workflows/ci-providers.yml
       - conftest.py
-      - infra/docker/providers/**
+      - infra/docker/simulators/**
+      - infra/docker/transcription/**
       - providers/**
       - pyproject.toml
       - uv.lock
@@ -39,7 +41,7 @@ env:
 
 jobs:
   validate:
-    name: Qualité et tests des providers
+    name: Qualité, simulateurs et transcription
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -66,11 +68,11 @@ jobs:
       - name: Synchroniser le workspace verrouillé
         run: uv sync --locked --all-packages --all-groups
 
-      - name: Vérifier le formatage des providers
+      - name: Vérifier le formatage des simulateurs
         run: uv run ruff format --check providers
 
-      - name: Exécuter l'analyse statique des providers
+      - name: Exécuter l'analyse statique des simulateurs
         run: uv run ruff check providers
 
-      - name: Exécuter les tests des providers et du Compose
+      - name: Exécuter les tests des simulateurs et des Compose
         run: uv run pytest providers --maxfail=1

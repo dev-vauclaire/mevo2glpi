@@ -88,12 +88,12 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     )
     monkeypatch.setattr(
         composition_module,
-        "TranscriptionClient",
+        "LegacyTranscriptionClient",
         capture("transcription_client", transcription_client),
     )
     monkeypatch.setattr(
         composition_module,
-        "TranscriptionPoller",
+        "LegacyPollingTranscriber",
         capture("poller", transcriber),
     )
     monkeypatch.setattr(
@@ -203,6 +203,10 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     assert ticket_defaults.request_source_id == settings.glpi_ticket_request_source_id
     assert ticket_defaults.urgency is settings.glpi_ticket_urgency
     assert ticket_defaults.impact is settings.glpi_ticket_impact
+    assert (
+        ticket_stage_arguments["title_generator"].generate("not retained")
+        == settings.glpi_ticket_title
+    )
 
     worker_arguments = captured["worker"]["kwargs"]
     assert worker_arguments["lifecycle"] is captured["lifecycle_instance"]
@@ -212,6 +216,51 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     assert worker_arguments["transitions"] is transitions
     assert worker_arguments["idle_wait_seconds"] == 1.25
     assert worker_arguments["on_job_started"] == started_jobs.append
+
+
+def test_openai_compatible_provider_is_composed_without_polling(
+    worker_settings_factory: Callable[..., WorkerSettings],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = worker_settings_factory(
+        transcription_provider="openai_compatible",
+        legacy_transcription_base_url=None,
+        legacy_transcription_api_key=None,
+        openai_compatible_transcription_base_url="http://parakeet:5092/v1",
+        openai_compatible_transcription_api_key="synthetic-provider-key",
+        openai_compatible_transcription_model="parakeet-tdt-0.6b",
+        openai_compatible_transcription_language="fr",
+    )
+    captured: dict[str, object] = {}
+    transcriber = object()
+
+    def capture_openai_transcriber(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return transcriber
+
+    monkeypatch.setattr(
+        composition_module,
+        "OpenAICompatibleTranscriber",
+        capture_openai_transcriber,
+    )
+    with httpx.Client() as http_client:
+        result = composition_module._build_transcriber(
+            settings,
+            http_client=http_client,
+            transcription_sleep=lambda _seconds: None,
+            transcription_should_stop=lambda: False,
+            record_transcription_submission=lambda _uuid, _provider_id: None,
+        )
+
+    assert result is transcriber
+    assert captured.pop("http_client") is http_client
+    assert captured == {
+        "base_url": "http://parakeet:5092/v1",
+        "api_key": settings.openai_compatible_transcription_api_key,
+        "model": "parakeet-tdt-0.6b",
+        "language": "fr",
+        "timeout": settings.transcription_http_timeout_seconds,
+    }
 
 
 def test_build_automation_worker_rejects_missing_audio_root(

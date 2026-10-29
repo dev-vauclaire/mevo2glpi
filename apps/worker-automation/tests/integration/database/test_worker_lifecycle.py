@@ -33,8 +33,8 @@ from glpi_ticketing_database import (
     create_session_factory,
 )
 from glpi_ticketing_glpi import GlpiTicketDefaults, TicketLevel, TicketType
+from glpi_ticketing_worker_automation.title_generation import DefaultTitleGenerator
 from glpi_ticketing_worker_automation.transcription import (
-    JobUuid,
     TranscriptionResult,
     TranscriptionRetryRequired,
 )
@@ -91,7 +91,6 @@ class PersistingFakeTranscriber:
         return TranscriptionResult(
             audio_path=audio_path,
             audio_uuid=audio_uuid,
-            provider_job_id=JobUuid(self._provider_job_id),
             transcription=TRANSCRIPTION,
         )
 
@@ -266,7 +265,6 @@ def test_crash_recovery_with_confirmed_ticket_finalizes_without_network(
     )
     lifecycle.record_transcription_succeeded(
         audio_uuid,
-        "provider-job-before-crash",
         NOW,
     )
     lifecycle.record_ticket_confirmed(audio_uuid, 84, NOW)
@@ -720,6 +718,7 @@ def _worker(
                 urgency=TicketLevel.LOW,
                 impact=TicketLevel.MEDIUM,
             ),
+            title_generator=DefaultTitleGenerator("Demande issue d'un appel audio"),
         ),
         transitions=transitions,
         idle_wait_seconds=1,

@@ -10,6 +10,7 @@ from glpi_ticketing_worker_automation.transcription import (
     JobSnapshot,
     JobStatus,
     JobUuid,
+    LegacyPollingTranscriber,
     ResponseLogEntry,
     Submission,
     TranscriptionBlockedError,
@@ -17,7 +18,6 @@ from glpi_ticketing_worker_automation.transcription import (
     TranscriptionErrorCategory,
     TranscriptionHttpError,
     TranscriptionOperation,
-    TranscriptionPoller,
     TranscriptionProtocolError,
     TranscriptionProvider,
     TranscriptionRetryRequired,
@@ -53,7 +53,7 @@ class FakeClock:
 
 
 class FakeTranscriptionClient:
-    provider = TranscriptionProvider.LEGACY
+    provider = TranscriptionProvider.LEGACY_POLLING
 
     def __init__(
         self,
@@ -114,7 +114,6 @@ def test_success_returns_provider_result_without_modifying_audio(
 
     assert result.audio_path == audio_path
     assert str(result.audio_uuid) == AUDIO_UUID
-    assert result.provider_job_id == JOB_UUID
     assert result.transcription == SYNTHETIC_TRANSCRIPTION
     assert SYNTHETIC_TRANSCRIPTION not in repr(result)
     assert client.submit_calls == 1
@@ -146,8 +145,8 @@ def test_submission_callback_runs_once_after_post_and_before_polling(
     result = poller.transcribe(audio_path)
 
     assert callback_calls == [(UUID(AUDIO_UUID), JOB_UUID)]
+    assert result.transcription == SYNTHETIC_TRANSCRIPTION
     assert call_log == ["submit", "callback", "get_job", "get_job"]
-    assert result.provider_job_id == JOB_UUID
 
 
 def test_submission_callback_failure_is_sanitized_and_stops_before_polling(
@@ -269,7 +268,7 @@ def test_shutdown_interrupts_polling_without_modifying_audio(
         clock.sleep(seconds)
         shutdown_requested = True
 
-    poller = TranscriptionPoller(
+    poller = LegacyPollingTranscriber(
         client=client,
         poll_interval_seconds=1.0,
         job_timeout_seconds=15.0,
@@ -294,7 +293,7 @@ def test_post_transport_error_keeps_audio_available_for_retry(
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionTransportError(
-            TranscriptionProvider.LEGACY,
+            TranscriptionProvider.LEGACY_POLLING,
             TranscriptionOperation.SUBMIT,
         ),
     )
@@ -321,7 +320,7 @@ def test_future_retryable_submission_error_uses_retry_fallback(
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionClientError(
-            provider=TranscriptionProvider.LEGACY,
+            provider=TranscriptionProvider.LEGACY_POLLING,
             operation=TranscriptionOperation.SUBMIT,
             category=TranscriptionErrorCategory.UNAVAILABLE,
             technical_code="future_retryable_error",
@@ -346,7 +345,7 @@ def test_post_500_keeps_audio_available_even_if_client_flag_is_false(
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionHttpError(
-            TranscriptionProvider.LEGACY,
+            TranscriptionProvider.LEGACY_POLLING,
             TranscriptionOperation.SUBMIT,
             500,
             retryable=False,
@@ -380,7 +379,7 @@ def test_non_retryable_submission_http_error_blocks_without_modifying_audio(
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionHttpError(
-            TranscriptionProvider.LEGACY,
+            TranscriptionProvider.LEGACY_POLLING,
             TranscriptionOperation.SUBMIT,
             status_code,
             retryable=False,
@@ -402,7 +401,7 @@ def test_explicit_submission_rejection_remains_terminal(
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionSubmissionRejectedError(
-            TranscriptionProvider.LEGACY,
+            TranscriptionProvider.LEGACY_POLLING,
             response_log=_response_log(TranscriptionOperation.SUBMIT, job_status=None),
         ),
     )
@@ -420,7 +419,7 @@ def test_submission_protocol_error_blocks_without_modifying_audio(
     client = FakeTranscriptionClient(
         events=[],
         submit_error=TranscriptionProtocolError(
-            TranscriptionProvider.LEGACY,
+            TranscriptionProvider.LEGACY_POLLING,
             TranscriptionOperation.SUBMIT,
             "synthetic remote contract detail",
         ),
@@ -443,7 +442,7 @@ def test_ambiguous_get_keeps_audio_available_for_a_fresh_submission(
     client = FakeTranscriptionClient(
         events=[
             TranscriptionTransportError(
-                TranscriptionProvider.LEGACY,
+                TranscriptionProvider.LEGACY_POLLING,
                 TranscriptionOperation.GET_JOB,
             ),
             _completed_snapshot(),
@@ -484,7 +483,7 @@ def test_get_unavailable_http_error_keeps_audio_available(
     client = FakeTranscriptionClient(
         events=[
             TranscriptionHttpError(
-                TranscriptionProvider.LEGACY,
+                TranscriptionProvider.LEGACY_POLLING,
                 TranscriptionOperation.GET_JOB,
                 status_code,
                 retryable=retryable,
@@ -506,7 +505,7 @@ def test_future_retryable_polling_error_uses_retry_fallback(
     client = FakeTranscriptionClient(
         events=[
             TranscriptionClientError(
-                provider=TranscriptionProvider.LEGACY,
+                provider=TranscriptionProvider.LEGACY_POLLING,
                 operation=TranscriptionOperation.GET_JOB,
                 category=TranscriptionErrorCategory.UNAVAILABLE,
                 technical_code="future_retryable_error",
@@ -543,7 +542,7 @@ def test_non_retryable_polling_http_error_blocks_without_modifying_audio(
     client = FakeTranscriptionClient(
         events=[
             TranscriptionHttpError(
-                TranscriptionProvider.LEGACY,
+                TranscriptionProvider.LEGACY_POLLING,
                 TranscriptionOperation.GET_JOB,
                 status_code,
                 retryable=False,
@@ -567,7 +566,7 @@ def test_polling_protocol_error_blocks_without_modifying_audio(
     client = FakeTranscriptionClient(
         events=[
             TranscriptionProtocolError(
-                TranscriptionProvider.LEGACY,
+                TranscriptionProvider.LEGACY_POLLING,
                 TranscriptionOperation.GET_JOB,
                 "synthetic remote contract detail",
             )
@@ -669,8 +668,8 @@ def _make_poller(
     *,
     job_timeout_seconds: float = 15.0,
     on_job_submitted: Callable[[UUID, JobUuid], None] | None = None,
-) -> TranscriptionPoller:
-    return TranscriptionPoller(
+) -> LegacyPollingTranscriber:
+    return LegacyPollingTranscriber(
         client=client,
         poll_interval_seconds=1.0,
         job_timeout_seconds=job_timeout_seconds,

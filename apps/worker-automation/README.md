@@ -86,10 +86,12 @@ flowchart TD
     Read --> TicketKnown{glpi_ticket_id connu ?}
 
     TicketKnown -->|oui| Finalize[Finaliser sans appel réseau]
-    TicketKnown -->|non| Transcribe[POST puis polling Transcribe AI]
-    Transcribe -->|job distant créé| ProviderId[Persister transcription_provider_job_id]
+    TicketKnown -->|non| Transcribe[Adaptateur de transcription sélectionné]
+    Transcribe -.->|legacy : job distant créé| ProviderId[Persister transcription_provider_job_id]
     ProviderId --> Transcribe
     Transcribe -->|succès| StageGlpi[Persister stage glpi_creation]
+    Transcribe -->|échec audio terminal| Fallback[Auditer + contenu explicatif expurgé]
+    Fallback --> StageGlpi
     StageGlpi --> Glpi[ensure_ticket par external_id]
     Glpi -->|ticket confirmé| TicketId[Persister glpi_ticket_id]
     TicketId --> Finalize
@@ -97,8 +99,7 @@ flowchart TD
 
     Transcribe -->|indisponible| Retry[retry_scheduled + backoff]
     Glpi -->|indisponible ou résultat inconnu| Retry
-    Transcribe -->|terminal propre au job| Failed[failed + rétention + événement]
-    Glpi -->|rejet terminal allowlisté| Failed
+    Glpi -->|rejet terminal allowlisté| Failed[failed + rétention + événement]
     Transcribe -->|ambiguïté propre au job| JobBlocked[blocked + rétention + événement]
     Glpi -->|ambiguïté propre au job| JobBlocked
     Read -->|clé ou fichier propre au job invalide| JobBlocked
@@ -115,19 +116,19 @@ flowchart TD
 ```
 
 Chaque mutation SQL est validée avant l'étape suivante. Aucune transaction ne
-reste ouverte pendant un appel Transcribe AI, un polling, un appel GLPI ou un
+reste ouverte pendant un appel de transcription, un polling, un appel GLPI ou un
 sommeil. Les frontières de reprise importantes sont donc durables :
 
 - la date de réception Exchange est relue depuis l'ingestion liée au job dans
   la même transaction que son acquisition ;
-- l'identifiant du job Transcribe AI est persisté immédiatement après le
-  `POST`, avant le premier `GET` de polling ;
+- avec le provider historique uniquement, l'identifiant distant est persisté
+  immédiatement après le `POST`, avant le premier `GET` de polling ;
 - l'identifiant GLPI est persisté avant la transition `completed` ;
 - l'état terminal, la rétention et l'événement associé sont écrits dans une
   même transaction.
 
-Transcribe AI ne persistant pas les résultats, un redémarrage retranscrit tout
-job `processing` sans `glpi_ticket_id`. Si l'identifiant GLPI est déjà présent,
+La transcription n'étant pas persistée localement, un redémarrage retranscrit
+tout job `processing` sans `glpi_ticket_id`. Si l'identifiant GLPI est déjà présent,
 le worker reprend directement la finalisation sans rappeler Transcribe AI ni
 GLPI. `ensure_ticket()` réconcilie les autres reprises grâce à
 `external_id = audio_uuid`.
@@ -171,13 +172,22 @@ Le runner ne dort pas sur un `RetryOutcome` : il revient immédiatement à la
 sélection afin qu'un autre job éligible puisse progresser. PostgreSQL empêche
 le job en retry d'être repris avant `next_attempt_at`.
 
+### Transcription dégradée avec création de ticket
+
+Un rejet audio explicite du provider (`400`, `413`, `415`, `422` pour le
+contrat OpenAI compatible), un statut distant legacy `FAILED`, une soumission
+legacy rejetée ou un texte vide/invalide n'arrête plus le pipeline. Le worker
+ajoute un événement `transcription_failed`, construit un contenu explicatif
+fixe avec un code technique expurgé, puis crée le ticket GLPI. L'audio suit
+ensuite la rétention normale d'un job `completed` afin de rester disponible à
+l'opérateur. Ni réponse HTTP brute ni transcription invalide ne sont persistées
+ou journalisées.
+
 ### `failed` : erreur terminale propre au job
 
 Un job devient `failed` uniquement lorsqu'une nouvelle tentative avec les
 mêmes données n'a pas de chance raisonnable de réussir, notamment :
 
-- rejet métier explicite de Transcribe AI ou statut distant exact `FAILED` ;
-- transcription annoncée terminée mais vide ou invalide ;
 - rejet sémantique GLPI explicitement reconnu par le client.
 
 Le worker persiste l'erreur et planifie une suppression absolue à 30 jours par
@@ -209,14 +219,17 @@ le worker avant son arrêt, afin de ne pas créer un job distant toutes les
 
 ## Transcription
 
-La couche `transcription` sépare le contrat du provider de son orchestration :
+La couche `transcription` expose un `TranscriberProtocol` indépendant du mode
+synchrone, du polling et des identifiants distants :
 
-- `TranscriptionClient` effectue le `POST /api/batchTranscription/createJob`
-  puis les lectures de `/api/batchTranscription/result` ;
-- `TranscriptionPoller` attend les statuts `PENDING` et `PROCESSING` ;
-- le callback `on_job_submitted` persiste l'identifiant distant avant le
-  polling ;
-- `TranscriberProtocol` permet d'injecter un faux dans les tests du worker.
+- `LegacyTranscriptionClient` et `LegacyPollingTranscriber` encapsulent le
+  `POST /api/batchTranscription/createJob`, le polling et la persistance de
+  l'identifiant distant historique ;
+- `OpenAICompatibleTranscriber` consomme uniquement le sous-ensemble commun
+  `POST /audio/transcriptions` avec `file`, `model`, `language` et
+  `response_format=json` ;
+- `TranscriptionResult` ne transporte que l'identité locale de l'audio, le
+  texte et d'éventuels segments neutres.
 
 Le fichier reste à sa clé canonique pendant tout ce flux. La transcription est
 gardée uniquement en mémoire le temps de construire le ticket GLPI.
@@ -228,6 +241,8 @@ Le package partage `glpi-ticketing-glpi` adapte l'API GLPI V2.3.0.
 d'abord l'UUID audio dans `external_id`, puis crée le ticket uniquement si
 aucun résultat exact n'existe. Le titre et les niveaux du ticket proviennent de
 la configuration ; la description contient la transcription et l'URL audio.
+`TitleGeneratorProtocol` isole désormais la génération du titre ; cette
+itération utilise `DefaultTitleGenerator`, qui retourne le titre configuré.
 
 Une réponse de création ambiguë reste récupérable et sera réconciliée à la
 tentative suivante. Une duplication réelle d'`external_id` bloque uniquement
@@ -396,8 +411,12 @@ Les variables obligatoires sont chargées depuis l'environnement ou `.env` :
 | --- | --- |
 | `DATABASE_URL` | URL `postgresql+psycopg` de la base migrée. |
 | `PUBLIC_BASE_URL` | Base des liens audio insérés dans GLPI. |
-| `LEGACY_TRANSCRIPTION_BASE_URL` | Base de l'API batch Transcribe AI. |
-| `LEGACY_TRANSCRIPTION_API_KEY` | Clé API Transcribe AI. |
+| `TRANSCRIPTION_PROVIDER` | `legacy_polling` ou `openai_compatible` ; `legacy_polling` par défaut. |
+| `LEGACY_TRANSCRIPTION_BASE_URL` | Base de l'API batch, obligatoire uniquement avec `legacy_polling`. |
+| `LEGACY_TRANSCRIPTION_API_KEY` | Clé de l'API batch, obligatoire uniquement avec `legacy_polling`. |
+| `OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL` | Base OpenAI compatible terminée par son préfixe `/v1`, obligatoire avec `openai_compatible`. |
+| `OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY` | Clé Bearer du provider synchrone, obligatoire avec `openai_compatible`. |
+| `OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL` | Identifiant de modèle envoyé au provider synchrone. |
 | `GLPI_BASE_URL` | Base de l'instance GLPI. |
 | `GLPI_USERNAME`, `GLPI_PASSWORD` | Utilisateur du grant OAuth Password. |
 | `GLPI_CLIENT_ID`, `GLPI_CLIENT_SECRET` | Client OAuth GLPI. |
@@ -422,9 +441,10 @@ Principaux réglages optionnels :
 | `FAILED_RETENTION_DAYS` | `30` | Deadline absolue d'un échec terminal. |
 | `BLOCKED_RETENTION_DAYS` | `90` | Deadline absolue d'un job bloqué. |
 | `RETENTION_CHECK_INTERVAL_HOURS` | `6` | Intervalle entre les contrôles d'un ticket terminé, également utilisé avant le premier contrôle. |
-| `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une requête Transcribe AI. |
-| `TRANSCRIPTION_POLL_INTERVAL_SECONDS` | `2` | Intervalle de polling distant. |
-| `TRANSCRIPTION_JOB_TIMEOUT_SECONDS` | `900` | Durée maximale d'un polling. |
+| `OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE` | `fr` | Langue envoyée au provider synchrone. |
+| `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une requête de transcription ; le staging CPU utilise `120`. |
+| `TRANSCRIPTION_POLL_INTERVAL_SECONDS` | `2` | Intervalle de polling du provider legacy uniquement. |
+| `TRANSCRIPTION_JOB_TIMEOUT_SECONDS` | `900` | Durée maximale du polling legacy uniquement. |
 | `GLPI_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une opération GLPI. |
 | `GLPI_TICKET_TYPE` | `1` | Type GLPI : `1` pour incident par défaut, `2` pour demande. |
 
@@ -507,7 +527,7 @@ conteneurs jetables et ne doivent pas être parallélisées.
 
 ## Limites actuelles
 
-- Transcribe AI ne persiste pas les transcriptions et n'accepte pas encore
+- Le provider historique ne persiste pas les transcriptions et n'accepte pas encore
   l'UUID audio lors de la soumission. Une reprise sans ticket confirmé crée
   donc un nouveau job distant et peut dupliquer le travail de transcription.
 - La transcription n'est jamais persistée. Une reprise GLPI sans

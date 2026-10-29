@@ -1,4 +1,4 @@
-"""In-memory orchestration of asynchronous transcription jobs."""
+"""Adapter hiding the historical provider's asynchronous polling workflow."""
 
 import math
 import time
@@ -12,9 +12,9 @@ from uuid import UUID
 from glpi_ticketing_common import audio_files
 
 from .contracts import (
+    LegacyTranscriptionClientProtocol,
     TranscriptionBlockedError,
     TranscriptionClientError,
-    TranscriptionClientProtocol,
     TranscriptionHttpError,
     TranscriptionProtocolError,
     TranscriptionRetryRequired,
@@ -47,7 +47,7 @@ class _TranscriptionAttempt:
     job_uuid: JobUuid | None = None
 
 
-class TranscriptionPoller:
+class LegacyPollingTranscriber:
     """Submit a new job for each call, then poll it until a terminal state.
 
     ``on_job_submitted`` runs synchronously after the accepted POST and before
@@ -58,7 +58,7 @@ class TranscriptionPoller:
     def __init__(
         self,
         *,
-        client: TranscriptionClientProtocol,
+        client: LegacyTranscriptionClientProtocol,
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         job_timeout_seconds: float = DEFAULT_JOB_TIMEOUT_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
@@ -255,7 +255,6 @@ class TranscriptionPoller:
                 return TranscriptionResult(
                     audio_path=audio_path,
                     audio_uuid=attempt.audio_uuid,
-                    provider_job_id=job_uuid,
                     transcription=snapshot.transcription,
                 )
             if snapshot.status is JobStatus.FAILED:

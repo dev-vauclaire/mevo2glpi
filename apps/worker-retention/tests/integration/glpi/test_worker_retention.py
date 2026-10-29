@@ -276,9 +276,8 @@ def _add_completed_retention(
             provider_job_id,
             ACTIVATED_AT,
         )
-        job_repository.record_transcription_succeeded(
+        job_repository.advance_after_transcription(
             job_uuid,
-            provider_job_id,
             ACTIVATED_AT,
         )
         job_repository.record_ticket_confirmed(

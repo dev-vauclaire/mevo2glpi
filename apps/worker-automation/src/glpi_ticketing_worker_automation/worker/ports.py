@@ -36,7 +36,15 @@ class JobLifecycleProtocol(Protocol):
     def record_transcription_succeeded(
         self,
         job_uuid: UUID,
-        provider_job_id: str,
+        now: datetime,
+    ) -> object: ...
+
+    def record_transcription_failed(
+        self,
+        job_uuid: UUID,
+        *,
+        error_category: str,
+        error_code: str,
         now: datetime,
     ) -> object: ...
 

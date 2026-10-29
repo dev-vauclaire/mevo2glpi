@@ -15,8 +15,8 @@ from .models import (
 )
 
 
-class TranscriptionClientProtocol(Protocol):
-    """Translate a provider-specific API into the worker's stable contract."""
+class LegacyTranscriptionClientProtocol(Protocol):
+    """Translate the historical polling API into normalized job snapshots."""
 
     @property
     def provider(self) -> TranscriptionProvider:
@@ -33,7 +33,7 @@ class TranscriptionClientProtocol(Protocol):
 
 
 class TranscriberProtocol(Protocol):
-    """Complete one asynchronous transcription attempt for an audio."""
+    """Complete one provider-independent transcription attempt for an audio."""
 
     def transcribe(self, audio_path: Path) -> TranscriptionResult:
         """Return a result or raise a sanitized retry, terminal or blocked error."""

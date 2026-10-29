@@ -57,7 +57,7 @@ def test_success_persists_ticket_before_completion_and_keeps_audio(
     assert [call[0] for call in state.repository_calls] == [
         "resume_or_claim_next",
         "get_ingestion_by_uuid",
-        "record_transcription_succeeded",
+        "advance_after_transcription",
         "record_ticket_confirmed",
         "mark_completed",
     ]

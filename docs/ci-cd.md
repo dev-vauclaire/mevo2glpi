@@ -38,15 +38,16 @@ La CI est séparée en deux workflows, déclenchés par une Pull Request vers
   workspace applicatif lorsque `apps/`, `packages/`, ses tests ou son
   infrastructure changent ;
 - [`.github/workflows/ci-providers.yml`](../.github/workflows/ci-providers.yml)
-  valide les packages et le Compose providers uniquement lorsque leur code,
-  leurs tests ou leur infrastructure changent.
+  valide les packages des simulateurs ainsi que les Compose simulateurs et
+  transcription lorsque leur code, leurs tests ou leur infrastructure changent.
 
 Le workspace uv et son unique `uv.lock` sont partagés par les deux périmètres.
 Une modification du manifeste ou du verrouillage déclenche donc les deux
-workflows. Une modification limitée au code ou au Compose providers ne lance
-que leur workflow ; `.dockerignore`, utilisé par toutes les images, déclenche
-également les deux. Un lancement manuel ignore les filtres de chemins et permet
-de rejouer chaque workflow indépendamment.
+workflows. Une modification limitée au code des simulateurs ou aux Compose
+simulateurs et transcription ne lance que leur workflow ; `.dockerignore`,
+utilisé par toutes les images, déclenche également les deux. Un lancement
+manuel ignore les filtres de chemins et permet de rejouer chaque workflow
+indépendamment.
 
 Les contrôles restent déterministes et utilisent uniquement des données
 synthétiques :
@@ -60,10 +61,12 @@ synthétiques :
 Les tests `deployment` qui construisent des images ou démarrent des conteneurs,
 ainsi que les suites `glpi`, `transcribe_ai` et `e2e`, ne font pas partie du
 contrôle automatique de chaque Pull Request. Ils restent des contrôles de
-recette manuels. Le contrat Compose statique des providers, également marqué
-`deployment`, reste en revanche exécuté par leur CI sans démarrer de conteneur.
-Le staging déployé exerce Graph et Transcribe au moyen de deux simulateurs
-séparés et utilise une instance GLPI de test externe en HTTPS.
+recette manuels. Les contrats Compose statiques des simulateurs et du moteur de
+transcription, également marqués `deployment`, restent en revanche exécutés par
+leur CI sans démarrer de conteneur. Le staging déployé exerce Graph et le
+provider legacy au moyen de deux simulateurs séparés, utilise Parakeet dans une
+stack privée indépendante et contacte une instance GLPI de test externe en
+HTTPS.
 
 La CI ne réalise aucune des opérations suivantes :
 
@@ -102,7 +105,8 @@ Le manifeste Compose peut être rendu sans démarrer les services :
 ```bash
 docker compose --env-file ./infra/docker/apps/.env.example --file infra/docker/apps/docker-compose.prod.yml config --quiet
 docker compose --env-file ./infra/docker/apps/staging.env.example --file infra/docker/apps/docker-compose.staging.yml config --quiet
-docker compose --env-file ./infra/docker/providers/providers.env.example --file infra/docker/providers/docker-compose.providers.yml config --quiet
+docker compose --env-file ./infra/docker/simulators/simulators.env.example --file infra/docker/simulators/docker-compose.simulators.yml config --quiet
+docker compose --env-file ./infra/docker/transcription/transcription.env.example --file infra/docker/transcription/docker-compose.transcription.yml config --quiet
 ```
 
 Ces commandes n'autorisent pas l'utilisation d'un fichier d'environnement
@@ -159,9 +163,12 @@ Avant la fusion :
 ## Promotion vers staging et production
 
 Le staging Dokploy suit `main` avec l'auto-déploiement activé. Il possède des
-ressources isolées, deux simulateurs de providers et des identifiants dédiés au
-GLPI de test externe. Il ne reçoit aucun identifiant ou certificat de
-production. Sa procédure complète est décrite dans [staging.md](staging.md).
+ressources isolées : une stack de simulateurs Graph et Transcribe AI legacy,
+une stack Parakeet CPU indépendante et des identifiants réservés au GLPI de
+test externe. Il ne reçoit aucun identifiant ou certificat de production. Sa
+procédure complète est décrite dans [staging.md](staging.md). La production
+reste sur le provider legacy jusqu'à validation de Parakeet ; le même Compose
+de transcription et le même digest seront ensuite promus séparément.
 
 Après une recette staging réussie :
 

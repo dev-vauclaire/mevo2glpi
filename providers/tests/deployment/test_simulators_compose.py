@@ -1,4 +1,4 @@
-"""Validate the standalone, staging-only providers Compose contract."""
+"""Validate the standalone, staging-only simulators Compose contract."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ import pytest
 pytestmark = pytest.mark.deployment
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-PROVIDERS_DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker" / "providers"
-PROVIDERS_COMPOSE_FILE = PROVIDERS_DOCKER_ROOT / "docker-compose.providers.yml"
-PROVIDERS_ENV_FILE = PROVIDERS_DOCKER_ROOT / "providers.env.example"
+SIMULATORS_DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker" / "simulators"
+SIMULATORS_COMPOSE_FILE = SIMULATORS_DOCKER_ROOT / "docker-compose.simulators.yml"
+SIMULATORS_ENV_FILE = SIMULATORS_DOCKER_ROOT / "simulators.env.example"
 
-PROVIDER_SERVICES = {
+SIMULATOR_SERVICES = {
     "microsoft-graph-simulator",
     "transcribe-ai-simulator",
 }
@@ -30,7 +30,7 @@ DOCUMENTED_SECRET_NAMES = {
 
 
 def _example_environment() -> dict[str, str]:
-    source = PROVIDERS_ENV_FILE.read_text(encoding="utf-8")
+    source = SIMULATORS_ENV_FILE.read_text(encoding="utf-8")
     return dict(re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", source, re.MULTILINE))
 
 
@@ -46,17 +46,17 @@ def _clean_environment(documented_names: set[str]) -> dict[str, str]:
 
 
 @pytest.fixture(scope="module")
-def providers_compose_config() -> dict[str, object]:
-    """Render the provider manifest once without starting any container."""
+def simulators_compose_config() -> dict[str, object]:
+    """Render the simulator manifest once without starting any container."""
     documented_names = set(_example_environment())
     result = subprocess.run(
         [
             "docker",
             "compose",
             "--env-file",
-            str(PROVIDERS_ENV_FILE),
+            str(SIMULATORS_ENV_FILE),
             "--file",
-            str(PROVIDERS_COMPOSE_FILE),
+            str(SIMULATORS_COMPOSE_FILE),
             "config",
             "--format",
             "json",
@@ -70,7 +70,7 @@ def providers_compose_config() -> dict[str, object]:
     )
     if result.returncode != 0:
         pytest.fail(
-            "Docker Compose could not render the providers manifest "
+            "Docker Compose could not render the simulators manifest "
             f"(exit_code={result.returncode}): {result.stderr.strip()}"
         )
     payload = json.loads(result.stdout)
@@ -84,9 +84,9 @@ def _services(config: dict[str, object]) -> dict[str, dict[str, Any]]:
     return services
 
 
-def test_providers_environment_documents_every_interpolated_variable() -> None:
-    compose_source = PROVIDERS_COMPOSE_FILE.read_text(encoding="utf-8")
-    example_source = PROVIDERS_ENV_FILE.read_text(encoding="utf-8")
+def test_simulators_environment_documents_every_interpolated_variable() -> None:
+    compose_source = SIMULATORS_COMPOSE_FILE.read_text(encoding="utf-8")
+    example_source = SIMULATORS_ENV_FILE.read_text(encoding="utf-8")
     active_compose_source = "\n".join(
         line
         for line in compose_source.splitlines()
@@ -98,9 +98,9 @@ def test_providers_environment_documents_every_interpolated_variable() -> None:
     documented_values = _example_environment()
 
     assert set(documented_values) == interpolated_names
-    assert documented_values["COMPOSE_PROJECT_NAME"] == "gta-staging-providers"
-    assert documented_values["PROVIDERS_NETWORK_NAME"] == (
-        "gta-staging-providers-network"
+    assert documented_values["COMPOSE_PROJECT_NAME"] == "gta-staging-simulators"
+    assert documented_values["SIMULATORS_NETWORK_NAME"] == (
+        "gta-staging-simulators-network"
     )
     assert {
         name: documented_values[name] for name in DOCUMENTED_SECRET_NAMES
@@ -111,20 +111,24 @@ def test_providers_environment_documents_every_interpolated_variable() -> None:
     )
 
 
-def test_providers_manifest_contains_only_the_two_active_simulators(
-    providers_compose_config: dict[str, object],
+def test_simulators_manifest_contains_only_the_active_staging_simulators(
+    simulators_compose_config: dict[str, object],
 ) -> None:
-    assert providers_compose_config["name"] == "gta-staging-providers"
-    assert set(_services(providers_compose_config)) == PROVIDER_SERVICES
+    assert simulators_compose_config["name"] == "gta-staging-simulators"
+    assert set(_services(simulators_compose_config)) == SIMULATOR_SERVICES
 
 
-def test_simulators_are_isolated_and_have_stable_network_aliases(
-    providers_compose_config: dict[str, object],
+def test_simulator_services_are_isolated_and_have_stable_network_aliases(
+    simulators_compose_config: dict[str, object],
 ) -> None:
-    services = _services(providers_compose_config)
+    services = _services(simulators_compose_config)
     expected_aliases = {
         "microsoft-graph-simulator": "gta-staging-microsoft-graph",
         "transcribe-ai-simulator": "gta-staging-transcribe-ai",
+    }
+    expected_ports = {
+        "microsoft-graph-simulator": "8080",
+        "transcribe-ai-simulator": "8080",
     }
 
     for service_name, alias in expected_aliases.items():
@@ -132,31 +136,31 @@ def test_simulators_are_isolated_and_have_stable_network_aliases(
         assert service["read_only"] is True
         assert service["cap_drop"] == ["ALL"]
         assert service["security_opt"] == ["no-new-privileges:true"]
-        assert service["expose"] == ["8080"]
+        assert service["expose"] == [expected_ports[service_name]]
         assert "ports" not in service
-        assert set(service["networks"]) == {"providers"}
-        assert service["networks"]["providers"]["aliases"] == [alias]
+        assert set(service["networks"]) == {"simulators"}
+        assert service["networks"]["simulators"]["aliases"] == [alias]
 
 
-def test_providers_manifest_uses_only_the_shared_provider_network(
-    providers_compose_config: dict[str, object],
+def test_simulators_manifest_uses_only_the_shared_simulator_network(
+    simulators_compose_config: dict[str, object],
 ) -> None:
-    assert providers_compose_config["networks"]["providers"] == {
-        "name": "gta-staging-providers-network",
+    assert simulators_compose_config["networks"]["simulators"] == {
+        "name": "gta-staging-simulators-network",
         "ipam": {},
         "external": True,
     }
-    assert set(providers_compose_config["networks"]) == {"providers"}
-    assert providers_compose_config.get("volumes", {}) == {}
+    assert set(simulators_compose_config["networks"]) == {"simulators"}
+    assert simulators_compose_config.get("volumes", {}) == {}
 
 
 def test_optional_glpi_simulation_remains_versioned_but_disabled() -> None:
-    compose_source = PROVIDERS_COMPOSE_FILE.read_text(encoding="utf-8")
-    dockerfile = (PROVIDERS_DOCKER_ROOT / "glpi-staging" / "Dockerfile").read_text(
+    compose_source = SIMULATORS_COMPOSE_FILE.read_text(encoding="utf-8")
+    dockerfile = (SIMULATORS_DOCKER_ROOT / "glpi-staging" / "Dockerfile").read_text(
         encoding="utf-8"
     )
     bootstrap = (
-        PROVIDERS_DOCKER_ROOT / "glpi-staging" / "bootstrap_oauth.php"
+        SIMULATORS_DOCKER_ROOT / "glpi-staging" / "bootstrap_oauth.php"
     ).read_text(encoding="utf-8")
 
     assert (
@@ -202,7 +206,7 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
         "microsoft-graph-simulator",
         "transcribe-ai-simulator",
     ):
-        dockerfile = (PROVIDERS_DOCKER_ROOT / simulator_name / "Dockerfile").read_text(
+        dockerfile = (SIMULATORS_DOCKER_ROOT / simulator_name / "Dockerfile").read_text(
             encoding="utf-8"
         )
         assert "python:3.12.14-slim-bookworm@sha256:" in dockerfile

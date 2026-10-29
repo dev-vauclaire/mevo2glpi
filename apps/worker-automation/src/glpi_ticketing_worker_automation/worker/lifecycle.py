@@ -144,7 +144,6 @@ class AutomationJobLifecycleService:
     def record_transcription_succeeded(
         self,
         job_uuid: UUID,
-        provider_job_id: str,
         now: datetime,
     ) -> JobSnapshot:
         """Advance to GLPI creation and append its audit event atomically."""
@@ -152,12 +151,45 @@ class AutomationJobLifecycleService:
         def operation(session: Session) -> JobSnapshot:
             snapshot = self._job_repository_factory(
                 session
-            ).record_transcription_succeeded(job_uuid, provider_job_id, now)
+            ).advance_after_transcription(
+                job_uuid,
+                now,
+            )
             self._append_event(
                 session,
                 snapshot,
                 event_type=JobEventType.TRANSCRIPTION_SUCCEEDED,
                 occurred_at=now,
+            )
+            return snapshot
+
+        return self._transaction(operation)
+
+    def record_transcription_failed(
+        self,
+        job_uuid: UUID,
+        *,
+        error_category: str,
+        error_code: str,
+        now: datetime,
+    ) -> JobSnapshot:
+        """Audit a terminal transcription failure and continue to ticketing."""
+
+        def operation(session: Session) -> JobSnapshot:
+            snapshot = self._job_repository_factory(
+                session
+            ).advance_after_transcription(
+                job_uuid,
+                now,
+            )
+            self._append_event(
+                session,
+                snapshot,
+                event_type=JobEventType.TRANSCRIPTION_FAILED,
+                occurred_at=now,
+                error_scope=ErrorScope.JOB,
+                error_category=error_category,
+                error_code=error_code,
             )
             return snapshot
 

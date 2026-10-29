@@ -54,6 +54,12 @@ def test_dashboard_names_every_retention_lifecycle_event() -> None:
     assert '["audio_deleted",' in dashboard
 
 
+def test_dashboard_names_the_degraded_transcription_event() -> None:
+    dashboard = (JAVASCRIPT_ROOT / "dashboard.js").read_text(encoding="utf-8")
+
+    assert '["transcription_failed",' in dashboard
+
+
 def test_dashboard_names_the_publisher_event_actor() -> None:
     dashboard = (JAVASCRIPT_ROOT / "dashboard.js").read_text(encoding="utf-8")
 

@@ -8,7 +8,7 @@ from pydantic import SecretStr
 from glpi_ticketing_worker_automation.transcription import (
     JobStatus,
     JobUuid,
-    TranscriptionClient,
+    LegacyTranscriptionClient,
     TranscriptionErrorCategory,
     TranscriptionHttpError,
     TranscriptionOperation,
@@ -25,9 +25,9 @@ SYNTHETIC_AUDIO = b"RIFF\x10\x00\x00\x00WAVEfmt \x00\x00\x00\x00data"
 
 def make_transcription_client(
     handler: Callable[[httpx.Request], httpx.Response],
-) -> tuple[TranscriptionClient, httpx.Client]:
+) -> tuple[LegacyTranscriptionClient, httpx.Client]:
     http_client = httpx.Client(transport=httpx.MockTransport(handler))
-    client = TranscriptionClient(
+    client = LegacyTranscriptionClient(
         base_url=BASE_URL,
         api_key=SecretStr(API_KEY),
         http_client=http_client,

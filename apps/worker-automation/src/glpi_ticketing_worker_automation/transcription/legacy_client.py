@@ -1,4 +1,4 @@
-"""HTTP client for the batch-transcription API."""
+"""HTTP client for the historical batch-transcription API."""
 
 import math
 from collections.abc import Mapping
@@ -35,8 +35,8 @@ AUDIO_MEDIA_TYPES = {
 }
 
 
-class TranscriptionClient:
-    """Translate the transcription HTTP API into the stable domain contract."""
+class LegacyTranscriptionClient:
+    """Translate the historical HTTP API into normalized polling primitives."""
 
     def __init__(
         self,
@@ -54,7 +54,7 @@ class TranscriptionClient:
     @property
     def provider(self) -> TranscriptionProvider:
         """Return the transcription provider identifier."""
-        return TranscriptionProvider.LEGACY
+        return TranscriptionProvider.LEGACY_POLLING
 
     def submit(self, audio_path: Path) -> Submission:
         """Submit one audio file to the batch endpoint."""

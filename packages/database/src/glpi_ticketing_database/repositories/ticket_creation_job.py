@@ -361,20 +361,14 @@ class TicketCreationJobRepository:
         self._session.flush()
         return JobMutation(job=_to_snapshot(job), changed=True)
 
-    def record_transcription_succeeded(
+    def advance_after_transcription(
         self,
         job_uuid: UUID,
-        provider_job_id: str,
         now: datetime,
     ) -> JobSnapshot:
-        """Advance a processing job without persisting transcription content."""
-        provider_job_id = _validate_provider_job_id(provider_job_id)
+        """Advance after a provider-independent transcription outcome."""
         now = validate_aware_datetime(now, "now")
         job = self._lock_processing_job(job_uuid, JobStage.TRANSCRIPTION)
-        if job.transcription_provider_job_id != provider_job_id:
-            raise InvalidJobTransitionError(
-                "transcription success must match the persisted provider identifier"
-            )
         job.stage = JobStage.GLPI_CREATION.value
         job.updated_at = now
         self._session.flush()

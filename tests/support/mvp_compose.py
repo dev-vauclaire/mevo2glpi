@@ -20,9 +20,14 @@ APPS_DOCKER_ROOT = DOCKER_ROOT / "apps"
 BASE_COMPOSE_FILE = APPS_DOCKER_ROOT / "docker-compose.prod.yml"
 COMMON_COMPOSE_SERVICES_FILE = APPS_DOCKER_ROOT / "docker-compose.common.services.yml"
 STAGING_COMPOSE_FILE = APPS_DOCKER_ROOT / "docker-compose.staging.yml"
-PROVIDERS_DOCKER_ROOT = DOCKER_ROOT / "providers"
-PROVIDERS_COMPOSE_FILE = PROVIDERS_DOCKER_ROOT / "docker-compose.providers.yml"
-PROVIDERS_ENV_FILE = PROVIDERS_DOCKER_ROOT / "providers.env.example"
+SIMULATORS_DOCKER_ROOT = DOCKER_ROOT / "simulators"
+SIMULATORS_COMPOSE_FILE = SIMULATORS_DOCKER_ROOT / "docker-compose.simulators.yml"
+SIMULATORS_ENV_FILE = SIMULATORS_DOCKER_ROOT / "simulators.env.example"
+TRANSCRIPTION_DOCKER_ROOT = DOCKER_ROOT / "transcription"
+TRANSCRIPTION_COMPOSE_FILE = (
+    TRANSCRIPTION_DOCKER_ROOT / "docker-compose.transcription.yml"
+)
+TRANSCRIPTION_ENV_FILE = TRANSCRIPTION_DOCKER_ROOT / "transcription.env.example"
 CUSTOM_SERVICES = (
     "database-migrations",
     "web",
@@ -59,7 +64,8 @@ def _deployment_environment_names() -> frozenset[str]:
     example_paths = (
         APPS_DOCKER_ROOT / ".env.example",
         APPS_DOCKER_ROOT / "staging.env.example",
-        PROVIDERS_ENV_FILE,
+        SIMULATORS_ENV_FILE,
+        TRANSCRIPTION_ENV_FILE,
     )
     return frozenset(
         name
@@ -777,14 +783,17 @@ __all__ = [
     "CUSTOM_SERVICES",
     "DOCKER_ROOT",
     "MvpComposeEnvironment",
-    "PROVIDERS_COMPOSE_FILE",
-    "PROVIDERS_DOCKER_ROOT",
-    "PROVIDERS_ENV_FILE",
     "ProviderConfiguration",
     "REPOSITORY_ROOT",
+    "SIMULATORS_COMPOSE_FILE",
+    "SIMULATORS_DOCKER_ROOT",
+    "SIMULATORS_ENV_FILE",
     "SYNTHETIC_APP_COMMIT_SHA",
     "SYNTHETIC_APP_RELEASE",
     "STAGING_COMPOSE_FILE",
+    "TRANSCRIPTION_COMPOSE_FILE",
+    "TRANSCRIPTION_DOCKER_ROOT",
+    "TRANSCRIPTION_ENV_FILE",
     "clean_environment",
     "create_mvp_compose_environment",
     "run_command",

@@ -134,9 +134,8 @@ def test_transcription_and_ticket_boundaries_mutate_only_the_job() -> None:
         "provider-123",
         NOW,
     )
-    succeeded = repository.record_transcription_succeeded(
+    succeeded = repository.advance_after_transcription(
         job.uuid,
-        "provider-123",
         NOW + timedelta(seconds=1),
     )
     ticketed = repository.record_ticket_confirmed(
@@ -176,22 +175,21 @@ def test_provider_submission_is_idempotent_only_for_the_same_identifier() -> Non
         repository.record_transcription_submitted(job.uuid, "provider-456", NOW)
 
 
-def test_transcription_success_rejects_a_provider_identifier_mismatch() -> None:
+def test_transcription_advance_does_not_require_a_remote_identifier() -> None:
     session = _session()
     job = _job(status=JobStatus.PROCESSING, stage=JobStage.TRANSCRIPTION)
     job.transcription_provider_job_id = "provider-persisted"
     session.get.return_value = job
 
-    with pytest.raises(InvalidJobTransitionError, match="must match"):
-        TicketCreationJobRepository(session).record_transcription_succeeded(
-            job.uuid,
-            "provider-result",
-            NOW,
-        )
+    snapshot = TicketCreationJobRepository(session).advance_after_transcription(
+        job.uuid,
+        NOW,
+    )
 
-    assert job.stage == JobStage.TRANSCRIPTION.value
+    assert snapshot.stage is JobStage.GLPI_CREATION
+    assert snapshot.transcription_provider_job_id == "provider-persisted"
     session.add.assert_not_called()
-    session.flush.assert_not_called()
+    session.flush.assert_called_once()
 
 
 def test_schedule_retry_increments_only_the_job_retry_counter() -> None:

@@ -128,6 +128,7 @@ from glpi_ticketing_database.models import (
                 "processing_resumed",
                 "transcription_submitted",
                 "transcription_succeeded",
+                "transcription_failed",
                 "retry_scheduled",
                 "ticket_confirmed",
                 "job_completed",

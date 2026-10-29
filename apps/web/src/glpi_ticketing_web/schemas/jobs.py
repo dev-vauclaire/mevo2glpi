@@ -71,6 +71,7 @@ class JobEventName(StrEnum):
     PROCESSING_RESUMED = "processing_resumed"
     TRANSCRIPTION_SUBMITTED = "transcription_submitted"
     TRANSCRIPTION_SUCCEEDED = "transcription_succeeded"
+    TRANSCRIPTION_FAILED = "transcription_failed"
     RETRY_SCHEDULED = "retry_scheduled"
     TICKET_CONFIRMED = "ticket_confirmed"
     JOB_COMPLETED = "job_completed"

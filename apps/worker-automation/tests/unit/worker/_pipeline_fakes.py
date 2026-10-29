@@ -13,14 +13,13 @@ from uuid import UUID
 
 from glpi_ticketing_database import (
     ErrorScope,
-    InvalidJobTransitionError,
     JobStage,
     JobStatus,
     MailIngestionDisposition,
 )
 from glpi_ticketing_glpi import GlpiTicketDefaults, TicketLevel, TicketType
+from glpi_ticketing_worker_automation.title_generation import DefaultTitleGenerator
 from glpi_ticketing_worker_automation.transcription import (
-    JobUuid,
     TranscriptionResult,
 )
 from glpi_ticketing_worker_automation.worker import (
@@ -141,20 +140,14 @@ class FakeTicketCreationJobRepository:
             return None
         return FakeAcquisition(self._state.job)
 
-    def record_transcription_succeeded(
+    def advance_after_transcription(
         self,
         job_uuid: UUID,
-        provider_job_id: str,
         now: datetime,
     ) -> FakeJob:
-        if self._state.job.transcription_provider_job_id != provider_job_id:
-            raise InvalidJobTransitionError(
-                "transcription provider identifiers do not match"
-            )
         self._record(
-            "record_transcription_succeeded",
+            "advance_after_transcription",
             job_uuid,
-            provider_job_id,
             now,
         )
         self._state.job.stage = JobStage.GLPI_CREATION
@@ -336,6 +329,7 @@ def build_worker(
     glpi_client: FakeGlpiClient,
     *,
     audio_url_for: Callable[[UUID], str] | None = None,
+    title_generator: object | None = None,
     ownership_guard: Callable[[], None] | None = None,
     on_job_started: Callable[[UUID], None] | None = None,
 ) -> AutomationWorker:
@@ -378,6 +372,11 @@ def build_worker(
                 else lambda audio_uuid: f"https://audio.test/audios/{audio_uuid}"
             ),
             ticket_defaults=TICKET_DEFAULTS,
+            title_generator=(
+                title_generator
+                if title_generator is not None
+                else DefaultTitleGenerator(TICKET_DEFAULTS.title)
+            ),  # type: ignore[arg-type]
             ownership_guard=ownership_guard,
         ),
         transitions=transitions,
@@ -397,7 +396,6 @@ def transcription_result(audio_path: Path) -> TranscriptionResult:
     return TranscriptionResult(
         audio_path=audio_path,
         audio_uuid=AUDIO_UUID,
-        provider_job_id=JobUuid("provider-job-1"),
         transcription=TRANSCRIPTION,
     )
 

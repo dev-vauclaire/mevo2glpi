@@ -1,0 +1,58 @@
+name: ${COMPOSE_PROJECT_NAME:-gta-transcription}
+
+x-inference-runtime: &inference-runtime
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  parakeet:
+    <<: *inference-runtime
+    image: ghcr.io/achetronic/parakeet:0.8.0-int8@sha256:00f8a02ec0ca6a7d6d5ee9f959060d8498b14f741a25e914941d22547a3f37f4
+    environment:
+      PARAKEET_API_KEY: ${PARAKEET_API_KEY:?Set PARAKEET_API_KEY}
+      PARAKEET_GPU: cpu
+      PARAKEET_WORKERS: "1"
+      PARAKEET_LOG_LEVEL: info
+      PARAKEET_LOG_FORMAT: json
+      PARAKEET_LONG_AUDIO: "false"
+    expose:
+      - "5092"
+    cpus: ${PARAKEET_CPUS:-2.0}
+    mem_limit: ${PARAKEET_MEMORY_LIMIT:-3g}
+    healthcheck:
+      test:
+        - CMD
+        - /bin/bash
+        - -ec
+        - |
+          exec 3<>/dev/tcp/127.0.0.1/5092
+          printf 'GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3
+          IFS= read -r status <&3
+          [[ "$${status}" == *" 200 "* ]]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    networks:
+      transcription:
+        aliases:
+          - ${PARAKEET_NETWORK_ALIAS:-gta-parakeet}
+    stop_grace_period: 45s
+
+networks:
+  transcription:
+    name: ${TRANSCRIPTION_NETWORK_NAME:-gta-transcription-network}
+    external: true

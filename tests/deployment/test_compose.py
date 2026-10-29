@@ -262,6 +262,17 @@ def test_production_manifest_separates_proxy_and_database_networks(
         assert set(services[service_name]["networks"]) == {"database"}
 
 
+def test_production_keeps_the_legacy_provider_without_a_transcription_network(
+    render_compose: Callable[[], dict[str, object]],
+) -> None:
+    config = render_compose()
+    automation = _services(config)["worker-automation"]
+
+    assert automation["environment"]["TRANSCRIPTION_PROVIDER"] == "legacy_polling"
+    assert set(automation["networks"]) == {"database"}
+    assert "transcription" not in config["networks"]
+
+
 def test_migration_gates_all_long_lived_applications(
     render_compose: Callable[[], dict[str, object]],
 ) -> None:
@@ -332,10 +343,17 @@ def test_web_receives_no_provider_credentials(
     web_environment = services["web"]["environment"]
     assert "DATABASE_URL" in web_environment
     assert not any(
-        name.startswith(("GLPI_", "LEGACY_TRANSCRIPTION_")) for name in web_environment
+        name.startswith(
+            ("GLPI_", "LEGACY_TRANSCRIPTION_", "OPENAI_COMPATIBLE_TRANSCRIPTION_")
+        )
+        for name in web_environment
     )
     assert (
         "LEGACY_TRANSCRIPTION_API_KEY" in services["worker-automation"]["environment"]
+    )
+    assert (
+        "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY"
+        in services["worker-automation"]["environment"]
     )
     automation_environment = services["worker-automation"]["environment"]
     assert automation_environment["WORKER_LOG_LEVEL"] == "INFO"
@@ -351,6 +369,7 @@ def test_web_receives_no_provider_credentials(
     assert "PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH" in publisher_environment
     assert not any(
         name.startswith(("GLPI_", "LEGACY_TRANSCRIPTION_"))
+        or name.startswith("OPENAI_COMPATIBLE_TRANSCRIPTION_")
         for name in publisher_environment
     )
     for service_name in ("database-migrations", "web", "worker-retention"):

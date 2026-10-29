@@ -7,16 +7,15 @@ import pytest
 
 from glpi_ticketing_database import ErrorScope, JobStage
 from glpi_ticketing_worker_automation.transcription import (
-    JobUuid,
     TranscriptionBlockedError,
     TranscriptionErrorCategory,
     TranscriptionResult,
     TranscriptionRetryRequired,
     TranscriptionSubmissionCallbackError,
+    TranscriptionTerminalError,
 )
 from glpi_ticketing_worker_automation.worker import (
     CompletedOutcome,
-    FailedOutcome,
     InterruptedOutcome,
     SystemBlockedOutcome,
 )
@@ -128,7 +127,6 @@ def test_transcription_result_identity_mismatch_blocks_the_system(
     result = TranscriptionResult(
         audio_path=mismatched_path,
         audio_uuid=mismatched_uuid,
-        provider_job_id=JobUuid("provider-job-1"),
         transcription=TRANSCRIPTION,
     )
     worker = build_worker(
@@ -175,12 +173,12 @@ def test_shutdown_during_transcription_keeps_processing_without_retry(
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
 
 
-def test_provider_result_identifier_mismatch_blocks_before_glpi(
+def test_provider_identifier_is_not_required_by_the_domain_result(
     tmp_path: Path,
 ) -> None:
     state = FakeState(FakeJob(transcription_provider_job_id="provider-persisted"))
     audio_path = write_audio(tmp_path)
-    glpi_client = FakeGlpiClient(state, [])
+    glpi_client = FakeGlpiClient(state, [42])
     worker = build_worker(
         tmp_path,
         state,
@@ -190,17 +188,13 @@ def test_provider_result_identifier_mismatch_blocks_before_glpi(
 
     outcome = worker.run_once()
 
-    assert isinstance(outcome, SystemBlockedOutcome)
-    assert outcome.failure.technical_code == "provider_job_id_mismatch"
-    assert outcome.automatic_probe is False
-    assert glpi_client.calls == []
-    assert state.transaction_outcomes == ["commit", "rollback"]
-    assert terminal_repository_calls(state) == []
-    assert state.eligible is True
+    assert isinstance(outcome, CompletedOutcome)
+    assert len(glpi_client.calls) == 1
+    assert "advance_after_transcription" in repository_call_names(state)
 
 
 @pytest.mark.parametrize("transcription", ["", "   ", "unsafe\x00content"])
-def test_invalid_transcription_content_is_failed(
+def test_invalid_transcription_content_creates_an_explanatory_ticket(
     tmp_path: Path,
     transcription: str,
 ) -> None:
@@ -209,21 +203,54 @@ def test_invalid_transcription_content_is_failed(
     result = TranscriptionResult(
         audio_path=audio_path,
         audio_uuid=AUDIO_UUID,
-        provider_job_id=JobUuid("provider-job-1"),
         transcription=transcription,
     )
+    glpi_client = FakeGlpiClient(state, [42])
     worker = build_worker(
         tmp_path,
         state,
         FakeTranscriber(state, [result]),
-        FakeGlpiClient(state, []),
+        glpi_client,
     )
 
     outcome = worker.run_once()
 
-    assert isinstance(outcome, FailedOutcome)
-    assert outcome.failure.technical_code == "invalid_transcription"
-    assert terminal_repository_calls(state) == ["mark_failed"]
+    assert isinstance(outcome, CompletedOutcome)
+    command = glpi_client.calls[0]
+    assert "transcription automatique" in command.transcription
+    assert "invalid_transcription" in command.transcription
+    assert transcription not in command.transcription or not transcription.strip()
+    assert terminal_repository_calls(state) == ["mark_completed"]
+    assert any(
+        call[-1].get("event_type").value == "transcription_failed"
+        for call in state.event_calls
+    )
+
+
+@pytest.mark.parametrize("technical_code", ["submission_rejected", "remote_job_failed"])
+def test_terminal_provider_failure_creates_an_explanatory_ticket(
+    tmp_path: Path,
+    technical_code: str,
+) -> None:
+    state = FakeState()
+    audio_path = write_audio(tmp_path)
+    glpi_client = FakeGlpiClient(state, [42])
+    worker = build_worker(
+        tmp_path,
+        state,
+        FakeTranscriber(
+            state,
+            [TranscriptionTerminalError(technical_code, audio_path)],
+        ),
+        glpi_client,
+    )
+
+    outcome = worker.run_once()
+
+    assert isinstance(outcome, CompletedOutcome)
+    command = glpi_client.calls[0]
+    assert technical_code in command.transcription
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
 
 
 def test_in_memory_transcription_is_excluded_from_repr() -> None:

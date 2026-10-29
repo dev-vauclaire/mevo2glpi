@@ -1,7 +1,7 @@
 name: ${COMPOSE_PROJECT_NAME:-gta-staging}
 
-# Les cinq applications héritent du socle commun. Les simulateurs sont
-# déployés séparément et partagent uniquement le réseau providers externe.
+# Les cinq applications héritent du socle commun. Les simulateurs et le moteur
+# de transcription sont déployés dans deux projets Dokploy indépendants.
 services:
   database-migrations:
     extends:
@@ -18,8 +18,13 @@ services:
       file: ./docker-compose.common.services.yml
       service: worker-automation
     environment:
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-openai_compatible}
       LEGACY_TRANSCRIPTION_BASE_URL: http://gta-staging-transcribe-ai:8080
       LEGACY_TRANSCRIPTION_API_KEY: ${TRANSCRIBE_AI_SIMULATOR_API_KEY:?Set TRANSCRIBE_AI_SIMULATOR_API_KEY}
+      OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL: http://gta-staging-parakeet:5092/v1
+      OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY: ${PARAKEET_API_KEY:?Set PARAKEET_API_KEY}
+      OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL: parakeet-tdt-0.6b
+      OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE: fr
       GLPI_BASE_URL: ${GLPI_BASE_URL:?Set GLPI_BASE_URL to the external staging GLPI URL}
       GLPI_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
       GLPI_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
@@ -28,7 +33,8 @@ services:
       GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
       SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
     networks:
-      - providers
+      - simulators
+      - transcription
 
   worker-publisher:
     extends:
@@ -38,7 +44,7 @@ services:
       PUBLISHER_GRAPH_AUTH_MODE: synthetic
       PUBLISHER_GRAPH_BASE_URL: http://gta-staging-microsoft-graph:8080/v1.0
     networks:
-      - providers
+      - simulators
 
   worker-retention:
     extends:
@@ -60,8 +66,11 @@ networks:
   dokploy-network:
     name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
     external: true
-  providers:
-    name: ${PROVIDERS_NETWORK_NAME:-gta-staging-providers-network}
+  simulators:
+    name: ${SIMULATORS_NETWORK_NAME:-gta-staging-simulators-network}
+    external: true
+  transcription:
+    name: ${TRANSCRIPTION_NETWORK_NAME:-gta-staging-transcription-network}
     external: true
 
 volumes:

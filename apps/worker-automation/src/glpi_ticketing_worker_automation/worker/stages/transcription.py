@@ -1,8 +1,9 @@
-"""Transcribe AI stage and its provider-specific error classification."""
+"""Provider-neutral transcription stage and error classification."""
 
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,13 +27,21 @@ from ..ports import JobLifecycleProtocol, JobSnapshotProtocol
 from ..transitions import JobTransitionService
 
 LOGGER = logging.getLogger(__name__)
+_SAFE_TECHNICAL_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+_FALLBACK_TRANSCRIPTION_TEMPLATE = (
+    "La transcription automatique de ce message audio n'a pas pu être produite. "
+    "L'audio reste disponible dans ce ticket pour écoute par un opérateur. "
+    "Code technique : {technical_code}."
+)
 
 
 @dataclass(frozen=True, slots=True)
 class TranscriptionSuccess:
-    """In-memory transcription passed to the next stage only."""
+    """In-memory content passed to ticketing after a completed stage."""
 
     transcription: str = field(repr=False)
+    degraded: bool = False
+    failure_code: str | None = None
 
 
 type TranscriptionStageResult = TranscriptionSuccess | RunOutcome
@@ -53,6 +62,8 @@ class TranscriptionStage:
             raise TypeError("transcriber must expose transcribe()")
         if not callable(getattr(lifecycle, "record_transcription_succeeded", None)):
             raise TypeError("lifecycle must expose record_transcription_succeeded()")
+        if not callable(getattr(lifecycle, "record_transcription_failed", None)):
+            raise TypeError("lifecycle must expose record_transcription_failed()")
         if not isinstance(transitions, JobTransitionService):
             raise TypeError("transitions must be a JobTransitionService")
         if ownership_guard is not None and not callable(ownership_guard):
@@ -129,12 +140,7 @@ class TranscriptionStage:
                     technical_code="terminal_audio_mismatch",
                     automatic_probe=False,
                 )
-            return self._transitions.fail(
-                audio_uuid,
-                stage=JobStage.TRANSCRIPTION,
-                category="terminal",
-                technical_code=error.code,
-            )
+            return self._continue_with_fallback(job, error.code)
 
         invalid_result = self._validate_result(
             result,
@@ -149,14 +155,13 @@ class TranscriptionStage:
         try:
             self._lifecycle.record_transcription_succeeded(
                 audio_uuid,
-                str(result.provider_job_id),
                 self._transitions.current_time(),
             )
         except InvalidJobTransitionError:
             return self._system_block(
                 job,
                 category="protocol",
-                technical_code="provider_job_id_mismatch",
+                technical_code="transcription_transition_conflict",
                 automatic_probe=False,
             )
         LOGGER.info("transcription completed audio_uuid=%s", audio_uuid)
@@ -168,7 +173,7 @@ class TranscriptionStage:
         *,
         job: JobSnapshotProtocol,
         audio_path: Path,
-    ) -> RunOutcome | None:
+    ) -> TranscriptionSuccess | RunOutcome | None:
         if not isinstance(result, TranscriptionResult):
             return self._system_block(
                 job,
@@ -184,13 +189,47 @@ class TranscriptionStage:
                 automatic_probe=False,
             )
         if not _valid_transcription(result.transcription):
-            return self._transitions.fail(
-                job.uuid,
-                stage=JobStage.TRANSCRIPTION,
-                category="terminal",
-                technical_code="invalid_transcription",
-            )
+            return self._continue_with_fallback(job, "invalid_transcription")
         return None
+
+    def _continue_with_fallback(
+        self,
+        job: JobSnapshotProtocol,
+        technical_code: str,
+    ) -> TranscriptionSuccess | RunOutcome:
+        if _SAFE_TECHNICAL_CODE.fullmatch(technical_code) is None:
+            return self._system_block(
+                job,
+                category="protocol",
+                technical_code="invalid_terminal_code",
+                automatic_probe=False,
+            )
+        try:
+            self._lifecycle.record_transcription_failed(
+                job.uuid,
+                error_category="terminal",
+                error_code=technical_code,
+                now=self._transitions.current_time(),
+            )
+        except InvalidJobTransitionError:
+            return self._system_block(
+                job,
+                category="protocol",
+                technical_code="transcription_transition_conflict",
+                automatic_probe=False,
+            )
+        LOGGER.warning(
+            "transcription fallback selected audio_uuid=%s code=%s",
+            job.uuid,
+            technical_code,
+        )
+        return TranscriptionSuccess(
+            transcription=_FALLBACK_TRANSCRIPTION_TEMPLATE.format(
+                technical_code=technical_code
+            ),
+            degraded=True,
+            failure_code=technical_code,
+        )
 
     def _system_block(
         self,
