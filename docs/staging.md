@@ -145,7 +145,7 @@ Après le déploiement, vérifier :
 Dans le terminal du simulateur Microsoft, injecter un message :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin seed --extension wav
+glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
 ```
 
 Puis contrôler la création de l'ingestion, la complétion du job, le déplacement
@@ -153,8 +153,20 @@ du message dans `Processed` et la création du ticket dans le GLPI de test.
 Rejouer avec OGG :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin seed --extension ogg
+glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
 ```
+
+Le catalogue complet est disponible sans secret :
+
+```bash
+glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
+```
+
+Pour mesurer la qualité avec un enregistrement fictif préparé par l'opérateur,
+copier un WAV ou un OGG de moins de 25 Mio dans le `/tmp` du conteneur puis
+l'injecter avec `seed --audio-path /tmp/test-vocal.wav`. Le chemin d'origine
+n'est pas conservé et le contenu reste en mémoire jusqu'au redémarrage ou au
+`reset`. Aucune donnée patient ou issue de la production ne doit être utilisée.
 
 Nettoyer uniquement l'état synthétique avec :
 

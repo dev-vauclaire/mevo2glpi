@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 from httpx2 import ASGITransport, AsyncClient
 
+from glpi_ticketing_microsoft_graph_simulator.scenarios import MAX_SEED_AUDIO_BYTES
 from glpi_ticketing_microsoft_graph_simulator.settings import (
     MicrosoftGraphSimulatorSettings,
 )
@@ -51,13 +52,13 @@ def _graph_headers() -> dict[str, str]:
 async def _seed(
     client: AsyncClient,
     *,
-    extension: str,
+    scenario: str,
     received_at: datetime = RECEIVED_AT,
 ) -> dict[str, object]:
     response = await client.post(
         "/__admin/messages",
         headers={"X-Admin-Token": ADMIN_TOKEN},
-        json={"extension": extension, "received_at": received_at.isoformat()},
+        json={"scenario": scenario, "received_at": received_at.isoformat()},
     )
     assert response.status_code == 201
     payload = response.json()
@@ -78,7 +79,7 @@ async def test_admin_seed_requires_token_without_echoing_it(
     response = await client.post(
         "/__admin/messages",
         headers={"X-Admin-Token": "wrong-admin-token"},
-        json={"extension": "wav"},
+        json={"scenario": "valid-wav"},
     )
 
     assert response.status_code == 401
@@ -87,19 +88,20 @@ async def test_admin_seed_requires_token_without_echoing_it(
 
 
 @pytest.mark.parametrize(
-    ("extension", "expected_media_type", "expected_magic"),
+    ("scenario", "expected_extension", "expected_media_type", "expected_magic"),
     [
-        ("wav", "audio/wav", b"RIFF"),
-        ("ogg", "audio/ogg", b"OggS"),
+        ("valid-wav", "wav", "audio/wav", b"RIFF"),
+        ("valid-ogg", "ogg", "audio/ogg", b"OggS"),
     ],
 )
 async def test_graph_lists_and_downloads_seeded_audio(
     client: AsyncClient,
-    extension: str,
+    scenario: str,
+    expected_extension: str,
     expected_media_type: str,
     expected_magic: bytes,
 ) -> None:
-    seeded = await _seed(client, extension=extension)
+    seeded = await _seed(client, scenario=scenario)
     messages_response = await client.get(
         f"/v1.0/users/{MAILBOX_ID}/mailFolders/inbox/messages",
         headers=_graph_headers(),
@@ -122,20 +124,202 @@ async def test_graph_lists_and_downloads_seeded_audio(
         headers=_graph_headers(),
     )
 
-    assert attachment["name"].endswith(f".{extension}")
+    assert seeded["scenario"] == scenario
+    assert seeded["attachment_count"] == 1
+    assert attachment["name"].endswith(f".{expected_extension}")
     assert attachment["contentType"] == expected_media_type
     assert download_response.headers["content-type"] == expected_media_type
     assert download_response.content.startswith(expected_magic)
     assert attachment["size"] == len(download_response.content)
 
 
+@pytest.mark.parametrize(
+    (
+        "scenario",
+        "expected_has_attachments",
+        "expected_count",
+        "expected_inline",
+        "expected_types",
+    ),
+    [
+        ("no-attachment", False, 0, [], []),
+        (
+            "two-audio-attachments",
+            True,
+            2,
+            [False, False],
+            [
+                "#microsoft.graph.fileAttachment",
+                "#microsoft.graph.fileAttachment",
+            ],
+        ),
+        (
+            "valid-audio-with-inline",
+            True,
+            2,
+            [False, True],
+            [
+                "#microsoft.graph.fileAttachment",
+                "#microsoft.graph.fileAttachment",
+            ],
+        ),
+        (
+            "non-file-attachment",
+            True,
+            1,
+            [False],
+            ["#microsoft.graph.itemAttachment"],
+        ),
+    ],
+)
+async def test_graph_exposes_scenario_attachment_topology(
+    client: AsyncClient,
+    scenario: str,
+    expected_has_attachments: bool,
+    expected_count: int,
+    expected_inline: list[bool],
+    expected_types: list[str],
+) -> None:
+    seeded = await _seed(client, scenario=scenario)
+    messages_response = await client.get(
+        f"/v1.0/users/{MAILBOX_ID}/mailFolders/inbox/messages",
+        headers=_graph_headers(),
+    )
+    message = messages_response.json()["value"][0]
+    attachments_response = await client.get(
+        f"/v1.0/users/{MAILBOX_ID}/messages/{message['id']}/attachments",
+        headers=_graph_headers(),
+    )
+    attachments = attachments_response.json()["value"]
+
+    assert seeded["attachment_count"] == expected_count
+    assert message["hasAttachments"] is expected_has_attachments
+    assert [item["isInline"] for item in attachments] == expected_inline
+    assert [item["@odata.type"] for item in attachments] == expected_types
+
+
+async def test_graph_exposes_oversized_metadata_without_a_large_fixture(
+    client: AsyncClient,
+) -> None:
+    seeded = await _seed(client, scenario="too-large")
+    response = await client.get(
+        f"/v1.0/users/{MAILBOX_ID}/messages/{seeded['message_id']}/attachments",
+        headers=_graph_headers(),
+    )
+
+    assert response.json()["value"][0]["size"] == MAX_SEED_AUDIO_BYTES + 1
+
+
+async def test_non_file_attachment_cannot_be_downloaded(
+    client: AsyncClient,
+) -> None:
+    seeded = await _seed(client, scenario="non-file-attachment")
+    attachments_response = await client.get(
+        f"/v1.0/users/{MAILBOX_ID}/messages/{seeded['message_id']}/attachments",
+        headers=_graph_headers(),
+    )
+    attachment_id = attachments_response.json()["value"][0]["id"]
+
+    response = await client.get(
+        f"/v1.0/users/{MAILBOX_ID}/messages/{seeded['message_id']}/attachments/"
+        f"{attachment_id}/$value",
+        headers=_graph_headers(),
+    )
+
+    assert response.status_code == 404
+
+
+async def test_admin_upload_exposes_exact_operator_audio_under_a_neutral_name(
+    client: AsyncClient,
+) -> None:
+    operator_audio = b"OggS-operator-provided-test-audio"
+    upload = await client.post(
+        "/__admin/messages/audio",
+        headers={
+            "X-Admin-Token": ADMIN_TOKEN,
+            "X-Audio-Extension": "ogg",
+            "X-Received-At": "2026-10-26T10:30:00+02:00",
+            "Content-Type": "audio/ogg",
+        },
+        content=operator_audio,
+    )
+    seeded = upload.json()
+    attachments_response = await client.get(
+        f"/v1.0/users/{MAILBOX_ID}/messages/{seeded['message_id']}/attachments",
+        headers=_graph_headers(),
+    )
+    attachment = attachments_response.json()["value"][0]
+    download = await client.get(
+        f"/v1.0/users/{MAILBOX_ID}/messages/{seeded['message_id']}/attachments/"
+        f"{attachment['id']}/$value",
+        headers=_graph_headers(),
+    )
+
+    assert upload.status_code == 201
+    assert seeded["scenario"] is None
+    assert seeded["received_at"] == "2026-10-26T08:30:00Z"
+    assert seeded["attachment_names"] == ["operator-audio.ogg"]
+    assert attachment["contentType"] == "audio/ogg"
+    assert download.content == operator_audio
+
+
+@pytest.mark.parametrize(
+    ("headers", "content", "expected_status", "expected_detail"),
+    [
+        (
+            {"X-Admin-Token": "wrong", "X-Audio-Extension": "wav"},
+            b"RIFF-test",
+            401,
+            "Unauthorized",
+        ),
+        (
+            {"X-Admin-Token": ADMIN_TOKEN, "X-Audio-Extension": "mp3"},
+            b"unsupported",
+            422,
+            "audio_extension_invalid",
+        ),
+        (
+            {"X-Admin-Token": ADMIN_TOKEN, "X-Audio-Extension": "wav"},
+            b"",
+            422,
+            "audio_empty",
+        ),
+        (
+            {
+                "X-Admin-Token": ADMIN_TOKEN,
+                "X-Audio-Extension": "wav",
+                "Content-Length": str(MAX_SEED_AUDIO_BYTES + 1),
+            },
+            b"x",
+            413,
+            "audio_too_large",
+        ),
+    ],
+)
+async def test_admin_upload_rejects_unauthorized_or_invalid_inputs(
+    client: AsyncClient,
+    headers: dict[str, str],
+    content: bytes,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    response = await client.post(
+        "/__admin/messages/audio",
+        headers=headers,
+        content=content,
+    )
+
+    assert response.status_code == expected_status
+    assert expected_detail in response.text
+
+
 async def test_graph_paginates_messages_oldest_first(client: AsyncClient) -> None:
     newer = await _seed(
         client,
-        extension="wav",
+        scenario="valid-wav",
         received_at=RECEIVED_AT + timedelta(minutes=1),
     )
-    older = await _seed(client, extension="ogg", received_at=RECEIVED_AT)
+    older = await _seed(client, scenario="valid-ogg", received_at=RECEIVED_AT)
 
     first_page = await client.get(
         f"/v1.0/users/{MAILBOX_ID}/mailFolders/inbox/messages?$top=1",
@@ -152,7 +336,7 @@ async def test_graph_paginates_messages_oldest_first(client: AsyncClient) -> Non
 async def test_graph_move_preserves_identifier_and_reset_clears_state(
     client: AsyncClient,
 ) -> None:
-    seeded = await _seed(client, extension="wav")
+    seeded = await _seed(client, scenario="valid-wav")
     folder_response = await client.post(
         f"/v1.0/users/{MAILBOX_ID}/mailFolders",
         headers=_graph_headers(),

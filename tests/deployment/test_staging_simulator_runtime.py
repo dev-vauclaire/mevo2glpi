@@ -146,9 +146,16 @@ def staging_simulator_environment(
         "  microsoft-graph-simulator:\n"
         "    ports:\n"
         f'      - "127.0.0.1:{graph_host_port}:8080"\n'
+        "    networks:\n"
+        "      host-test: {}\n"
         "  transcribe-ai-simulator:\n"
         "    ports:\n"
-        f'      - "127.0.0.1:{transcription_host_port}:8080"\n',
+        f'      - "127.0.0.1:{transcription_host_port}:8080"\n'
+        "    networks:\n"
+        "      host-test: {}\n"
+        "networks:\n"
+        "  host-test:\n"
+        "    driver: bridge\n",
         encoding="utf-8",
     )
     process_environment = clean_environment()
@@ -215,7 +222,7 @@ def test_real_graph_client_uses_the_microsoft_graph_simulator(
         seeded = admin_client.post(
             f"{base_url}/__admin/messages",
             headers={"X-Admin-Token": staging_simulator_environment.admin_token},
-            json={"extension": "ogg"},
+            json={"scenario": "valid-ogg"},
             timeout=5,
         )
     assert seeded.status_code == httpx.codes.CREATED

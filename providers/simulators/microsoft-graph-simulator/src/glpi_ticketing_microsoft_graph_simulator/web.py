@@ -12,8 +12,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .audio import SyntheticAudioExtension
+from .scenarios import (
+    MAX_SEED_AUDIO_BYTES,
+    SeedScenario,
+    SyntheticAttachmentKind,
+)
 from .settings import MicrosoftGraphSimulatorSettings
-from .state import MicrosoftGraphSimulatorState, SyntheticMessage
+from .state import (
+    MicrosoftGraphSimulatorState,
+    SyntheticAttachment,
+    SyntheticMessage,
+)
 
 GRAPH_SYNTHETIC_ACCESS_TOKEN = "synthetic-token"
 IMMUTABLE_ID_PREFERENCE = 'IdType="ImmutableId"'
@@ -33,7 +42,7 @@ class SeedMessageRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    extension: SyntheticAudioExtension
+    scenario: SeedScenario
     received_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("received_at")
@@ -51,7 +60,9 @@ class SeedMessageResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     message_id: str
-    attachment_name: str
+    scenario: SeedScenario | None
+    attachment_names: tuple[str, ...]
+    attachment_count: int
     received_at: datetime
 
 
@@ -100,15 +111,29 @@ def create_app(
         request: Request,
     ) -> SeedMessageResponse:
         _require_admin(request, settings)
-        message = state_store.seed_message(
-            extension=payload.extension,
+        message = state_store.seed_scenario(
+            scenario=payload.scenario,
             received_at=payload.received_at,
         )
-        return SeedMessageResponse(
-            message_id=message.message_id,
-            attachment_name=message.attachment.name,
-            received_at=message.received_at,
+        return _seed_message_response(message)
+
+    @application.post(
+        "/__admin/messages/audio",
+        response_model=SeedMessageResponse,
+        status_code=status.HTTP_201_CREATED,
+        include_in_schema=False,
+    )
+    async def seed_uploaded_audio(request: Request) -> SeedMessageResponse:
+        _require_admin(request, settings)
+        extension = _uploaded_audio_extension(request)
+        received_at = _uploaded_audio_received_at(request)
+        content = await _read_bounded_audio(request)
+        message = state_store.seed_uploaded_audio(
+            extension=extension,
+            content=content,
+            received_at=received_at,
         )
+        return _seed_message_response(message)
 
     @application.post(
         "/__admin/reset",
@@ -162,17 +187,9 @@ def create_app(
         message = state_store.get_message(message_id)
         if message is None:
             raise _graph_not_found()
-        attachment = message.attachment
         return {
             "value": [
-                {
-                    "@odata.type": "#microsoft.graph.fileAttachment",
-                    "id": attachment.attachment_id,
-                    "name": attachment.name,
-                    "contentType": attachment.media_type,
-                    "size": len(attachment.content),
-                    "isInline": False,
-                }
+                _attachment_payload(attachment) for attachment in message.attachments
             ]
         }
 
@@ -187,11 +204,21 @@ def create_app(
     ) -> Response:
         _require_graph(request, state_store, mailbox_id)
         message = state_store.get_message(message_id)
-        if message is None or message.attachment.attachment_id != attachment_id:
+        if message is None:
+            raise _graph_not_found()
+        attachment = next(
+            (
+                candidate
+                for candidate in message.attachments
+                if candidate.attachment_id == attachment_id
+            ),
+            None,
+        )
+        if attachment is None or attachment.kind is not SyntheticAttachmentKind.FILE:
             raise _graph_not_found()
         return Response(
-            content=message.attachment.content,
-            media_type=message.attachment.media_type,
+            content=attachment.content,
+            media_type=attachment.media_type,
         )
 
     @application.get(f"{graph_root}/mailFolders")
@@ -291,8 +318,91 @@ def _message_payload(message: SyntheticMessage) -> dict[str, object]:
         "id": message.message_id,
         "parentFolderId": message.parent_folder_id,
         "receivedDateTime": message.received_at.isoformat().replace("+00:00", "Z"),
-        "hasAttachments": True,
+        "hasAttachments": bool(message.attachments),
     }
+
+
+def _attachment_payload(attachment: SyntheticAttachment) -> dict[str, object]:
+    return {
+        "@odata.type": attachment.kind.odata_type,
+        "id": attachment.attachment_id,
+        "name": attachment.name,
+        "contentType": attachment.media_type,
+        "size": attachment.size_bytes,
+        "isInline": attachment.is_inline,
+    }
+
+
+def _seed_message_response(message: SyntheticMessage) -> SeedMessageResponse:
+    return SeedMessageResponse(
+        message_id=message.message_id,
+        scenario=message.scenario,
+        attachment_names=tuple(item.name for item in message.attachments),
+        attachment_count=len(message.attachments),
+        received_at=message.received_at,
+    )
+
+
+def _uploaded_audio_extension(request: Request) -> SyntheticAudioExtension:
+    raw_extension = request.headers.get("x-audio-extension", "")
+    try:
+        return SyntheticAudioExtension(raw_extension.casefold())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="audio_extension_invalid",
+        ) from None
+
+
+def _uploaded_audio_received_at(request: Request) -> datetime:
+    raw_value = request.headers.get("x-received-at")
+    if raw_value is None:
+        return datetime.now(UTC)
+    try:
+        parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="received_at_invalid",
+        ) from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="received_at_invalid",
+        )
+    return parsed.astimezone(UTC)
+
+
+async def _read_bounded_audio(request: Request) -> bytes:
+    raw_length = request.headers.get("content-length")
+    if raw_length is not None:
+        try:
+            content_length = int(raw_length)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="content_length_invalid",
+            ) from None
+        if content_length > MAX_SEED_AUDIO_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="audio_too_large",
+            )
+
+    content = bytearray()
+    async for chunk in request.stream():
+        content.extend(chunk)
+        if len(content) > MAX_SEED_AUDIO_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="audio_too_large",
+            )
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="audio_empty",
+        )
+    return bytes(content)
 
 
 def _page[ItemT](

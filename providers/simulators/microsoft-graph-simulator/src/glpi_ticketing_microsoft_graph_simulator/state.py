@@ -2,24 +2,34 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from threading import RLock
 from uuid import UUID, uuid4
 
-from .audio import SyntheticAudioExtension, build_synthetic_audio
+from .audio import SyntheticAudioExtension
+from .scenarios import (
+    SeedScenario,
+    SyntheticAttachmentKind,
+    SyntheticAttachmentTemplate,
+    build_scenario_attachments,
+    build_uploaded_audio_attachment,
+)
 
 INBOX_FOLDER_ID = "inbox"
 
 
 @dataclass(frozen=True, slots=True)
 class SyntheticAttachment:
-    """One fake file attachment held only in process memory."""
+    """One fake attachment held only in process memory."""
 
     attachment_id: str
     name: str
     media_type: str
-    content: bytes
+    content: bytes = field(repr=False)
+    size_bytes: int
+    kind: SyntheticAttachmentKind = SyntheticAttachmentKind.FILE
+    is_inline: bool = False
 
 
 @dataclass(slots=True)
@@ -29,7 +39,8 @@ class SyntheticMessage:
     message_id: str
     parent_folder_id: str
     received_at: datetime
-    attachment: SyntheticAttachment
+    attachments: tuple[SyntheticAttachment, ...]
+    scenario: SeedScenario | None
 
 
 class MicrosoftGraphSimulatorState:
@@ -59,15 +70,42 @@ class MicrosoftGraphSimulatorState:
             self._client_request_ids.add(request_id)
             return True
 
-    def seed_message(
+    def seed_scenario(
+        self,
+        *,
+        scenario: SeedScenario,
+        received_at: datetime,
+    ) -> SyntheticMessage:
+        """Create one Inbox message from a named deterministic scenario."""
+        if not isinstance(scenario, SeedScenario):
+            raise TypeError("scenario must be a SeedScenario")
+        return self._seed_message(
+            attachments=build_scenario_attachments(scenario),
+            received_at=received_at,
+            scenario=scenario,
+        )
+
+    def seed_uploaded_audio(
         self,
         *,
         extension: SyntheticAudioExtension,
+        content: bytes,
         received_at: datetime,
     ) -> SyntheticMessage:
-        """Create one Inbox message with a unique synthetic attachment."""
-        if not isinstance(extension, SyntheticAudioExtension):
-            raise TypeError("extension must be a SyntheticAudioExtension")
+        """Create one Inbox message from operator-provided test audio."""
+        return self._seed_message(
+            attachments=(build_uploaded_audio_attachment(extension, content),),
+            received_at=received_at,
+            scenario=None,
+        )
+
+    def _seed_message(
+        self,
+        *,
+        attachments: tuple[SyntheticAttachmentTemplate, ...],
+        received_at: datetime,
+        scenario: SeedScenario | None,
+    ) -> SyntheticMessage:
         if received_at.tzinfo is None or received_at.utcoffset() is None:
             raise ValueError("received_at must be timezone-aware")
         identifier = uuid4()
@@ -75,16 +113,31 @@ class MicrosoftGraphSimulatorState:
             message_id=f"message-{identifier}",
             parent_folder_id=INBOX_FOLDER_ID,
             received_at=received_at.astimezone(UTC),
-            attachment=SyntheticAttachment(
-                attachment_id=f"attachment-{identifier}",
-                name=f"synthetic-message-{identifier}.{extension.value}",
-                media_type=extension.media_type,
-                content=build_synthetic_audio(extension),
+            attachments=tuple(
+                self._attachment_from_template(identifier, index, template)
+                for index, template in enumerate(attachments, start=1)
             ),
+            scenario=scenario,
         )
         with self._lock:
             self._messages[message.message_id] = message
         return message
+
+    @staticmethod
+    def _attachment_from_template(
+        message_identifier: UUID,
+        index: int,
+        template: SyntheticAttachmentTemplate,
+    ) -> SyntheticAttachment:
+        return SyntheticAttachment(
+            attachment_id=f"attachment-{message_identifier}-{index}",
+            name=template.name,
+            media_type=template.media_type,
+            content=template.content,
+            size_bytes=template.size_bytes,
+            kind=template.kind,
+            is_inline=template.is_inline,
+        )
 
     def list_inbox_messages(self) -> tuple[SyntheticMessage, ...]:
         """Return Inbox messages oldest first, like the pinned Graph query."""

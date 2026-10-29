@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from glpi_ticketing_microsoft_graph_simulator import admin
+from glpi_ticketing_microsoft_graph_simulator.audio import SyntheticAudioExtension
 
 ADMIN_TOKEN = "synthetic-admin-token"
 
 
-def test_seed_cli_calls_the_loopback_admin_endpoint(
+def test_seed_scenario_cli_calls_the_loopback_admin_endpoint(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -20,7 +22,9 @@ def test_seed_cli_calls_the_loopback_admin_endpoint(
         observed.append((url, token, payload))
         return {
             "message_id": "message-synthetic",
-            "attachment_name": "synthetic-message.ogg",
+            "scenario": "valid-ogg",
+            "attachment_names": ["audio.ogg"],
+            "attachment_count": 1,
             "received_at": "2026-10-26T08:30:00Z",
         }
 
@@ -29,8 +33,8 @@ def test_seed_cli_calls_the_loopback_admin_endpoint(
     exit_code = admin.main(
         [
             "seed",
-            "--extension",
-            "ogg",
+            "--scenario",
+            "valid-ogg",
             "--received-at",
             "2026-10-26T10:30:00+02:00",
         ]
@@ -41,12 +45,153 @@ def test_seed_cli_calls_the_loopback_admin_endpoint(
         (
             "http://127.0.0.1:8080/__admin/messages",
             ADMIN_TOKEN,
-            {"extension": "ogg", "received_at": "2026-10-26T08:30:00Z"},
+            {"scenario": "valid-ogg", "received_at": "2026-10-26T08:30:00Z"},
         )
     ]
     output = json.loads(capsys.readouterr().out)
     assert output["message_id"] == "message-synthetic"
     assert ADMIN_TOKEN not in str(output)
+
+
+@pytest.mark.parametrize(
+    ("suffix", "expected_extension"),
+    [
+        (".wav", SyntheticAudioExtension.WAV),
+        (".OGG", SyntheticAudioExtension.OGG),
+    ],
+)
+def test_seed_audio_path_uploads_exact_bytes_without_disclosing_the_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    suffix: str,
+    expected_extension: SyntheticAudioExtension,
+) -> None:
+    private_marker = "operator-private-filename"
+    audio_path = tmp_path / f"{private_marker}{suffix}"
+    audio_path.write_bytes(b"synthetic-operator-audio")
+    observed: list[tuple[str, str, SyntheticAudioExtension, bytes, str | None]] = []
+    monkeypatch.setenv("MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN", ADMIN_TOKEN)
+
+    def post_audio(
+        url: str,
+        *,
+        token: str,
+        extension: SyntheticAudioExtension,
+        content: bytes,
+        received_at: str | None,
+    ) -> object:
+        observed.append((url, token, extension, content, received_at))
+        return {
+            "message_id": "message-uploaded",
+            "scenario": None,
+            "attachment_names": [f"operator-audio.{extension.value}"],
+            "attachment_count": 1,
+            "received_at": "2026-10-26T08:30:00Z",
+        }
+
+    monkeypatch.setattr(admin, "_post_audio", post_audio)
+
+    exit_code = admin.main(
+        [
+            "seed",
+            "--audio-path",
+            str(audio_path),
+            "--received-at",
+            "2026-10-26T08:30:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    assert observed == [
+        (
+            "http://127.0.0.1:8080/__admin/messages/audio",
+            ADMIN_TOKEN,
+            expected_extension,
+            b"synthetic-operator-audio",
+            "2026-10-26T08:30:00Z",
+        )
+    ]
+    captured = capsys.readouterr()
+    assert private_marker not in captured.out
+    assert private_marker not in captured.err
+
+
+def test_list_scenarios_requires_no_admin_token(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN", raising=False)
+
+    exit_code = admin.main(["list-scenarios"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [item["name"] for item in payload][:3] == [
+        "valid-wav",
+        "valid-ogg",
+        "valid-wav-alaw",
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["seed", "--extension", "wav"],
+        ["seed", "--scenario", "valid-wav", "--audio-path", "audio.wav"],
+    ],
+)
+def test_removed_or_conflicting_seed_options_are_rejected(
+    arguments: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        admin.main(arguments)
+
+    assert raised.value.code == 2
+
+
+def test_invalid_audio_path_does_not_disclose_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_marker = "private-patient-marker"
+    missing = tmp_path / f"{private_marker}.wav"
+    monkeypatch.setenv("MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN", ADMIN_TOKEN)
+
+    exit_code = admin.main(["seed", "--audio-path", str(missing)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert private_marker not in captured.err
+    assert private_marker not in captured.out
+
+
+@pytest.mark.parametrize(
+    ("suffix", "content"),
+    [
+        (".mp3", b"unsupported"),
+        (".wav", b""),
+        (".wav", b"too-large"),
+    ],
+)
+def test_invalid_audio_path_is_rejected_before_any_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+    content: bytes,
+) -> None:
+    audio_path = tmp_path / f"audio{suffix}"
+    audio_path.write_bytes(content)
+    monkeypatch.setenv("MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN", ADMIN_TOKEN)
+    monkeypatch.setattr(admin, "MAX_SEED_AUDIO_BYTES", 4)
+
+    def unexpected_request(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("invalid audio must not reach the simulator")
+
+    monkeypatch.setattr(admin, "_post_audio", unexpected_request)
+
+    assert admin.main(["seed", "--audio-path", str(audio_path)]) == 1
 
 
 def test_reset_cli_never_prints_admin_token_on_failure(

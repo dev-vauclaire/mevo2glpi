@@ -1,12 +1,12 @@
-"""Generate tiny structurally valid and non-sensitive staging audio files."""
+"""Load deterministic, non-sensitive audio fixtures used by staging scenarios."""
 
 from __future__ import annotations
 
-import struct
+import base64
+import gzip
+import hashlib
 from enum import StrEnum
-
-_OGG_CRC_POLYNOMIAL = 0x04C11DB7
-_UINT32_MASK = 0xFFFFFFFF
+from importlib.resources import files
 
 
 class SyntheticAudioExtension(StrEnum):
@@ -23,52 +23,48 @@ class SyntheticAudioExtension(StrEnum):
         return "audio/ogg"
 
 
-def build_synthetic_audio(extension: SyntheticAudioExtension) -> bytes:
-    """Return deterministic container bytes without speech or personal data."""
-    if extension is SyntheticAudioExtension.WAV:
-        return _build_wav()
-    if extension is SyntheticAudioExtension.OGG:
-        return _build_ogg()
-    raise ValueError("unsupported synthetic audio extension")
+class SyntheticAudioFixture(StrEnum):
+    """Versioned spoken fixtures generated from a fictitious sentence."""
+
+    WAV_PCM = "valid-speech.wav"
+    WAV_ALAW = "valid-speech-alaw.wav"
+    OGG_OPUS = "valid-speech.ogg"
 
 
-def _build_wav() -> bytes:
-    audio = b"\xd5" * 80
-    format_chunk = struct.pack("<HHIIHH", 6, 1, 8_000, 8_000, 1, 8)
-    chunks = b"fmt " + struct.pack("<I", len(format_chunk)) + format_chunk
-    chunks += b"data" + struct.pack("<I", len(audio)) + audio
-    return b"RIFF" + struct.pack("<I", len(chunks) + 4) + b"WAVE" + chunks
+_FIXTURE_SHA256 = {
+    SyntheticAudioFixture.WAV_PCM: (
+        "477a01ce6643d7f06ef4bd2e3564d4cb2e01f3fcfa8205e220185129c8889f7d"
+    ),
+    SyntheticAudioFixture.WAV_ALAW: (
+        "86086f9f72d66f4b3b59f420e5dfd64a76880a0103a7cff99bfd1aaa7a1e611c"
+    ),
+    SyntheticAudioFixture.OGG_OPUS: (
+        "0eb4e93632e8530feba90abbd1e48781ffc920684538bf3c5603d1c87942dedb"
+    ),
+}
 
 
-def _build_ogg() -> bytes:
-    payload = b"synthetic-ogg"
-    header = struct.pack(
-        "<4sBBQIIIB",
-        b"OggS",
-        0,
-        0x02 | 0x04,
-        0,
-        1,
-        0,
-        0,
-        1,
+def load_synthetic_audio(fixture: SyntheticAudioFixture) -> bytes:
+    """Decode one packaged fixture and fail closed if it was altered."""
+    if not isinstance(fixture, SyntheticAudioFixture):
+        raise TypeError("fixture must be a SyntheticAudioFixture")
+    encoded = (
+        files("glpi_ticketing_microsoft_graph_simulator")
+        .joinpath("fixtures", f"{fixture.value}.gz.b64")
+        .read_text(encoding="ascii")
     )
-    page = bytearray(header + bytes((len(payload),)) + payload)
-    page[22:26] = _ogg_crc(page).to_bytes(4, byteorder="little")
-    return bytes(page)
+    try:
+        compact = "".join(encoded.split())
+        content = gzip.decompress(base64.b64decode(compact, validate=True))
+    except (ValueError, gzip.BadGzipFile) as error:
+        raise RuntimeError("synthetic audio fixture is invalid") from error
+    if hashlib.sha256(content).hexdigest() != _FIXTURE_SHA256[fixture]:
+        raise RuntimeError("synthetic audio fixture checksum mismatch")
+    return content
 
 
-def _ogg_crc(page: bytes | bytearray) -> int:
-    checksum = 0
-    for octet in page:
-        checksum ^= octet << 24
-        for _ in range(8):
-            if checksum & 0x80000000:
-                checksum = (checksum << 1) ^ _OGG_CRC_POLYNOMIAL
-            else:
-                checksum <<= 1
-            checksum &= _UINT32_MASK
-    return checksum
-
-
-__all__ = ["SyntheticAudioExtension", "build_synthetic_audio"]
+__all__ = [
+    "SyntheticAudioExtension",
+    "SyntheticAudioFixture",
+    "load_synthetic_audio",
+]

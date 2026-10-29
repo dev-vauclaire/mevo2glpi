@@ -50,10 +50,23 @@ uv.lock
 Depuis le terminal du simulateur Microsoft :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin seed --extension wav
-glpi-ticketing-microsoft-graph-simulator-admin seed --extension ogg
+glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
+glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
+glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
 glpi-ticketing-microsoft-graph-simulator-admin reset
 ```
+
+Pour tester un enregistrement WAV ou OGG fictif créé par l'opérateur, le copier
+temporairement depuis la VM dans le `/tmp` du conteneur, puis le référencer :
+
+```bash
+sudo docker ps --filter name=microsoft-graph-simulator --format '{{.ID}} {{.Names}}'
+sudo docker cp ./test-vocal.wav <CONTAINER_ID>:/tmp/test-vocal.wav
+sudo docker exec <CONTAINER_ID> glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /tmp/test-vocal.wav
+```
+
+Le fichier disparaît avec le conteneur et n'est jamais ajouté au dépôt. Ne pas
+utiliser de donnée patient ou de message vocal de production.
 
 Depuis le terminal du simulateur Transcribe AI :
 
@@ -61,5 +74,5 @@ Depuis le terminal du simulateur Transcribe AI :
 glpi-ticketing-transcribe-ai-simulator-smoke
 ```
 
-Ces commandes utilisent uniquement des données synthétiques. Aucun secret ou
-audio réel ne doit être ajouté au dépôt ou à cette stack.
+Les scénarios utilisent uniquement des données synthétiques. Aucun secret ou
+audio de production ne doit être ajouté au dépôt ou à cette stack.

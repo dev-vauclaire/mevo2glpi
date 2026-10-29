@@ -1,10 +1,11 @@
 # Microsoft Graph simulator
 
 Simulateur stateful réservé au staging. Il expose le sous-ensemble Graph utilisé
-par le publisher et une administration locale permettant d'injecter des messages
-WAV ou OGG synthétiques.
+par le publisher et une administration locale permettant d'injecter des
+scénarios déterministes ou un fichier WAV/OGG choisi par l'opérateur.
 
-Il ne simule pas Microsoft Entra ID et ne doit recevoir aucune donnée réelle.
+Il ne simule pas Microsoft Entra ID. Les fichiers choisis doivent être des
+enregistrements de test fictifs, sans donnée patient ni donnée métier réelle.
 
 ```text
 MICROSOFT_GRAPH_SIMULATOR_HOST=0.0.0.0
@@ -16,7 +17,29 @@ MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN=<secret staging>
 Depuis le conteneur :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin seed --extension wav
-glpi-ticketing-microsoft-graph-simulator-admin seed --extension ogg
+glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
+glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
+glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
+glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /tmp/test-vocal.wav
 glpi-ticketing-microsoft-graph-simulator-admin reset
 ```
+
+| Scénario | Résultat publisher attendu |
+|---|---|
+| `valid-wav`, `valid-ogg`, `valid-wav-alaw` | accepté, message `Processed` |
+| `no-attachment` | rejet `audio_attachment_missing` |
+| `two-audio-attachments` | rejet `attachment_count_invalid` |
+| `empty-audio` | rejet `audio_empty` |
+| `unsupported-format` | rejet `audio_format_not_supported` |
+| `corrupt-wav` | rejet `wav_header_invalid` |
+| `corrupt-ogg` | rejet `ogg_header_invalid` |
+| `too-large` | rejet `audio_too_large` |
+| `valid-audio-with-inline` | accepté ; l'image inline est ignorée |
+| `non-file-attachment` | rejet `attachment_kind_invalid` |
+| `silent-wav` | accepté par le publisher ; résultat dépendant du transcripteur |
+
+`--scenario` et `--audio-path` sont mutuellement exclusifs. Le fichier indiqué
+doit être visible depuis le conteneur, porter l'extension `.wav` ou `.ogg`, ne
+pas être vide et ne pas dépasser 25 Mio. Son chemin et son nom d'origine ne
+sont pas transmis à l'API Graph simulée. Son contenu reste uniquement en
+mémoire jusqu'au redémarrage ou à la commande `reset`.
