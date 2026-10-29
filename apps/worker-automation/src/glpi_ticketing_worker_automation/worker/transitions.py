@@ -38,6 +38,7 @@ class JobTransitionService:
         lifecycle: JobLifecycleProtocol,
         retry_policy: RetryBackoffPolicy,
         retention_policy: RetentionSchedulePolicy,
+        maximum_consecutive_retries: int = 3,
         system_probe_interval_seconds: float = 60.0,
         now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -47,12 +48,19 @@ class JobTransitionService:
             raise TypeError("retry_policy must be a RetryBackoffPolicy")
         if not isinstance(retention_policy, RetentionSchedulePolicy):
             raise TypeError("retention_policy must be a RetentionSchedulePolicy")
+        if isinstance(maximum_consecutive_retries, bool) or not isinstance(
+            maximum_consecutive_retries, int
+        ):
+            raise TypeError("maximum_consecutive_retries must be an integer")
+        if maximum_consecutive_retries <= 0:
+            raise ValueError("maximum_consecutive_retries must be greater than zero")
         if now is not None and not callable(now):
             raise TypeError("now must be callable")
 
         self._lifecycle = lifecycle
         self._retry_policy = retry_policy
         self._retention_policy = retention_policy
+        self._maximum_consecutive_retries = maximum_consecutive_retries
         self._system_probe_interval_seconds = _positive_seconds(
             system_probe_interval_seconds,
             "system_probe_interval_seconds",
@@ -103,6 +111,9 @@ class JobTransitionService:
     ) -> RetryOutcome:
         """Schedule the next eligible attempt using the shared backoff policy."""
 
+        if self.retry_budget_exhausted(job):
+            raise RuntimeError("the job retry budget is exhausted")
+
         now = self.current_time()
         next_attempt_at = self._retry_policy.next_attempt_at(
             now=now,
@@ -134,6 +145,16 @@ class JobTransitionService:
             failure=failure,
             next_attempt_at=next_attempt_at,
         )
+
+    def retry_budget_exhausted(self, job: JobSnapshotProtocol) -> bool:
+        """Return whether another durable retry would exceed the job budget."""
+
+        retry_count = job.consecutive_retry_count
+        if isinstance(retry_count, bool) or not isinstance(retry_count, int):
+            raise TypeError("consecutive_retry_count must be an integer")
+        if retry_count < 0:
+            raise ValueError("consecutive_retry_count must not be negative")
+        return retry_count >= self._maximum_consecutive_retries
 
     def fail(
         self,

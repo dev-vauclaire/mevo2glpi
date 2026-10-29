@@ -139,6 +139,7 @@ def build_automation_worker(
         lifecycle=lifecycle,
         retry_policy=retry_policy,
         retention_policy=retention_policy,
+        maximum_consecutive_retries=settings.worker_max_consecutive_retries,
         system_probe_interval_seconds=settings.worker_system_probe_interval_seconds,
     )
 

@@ -99,7 +99,7 @@ def test_transcribe_uses_the_strict_openai_multipart_contract(
     assert TRANSCRIPTION not in repr(result)
 
 
-@pytest.mark.parametrize("status_code", [408, 425, 429, 500, 503, 599])
+@pytest.mark.parametrize("status_code", [408, 425, 429, 502, 503, 504, 599])
 def test_retryable_http_statuses_request_a_retry(
     tmp_path: Path,
     status_code: int,
@@ -135,8 +135,8 @@ def test_transport_error_requests_a_sanitized_retry(tmp_path: Path) -> None:
     assert "upstream detail" not in str(captured.value)
 
 
-@pytest.mark.parametrize("status_code", [400, 413, 415, 422])
-def test_audio_specific_http_statuses_are_terminal(
+@pytest.mark.parametrize("status_code", [400, 413, 415, 422, 500])
+def test_configured_http_statuses_are_terminal(
     tmp_path: Path,
     status_code: int,
 ) -> None:

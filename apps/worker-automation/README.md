@@ -97,8 +97,10 @@ flowchart TD
     TicketId --> Finalize
     Finalize --> Complete[completed + rétention + événement]
 
-    Transcribe -->|indisponible| Retry[retry_scheduled + backoff]
-    Glpi -->|indisponible ou résultat inconnu| Retry
+    Transcribe -->|indisponible et budget disponible| Retry[retry_scheduled + backoff]
+    Transcribe -->|budget épuisé| Fallback
+    Glpi -->|indisponible ou résultat inconnu, budget disponible| Retry
+    Glpi -->|budget épuisé| JobBlocked
     Glpi -->|rejet terminal allowlisté| Failed[failed + rétention + événement]
     Transcribe -->|ambiguïté propre au job| JobBlocked[blocked + rétention + événement]
     Glpi -->|ambiguïté propre au job| JobBlocked
@@ -168,6 +170,14 @@ GLPI. Une étape intermédiaire réussie ne le remet pas à zéro, puisque la re
 GLPI doit actuellement retranscrire l'audio. L'action opérateur de réarmement
 prévue à l'itération 4 réinitialisera cette série.
 
+Par défaut, le worker autorise trois reprogrammations après la tentative
+initiale. À épuisement, une indisponibilité de transcription devient le code
+expurgé `transcription_retry_exhausted` et le pipeline crée un ticket explicatif.
+Une indisponibilité ou un résultat inconnu GLPI devient un job `blocked` avec
+`glpi_retry_exhausted`, afin de libérer la file tout en conservant l'audio pour
+une décision opérateur. Cette limite ne s'applique pas aux sondes de blocage
+système, qui suivent leur politique dédiée.
+
 Le runner ne dort pas sur un `RetryOutcome` : il revient immédiatement à la
 sélection afin qu'un autre job éligible puisse progresser. PostgreSQL empêche
 le job en retry d'être repris avant `next_attempt_at`.
@@ -175,13 +185,15 @@ le job en retry d'être repris avant `next_attempt_at`.
 ### Transcription dégradée avec création de ticket
 
 Un rejet audio explicite du provider (`400`, `413`, `415`, `422` pour le
-contrat OpenAI compatible), un statut distant legacy `FAILED`, une soumission
-legacy rejetée ou un texte vide/invalide n'arrête plus le pipeline. Le worker
-ajoute un événement `transcription_failed`, construit un contenu explicatif
-fixe avec un code technique expurgé, puis crée le ticket GLPI. L'audio suit
-ensuite la rétention normale d'un job `completed` afin de rester disponible à
-l'opérateur. Ni réponse HTTP brute ni transcription invalide ne sont persistées
-ou journalisées.
+contrat OpenAI compatible), son erreur HTTP `500`, un statut distant legacy
+`FAILED`, une soumission legacy rejetée, un texte vide/invalide ou l'épuisement
+des retries de transcription n'arrête plus le pipeline. Le worker ajoute un
+événement `transcription_failed`, construit un contenu explicatif fixe avec un
+code technique expurgé, puis crée le ticket GLPI. L'audio suit ensuite la
+rétention normale d'un job `completed` afin de rester disponible à l'opérateur.
+Ni réponse HTTP brute ni transcription invalide ne sont persistées ou
+journalisées. Les autres erreurs HTTP temporaires, notamment `502`, `503` et
+`504`, restent reprogrammables dans la limite configurée.
 
 ### `failed` : erreur terminale propre au job
 
@@ -436,6 +448,7 @@ Principaux réglages optionnels :
 | `WORKER_IDLE_INTERVAL_SECONDS` | `1` | Attente lorsqu'aucun job n'est éligible. |
 | `WORKER_RETRY_INITIAL_SECONDS` | `5` | Premier délai du backoff. |
 | `WORKER_RETRY_MAX_SECONDS` | `300` | Plafond du backoff. |
+| `WORKER_MAX_CONSECUTIVE_RETRIES` | `3` | Nombre maximal de reprogrammations après la tentative initiale, partagé sur tout le pipeline du job. |
 | `WORKER_SYSTEM_PROBE_INTERVAL_SECONDS` | `60` | Attente après un blocage système immédiat. |
 | `COMPLETED_RETENTION_DAYS` | `90` | Deadline absolue d'un succès. |
 | `FAILED_RETENTION_DAYS` | `30` | Deadline absolue d'un échec terminal. |
@@ -539,8 +552,9 @@ conteneurs jetables et ne doivent pas être parallélisées.
 - La taille détecte un audio tronqué ou remplacé par un contenu d'une taille
   différente. Le MVP ne persiste pas encore d'empreinte cryptographique et ne
   détecte donc pas un remplacement de même taille entre le contrôle et l'envoi.
-- Le backoff n'a pas de jitter et les retries ne sont pas plafonnés en nombre ;
-  ce compromis est adapté au singleton du MVP mais devra être réévalué avant
-  une parallélisation.
+- Le backoff n'a pas de jitter. Les retries du traitement sont plafonnés, mais
+  les sondes automatiques d'un blocage système suivent une politique distincte
+  sans compteur persistant ; cette politique devra être réévaluée avant une
+  parallélisation.
 - Le heartbeat n'est pas émis au milieu d'une requête HTTP synchrone. Les
   timeouts configurés bornent cette fenêtre d'invisibilité.

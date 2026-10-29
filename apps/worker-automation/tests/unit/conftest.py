@@ -29,6 +29,7 @@ def worker_settings_factory(
             "worker_idle_interval_seconds": 1.25,
             "worker_retry_initial_seconds": 3.5,
             "worker_retry_max_seconds": 30.0,
+            "worker_max_consecutive_retries": 4,
             "worker_system_probe_interval_seconds": 45.0,
             "completed_retention_days": 91,
             "failed_retention_days": 31,

@@ -227,7 +227,10 @@ def test_invalid_transcription_content_creates_an_explanatory_ticket(
     )
 
 
-@pytest.mark.parametrize("technical_code", ["submission_rejected", "remote_job_failed"])
+@pytest.mark.parametrize(
+    "technical_code",
+    ["submission_rejected", "remote_job_failed", "http_500"],
+)
 def test_terminal_provider_failure_creates_an_explanatory_ticket(
     tmp_path: Path,
     technical_code: str,

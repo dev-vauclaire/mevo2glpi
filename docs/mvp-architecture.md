@@ -148,7 +148,7 @@ cohérence avec le singleton publisher.
 | `glpi_ticket_id` | Identifiant positif, persisté dès confirmation de la création GLPI. |
 | `transcription_provider_job_id` | Identifiant distant optionnel, utilisé uniquement par le provider historique avec polling. |
 | `attempt_count` | Nombre total monotone de tentatives. |
-| `consecutive_retry_count` | Série d'indisponibilités utilisée par le backoff. |
+| `consecutive_retry_count` | Série globale d'indisponibilités du job, utilisée par le backoff et plafonnée par configuration. |
 | `next_attempt_at` | Échéance d'un retry programmé. |
 | `last_error_*` | Portée, catégorie et code technique expurgés. |
 
@@ -315,9 +315,12 @@ flowchart TD
     SourceDate -->|non| Blocked[SQL : blocked data_integrity]
     SourceDate -->|oui| Read[Système : lire et vérifier l'audio]
     Read --> Transcribe[HTTP : appeler l'adaptateur sélectionné]
-    Transcribe -->|échec audio terminal| Fallback[SQL : transcription_failed + texte explicatif]
+    Transcribe -->|échec terminal, HTTP 500 ou retries épuisés| Fallback[SQL : transcription_failed + texte explicatif]
     Fallback --> GLPI
     Transcribe --> GLPI[HTTP : créer avec date d'ouverture Europe/Paris]
+    Transcribe -->|indisponible, budget disponible| Retry[SQL : retry_scheduled + backoff]
+    GLPI -->|indisponible, budget disponible| Retry
+    GLPI -->|retries épuisés| RetryBlocked[SQL : blocked + glpi_retry_exhausted]
     GLPI --> Persist[SQL : persister glpi_ticket_id]
     Persist --> Finalize
     Finalize --> Complete[SQL : completed + rétention + événement]
@@ -342,10 +345,14 @@ persisté, le worker considère la création confirmée et reprend directement l
 finalisation. Tant qu'il manque, le client peut réconcilier une création par
 `external_id`; GLPI ne garantit pas son unicité et une ambiguïté bloque le job.
 
-Une indisponibilité produit `retry_scheduled` avec backoff. Un échec terminal
-de transcription produit un ticket explicatif et conserve l'audio sous la
-rétention normale d'un succès. Un rejet terminal GLPI peut encore produire
-`failed`. Une réponse incohérente ou un état propre
+Une indisponibilité produit `retry_scheduled` avec backoff tant que son budget
+global au job n'est pas épuisé. La valeur par défaut autorise trois
+reprogrammations après la tentative initiale. Un échec terminal de
+transcription, une réponse HTTP `500` ou l'épuisement de ses retries produit un
+ticket explicatif et conserve l'audio sous la rétention normale d'un succès.
+L'épuisement des retries GLPI produit `blocked` avec
+`glpi_retry_exhausted`, conserve l'audio et libère la file. Un rejet terminal
+GLPI peut encore produire `failed`. Une réponse incohérente ou un état propre
 au job impossible à réconcilier produit `blocked`. Une erreur globale
 d'autorisation bloque le worker au niveau système sans reclasser arbitrairement
 le job. Les appels HTTP et le polling n'ouvrent aucune transaction longue.
@@ -428,9 +435,11 @@ indisponible ; `blocked` représente une situation dont le rejeu automatique
 serait dangereux ou inutile.
 
 Le backoff exponentiel est partagé comme politique mais chaque worker possède
-ses variables d'intervalle initial et maximal. Une réussite remet la série
-concernée à zéro. Les erreurs et alertes exposent uniquement une catégorie et
-un code technique stable.
+ses variables d'intervalle initial et maximal. Pour `worker-automation`, la
+série reste globale à tout le pipeline car une reprise GLPI retranscrit encore
+l'audio ; elle est plafonnée par `WORKER_MAX_CONSECUTIVE_RETRIES`. Les sondes
+de blocage système restent régies séparément. Les erreurs et alertes exposent
+uniquement une catégorie et un code technique stable.
 
 Les codes de sortie des workers sont stables :
 

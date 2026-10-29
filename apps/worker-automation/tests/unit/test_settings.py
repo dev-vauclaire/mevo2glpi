@@ -135,6 +135,7 @@ def test_worker_settings_read_environment_overrides(
     monkeypatch.setenv("WORKER_HEARTBEAT_INTERVAL_SECONDS", "8")
     monkeypatch.setenv("WORKER_RETRY_INITIAL_SECONDS", "4")
     monkeypatch.setenv("WORKER_RETRY_MAX_SECONDS", "120")
+    monkeypatch.setenv("WORKER_MAX_CONSECUTIVE_RETRIES", "7")
     monkeypatch.setenv("WORKER_SYSTEM_PROBE_INTERVAL_SECONDS", "45")
     monkeypatch.setenv("RETENTION_CHECK_INTERVAL_HOURS", "8")
 
@@ -152,6 +153,7 @@ def test_worker_settings_read_environment_overrides(
     assert settings.worker_heartbeat_interval_seconds == 8
     assert settings.worker_retry_initial_seconds == 4
     assert settings.worker_retry_max_seconds == 120
+    assert settings.worker_max_consecutive_retries == 7
     assert settings.worker_system_probe_interval_seconds == 45
     assert settings.retention_check_interval_hours == 8
 
@@ -164,6 +166,7 @@ def test_runner_intervals_have_safe_defaults(
         "WORKER_HEARTBEAT_INTERVAL_SECONDS",
         "WORKER_RETRY_INITIAL_SECONDS",
         "WORKER_RETRY_MAX_SECONDS",
+        "WORKER_MAX_CONSECUTIVE_RETRIES",
         "WORKER_SYSTEM_PROBE_INTERVAL_SECONDS",
     ):
         monkeypatch.delenv(variable_name, raising=False)
@@ -178,6 +181,7 @@ def test_runner_intervals_have_safe_defaults(
     assert settings.worker_heartbeat_interval_seconds == 10.0
     assert settings.worker_retry_initial_seconds == 5.0
     assert settings.worker_retry_max_seconds == 300.0
+    assert settings.worker_max_consecutive_retries == 3
     assert settings.worker_system_probe_interval_seconds == 60.0
 
 
@@ -188,6 +192,7 @@ def test_runner_intervals_read_environment_overrides(
     monkeypatch.setenv("WORKER_HEARTBEAT_INTERVAL_SECONDS", "7.5")
     monkeypatch.setenv("WORKER_RETRY_INITIAL_SECONDS", "3.5")
     monkeypatch.setenv("WORKER_RETRY_MAX_SECONDS", "90")
+    monkeypatch.setenv("WORKER_MAX_CONSECUTIVE_RETRIES", "6")
     monkeypatch.setenv("WORKER_SYSTEM_PROBE_INTERVAL_SECONDS", "12")
 
     settings = WorkerSettings(
@@ -199,6 +204,7 @@ def test_runner_intervals_read_environment_overrides(
     assert settings.worker_heartbeat_interval_seconds == 7.5
     assert settings.worker_retry_initial_seconds == 3.5
     assert settings.worker_retry_max_seconds == 90
+    assert settings.worker_max_consecutive_retries == 6
     assert settings.worker_system_probe_interval_seconds == 12
 
 
@@ -230,6 +236,18 @@ def test_heartbeat_interval_rejects_boolean() -> None:
         WorkerSettings(
             public_base_url="http://localhost:8000",
             worker_heartbeat_interval_seconds=True,
+            _env_file=None,
+        )
+
+
+@pytest.mark.parametrize("invalid_value", [0, -1, True, 1.5])
+def test_maximum_consecutive_retries_must_be_a_positive_integer(
+    invalid_value: object,
+) -> None:
+    with pytest.raises(ValidationError, match="worker_max_consecutive_retries"):
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            worker_max_consecutive_retries=invalid_value,
             _env_file=None,
         )
 

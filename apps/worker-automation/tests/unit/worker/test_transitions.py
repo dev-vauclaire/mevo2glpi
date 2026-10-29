@@ -56,6 +56,38 @@ def test_unavailable_transcription_is_scheduled_with_capped_backoff(
     assert state.repository_calls[-1][0] == "schedule_retry"
 
 
+def test_exhausted_transcription_retries_create_a_fallback_ticket(
+    tmp_path: Path,
+) -> None:
+    state = FakeState(FakeJob(consecutive_retry_count=3))
+    audio_path = write_audio(tmp_path)
+    glpi_client = FakeGlpiClient(state, [42])
+    worker = build_worker(
+        tmp_path,
+        state,
+        FakeTranscriber(
+            state,
+            [TranscriptionRetryRequired("transcription_unavailable", audio_path)],
+        ),
+        glpi_client,
+        maximum_consecutive_retries=3,
+    )
+
+    outcome = worker.run_once()
+
+    assert isinstance(outcome, CompletedOutcome)
+    assert "schedule_retry" not in repository_call_names(state)
+    assert state.repository_calls[-1][0] == "mark_completed"
+    assert len(glpi_client.calls) == 1
+    ticket_command = glpi_client.calls[0]
+    assert "transcription_retry_exhausted" in ticket_command.transcription
+    assert any(
+        call[-1].get("technical_code") == "transcription_retry_exhausted"
+        for call in state.event_calls
+    )
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
+
+
 def test_terminal_transcription_creates_fallback_ticket_without_sidecar_or_move(
     tmp_path: Path,
 ) -> None:

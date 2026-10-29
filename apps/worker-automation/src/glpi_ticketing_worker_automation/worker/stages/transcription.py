@@ -114,6 +114,11 @@ class TranscriptionStage:
                     audio_uuid=audio_uuid,
                     stage=JobStage.TRANSCRIPTION,
                 )
+            if self._transitions.retry_budget_exhausted(job):
+                return self._continue_with_fallback(
+                    job,
+                    "transcription_retry_exhausted",
+                )
             return self._transitions.retry(
                 job,
                 stage=JobStage.TRANSCRIPTION,

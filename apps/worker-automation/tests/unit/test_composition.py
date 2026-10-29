@@ -179,6 +179,7 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     assert transitions_arguments["lifecycle"] is captured["lifecycle_instance"]
     assert transitions_arguments["retry_policy"].initial_seconds == 3.5
     assert transitions_arguments["retry_policy"].maximum_seconds == 30.0
+    assert transitions_arguments["maximum_consecutive_retries"] == 4
     retention_policy = transitions_arguments["retention_policy"]
     assert retention_policy.completed_ttl.days == 91
     assert retention_policy.failed_ttl.days == 31

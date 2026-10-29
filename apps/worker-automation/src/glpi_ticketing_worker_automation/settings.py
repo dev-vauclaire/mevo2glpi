@@ -64,6 +64,7 @@ class WorkerSettings(BaseSettings):
         gt=0,
         allow_inf_nan=False,
     )
+    worker_max_consecutive_retries: int = Field(default=3, gt=0)
     worker_system_probe_interval_seconds: float = Field(
         default=60.0,
         gt=0,
@@ -139,6 +140,7 @@ class WorkerSettings(BaseSettings):
 
     @field_validator(
         "database_connect_timeout_seconds",
+        "worker_max_consecutive_retries",
         "completed_retention_days",
         "failed_retention_days",
         "blocked_retention_days",

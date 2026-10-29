@@ -124,6 +124,16 @@ class TicketCreationStage:
             )
         except GlpiClientError as error:
             if error.retryable or error.outcome_unknown:
+                if self._transitions.retry_budget_exhausted(job):
+                    return self._transitions.block(
+                        audio_uuid,
+                        stage=JobStage.GLPI_CREATION,
+                        failure=FailureDetails(
+                            scope=ErrorScope.JOB,
+                            category="retry_limit",
+                            technical_code="glpi_retry_exhausted",
+                        ),
+                    )
                 return self._transitions.retry(
                     job,
                     stage=JobStage.GLPI_CREATION,

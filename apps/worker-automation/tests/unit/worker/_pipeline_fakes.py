@@ -332,6 +332,7 @@ def build_worker(
     title_generator: object | None = None,
     ownership_guard: Callable[[], None] | None = None,
     on_job_started: Callable[[UUID], None] | None = None,
+    maximum_consecutive_retries: int = 3,
 ) -> AutomationWorker:
     lifecycle = AutomationJobLifecycleService(
         session_factory=lambda: FakeSession(state),  # type: ignore[arg-type]
@@ -351,6 +352,7 @@ def build_worker(
             first_completed_check_after=timedelta(hours=6),
         ),
         system_probe_interval_seconds=60,
+        maximum_consecutive_retries=maximum_consecutive_retries,
         now=lambda: NOW,
     )
     return AutomationWorker(

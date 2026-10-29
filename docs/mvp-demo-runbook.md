@@ -20,8 +20,8 @@ La recette E2E automatisée valide neuf scénarios aval :
 | Lot nominal | Trois sorties publisher synthétiques deviennent `completed`, avec événements ordonnés, audio identique et ticket GLPI corrélé par UUID. |
 | Erreur de stockage | Une taille audio incohérente produit `blocked` et une alerte ; après réparation, le retry opérateur termine le job. |
 | Erreur terminale | Un job `failed` et son alerte sont visibles ; le retry opérateur réarme le même UUID. |
-| Panne Transcribe AI | Un seul job porte le retry système et les jobs suivants restent `pending` ; tous repartent après rétablissement. |
-| Panne GLPI | Le job reste récupérable, redemande une transcription et ne crée qu'un ticket. |
+| Panne du provider de transcription | Un seul job porte le retry système et les jobs suivants restent `pending` ; après trois reprogrammations par défaut, un ticket explicatif est créé. |
+| Panne GLPI | Le job redemande une transcription pendant son budget de retry puis devient `blocked` avec son audio conservé ; aucun doublon de ticket n'est créé. |
 | Crash automation | Un `processing` abandonné est repris après `SIGKILL`, sans doublon GLPI. |
 | Rétention GLPI | `SOLVED` conserve l'audio ; `CLOSED` le purge et le téléchargement répond `410 Gone`. |
 | Deadline | Une échéance dépassée purge l'audio même lorsque GLPI est indisponible. |

@@ -24,7 +24,7 @@ from .models import (
 
 TRANSCRIPTIONS_PATH = "/audio/transcriptions"
 RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429})
-TERMINAL_AUDIO_HTTP_STATUSES = frozenset({400, 413, 415, 422})
+TERMINAL_HTTP_STATUSES = frozenset({400, 413, 415, 422, 500})
 AUDIO_MEDIA_TYPES = {
     ".wav": "audio/wav",
     ".mp3": "audio/mpeg",
@@ -120,13 +120,13 @@ class OpenAICompatibleTranscriber:
         status_code = response.status_code
         if status_code == 200:
             return
+        if status_code in TERMINAL_HTTP_STATUSES:
+            raise TranscriptionTerminalError(f"http_{status_code}", audio_path)
         if status_code in RETRYABLE_HTTP_STATUSES or 500 <= status_code < 600:
             raise TranscriptionRetryRequired(
                 "transcription_unavailable",
                 audio_path,
             )
-        if status_code in TERMINAL_AUDIO_HTTP_STATUSES:
-            raise TranscriptionTerminalError(f"http_{status_code}", audio_path)
         if status_code in {401, 403}:
             category = (
                 TranscriptionErrorCategory.AUTHENTICATION
