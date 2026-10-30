@@ -25,6 +25,18 @@ applications staging :
 sudo docker network create --driver bridge --internal gta-staging-simulators-network
 ```
 
+Créer aussi le répertoire hôte destiné aux seuls enregistrements de recette.
+Le groupe `10001` correspond au groupe non privilégié du simulateur :
+
+```bash
+sudo install -d -o root -g 10001 -m 0750 /srv/gta-staging/audio-fixtures
+```
+
+Configurer ensuite
+`MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH=/srv/gta-staging/audio-fixtures`
+dans Dokploy. Le Compose monte ce répertoire dans `/fixtures/audio` en lecture
+seule et refuse de le créer implicitement s'il est absent.
+
 Créer ensuite un projet Docker Compose Dokploy utilisant :
 
 ```text
@@ -56,17 +68,24 @@ glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
 glpi-ticketing-microsoft-graph-simulator-admin reset
 ```
 
-Pour tester un enregistrement WAV ou OGG fictif créé par l'opérateur, le copier
-temporairement depuis la VM dans le `/tmp` du conteneur, puis le référencer :
+Pour tester un enregistrement WAV ou OGG fictif créé par l'opérateur, l'installer
+dans le répertoire préparé sur la VM avec des droits minimaux :
 
 ```bash
-sudo docker ps --filter name=microsoft-graph-simulator --format '{{.ID}} {{.Names}}'
-sudo docker cp ./test-vocal.wav <CONTAINER_ID>:/tmp/test-vocal.wav
-sudo docker exec <CONTAINER_ID> glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /tmp/test-vocal.wav
+sudo install -o root -g 10001 -m 0640 ./test-vocal.wav /srv/gta-staging/audio-fixtures/test-vocal.wav
 ```
 
-Le fichier disparaît avec le conteneur et n'est jamais ajouté au dépôt. Ne pas
-utiliser de donnée patient ou de message vocal de production.
+Depuis le terminal Dokploy du simulateur Microsoft, injecter ensuite le fichier
+monté en lecture seule :
+
+```bash
+glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
+```
+
+La commande `reset` efface uniquement la boîte simulée en mémoire : elle ne
+supprime jamais le fichier source sur la VM. Retirer manuellement ce dernier à
+la fin de la recette. Il ne doit jamais être ajouté au dépôt. Ne pas utiliser de
+donnée patient, de message vocal de production ou d'autre donnée sensible.
 
 Depuis le terminal du simulateur Transcribe AI :
 

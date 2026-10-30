@@ -56,13 +56,16 @@ Avant de déployer les applications :
    staging ;
 4. vérifier depuis la VM que le nom du GLPI de test est résolu et que son
    certificat est validé par le bundle configuré ;
-5. disposer d'identifiants OAuth GLPI réservés au test.
+5. disposer d'identifiants OAuth GLPI réservés au test ;
+6. créer `/srv/gta-staging/audio-fixtures` pour les enregistrements de recette
+   fictifs, avec un accès en lecture pour l'UID/GID `10001` du simulateur.
 
 Créer les réseaux une seule fois sur la VM de staging :
 
 ```bash
 sudo docker network create --driver bridge --internal gta-staging-simulators-network
 sudo docker network create --driver bridge --internal gta-staging-transcription-network
+sudo install -d -o root -g 10001 -m 0750 /srv/gta-staging/audio-fixtures
 ```
 
 Le test TLS ne doit jamais désactiver la vérification du certificat :
@@ -86,6 +89,9 @@ Déployer d'abord les simulateurs avec :
 
 Copier les variables de
 `infra/docker/simulators/simulators.env.example` dans leur projet Dokploy.
+`MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH` doit désigner le répertoire
+préparé sur la VM. Il est monté dans `/fixtures/audio` en lecture seule et le
+déploiement échoue explicitement s'il est absent.
 
 Déployer ensuite le moteur de transcription avec :
 
@@ -163,10 +169,23 @@ glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
 ```
 
 Pour mesurer la qualité avec un enregistrement fictif préparé par l'opérateur,
-copier un WAV ou un OGG de moins de 25 Mio dans le `/tmp` du conteneur puis
-l'injecter avec `seed --audio-path /tmp/test-vocal.wav`. Le chemin d'origine
-n'est pas conservé et le contenu reste en mémoire jusqu'au redémarrage ou au
-`reset`. Aucune donnée patient ou issue de la production ne doit être utilisée.
+installer un WAV ou un OGG de moins de 25 Mio sur la VM :
+
+```bash
+sudo install -o root -g 10001 -m 0640 ./test-vocal.wav /srv/gta-staging/audio-fixtures/test-vocal.wav
+```
+
+Depuis le terminal Dokploy du simulateur Microsoft, injecter le fichier monté :
+
+```bash
+glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
+```
+
+Le chemin hôte n'est pas transmis au simulateur Graph et le contenu injecté
+reste en mémoire jusqu'au redémarrage ou au `reset`. Le fichier monté demeure
+sur la VM après ces opérations et doit être retiré manuellement à la fin de la
+recette. Aucune donnée patient, donnée sensible ou issue de la production ne
+doit être utilisée.
 
 Nettoyer uniquement l'état synthétique avec :
 

@@ -102,6 +102,10 @@ def test_simulators_environment_documents_every_interpolated_variable() -> None:
     assert documented_values["SIMULATORS_NETWORK_NAME"] == (
         "gta-staging-simulators-network"
     )
+    assert (
+        documented_values["MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH"]
+        == "/srv/gta-staging/audio-fixtures"
+    )
     assert {
         name: documented_values[name] for name in DOCUMENTED_SECRET_NAMES
     } == dict.fromkeys(DOCUMENTED_SECRET_NAMES, "CHANGE_ME")
@@ -140,6 +144,22 @@ def test_simulator_services_are_isolated_and_have_stable_network_aliases(
         assert "ports" not in service
         assert set(service["networks"]) == {"simulators"}
         assert service["networks"]["simulators"]["aliases"] == [alias]
+
+
+def test_graph_simulator_mounts_only_operator_audio_fixtures_read_only(
+    simulators_compose_config: dict[str, object],
+) -> None:
+    services = _services(simulators_compose_config)
+    graph_volumes = services["microsoft-graph-simulator"].get("volumes", [])
+
+    assert len(graph_volumes) == 1
+    audio_fixtures = graph_volumes[0]
+    assert audio_fixtures["type"] == "bind"
+    assert audio_fixtures["source"] == "/srv/gta-staging/audio-fixtures"
+    assert audio_fixtures["target"] == "/fixtures/audio"
+    assert audio_fixtures["read_only"] is True
+    assert audio_fixtures["bind"]["create_host_path"] is False
+    assert services["transcribe-ai-simulator"].get("volumes", []) == []
 
 
 def test_simulators_manifest_uses_only_the_shared_simulator_network(

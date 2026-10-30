@@ -12,7 +12,12 @@ MICROSOFT_GRAPH_SIMULATOR_HOST=0.0.0.0
 MICROSOFT_GRAPH_SIMULATOR_PORT=8080
 MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID=<UUID fictif>
 MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN=<secret staging>
+MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH=/srv/gta-staging/audio-fixtures
 ```
+
+Le Compose monte le dernier répertoire en lecture seule dans `/fixtures/audio`.
+Il doit exister sur la VM avant le déploiement et rester lisible par l'UID/GID
+`10001` du conteneur.
 
 Depuis le conteneur :
 
@@ -20,7 +25,7 @@ Depuis le conteneur :
 glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
 glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
 glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
-glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /tmp/test-vocal.wav
+glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
 glpi-ticketing-microsoft-graph-simulator-admin reset
 ```
 
@@ -42,4 +47,7 @@ glpi-ticketing-microsoft-graph-simulator-admin reset
 doit être visible depuis le conteneur, porter l'extension `.wav` ou `.ogg`, ne
 pas être vide et ne pas dépasser 25 Mio. Son chemin et son nom d'origine ne
 sont pas transmis à l'API Graph simulée. Son contenu reste uniquement en
-mémoire jusqu'au redémarrage ou à la commande `reset`.
+mémoire jusqu'au redémarrage ou à la commande `reset`. Cette commande ne
+supprime pas le fichier source monté depuis la VM ; l'opérateur doit le retirer
+après la recette. Aucun audio patient, message de production ou autre donnée
+sensible ne doit être placé dans ce répertoire.
