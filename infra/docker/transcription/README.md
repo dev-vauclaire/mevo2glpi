@@ -8,6 +8,12 @@ Parakeet est accessible uniquement depuis `worker-automation` sur un réseau
 Docker privé partagé. Le Compose ne publie aucun port vers l'hôte et ne relie
 pas le service au réseau Traefik.
 
+La stack épingle la variante FP32 : les essais en staging ont montré une
+qualité de transcription française insuffisante avec la variante INT8. Le
+conteneur doit disposer de 8 Gio de RAM. Ce choix ne modifie pas les formats
+acceptés par le serveur : les WAV G.711 A-law ou μ-law restent incompatibles
+tant qu'une normalisation PCM16 n'est pas ajoutée à la stack de transcription.
+
 ## Déploiement staging
 
 Créer une fois le réseau privé :
@@ -24,7 +30,10 @@ Créer un projet Docker Compose Dokploy utilisant :
 
 Copier les variables de `transcription.env.example`, remplacer
 `PARAKEET_API_KEY`, puis déployer cette stack avant les applications staging.
-La même clé doit être configurée dans le projet applicatif staging.
+La même clé doit être configurée dans le projet applicatif staging. Lors
+d'une mise à niveau depuis la variante INT8, remplacer explicitement
+`PARAKEET_MEMORY_LIMIT=3g` par `PARAKEET_MEMORY_LIMIT=8g` dans Dokploy avant le
+redéploiement.
 
 Watch path recommandé :
 

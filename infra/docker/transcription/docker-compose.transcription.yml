@@ -20,7 +20,7 @@ x-inference-runtime: &inference-runtime
 services:
   parakeet:
     <<: *inference-runtime
-    image: ghcr.io/achetronic/parakeet:0.8.0-int8@sha256:00f8a02ec0ca6a7d6d5ee9f959060d8498b14f741a25e914941d22547a3f37f4
+    image: ghcr.io/achetronic/parakeet:0.8.0-fp32@sha256:46bf3ccb62dcc5d997edb20ed812125e19a33ab2774b2c59ba639bbfeb9d548b
     environment:
       PARAKEET_API_KEY: ${PARAKEET_API_KEY:?Set PARAKEET_API_KEY}
       PARAKEET_GPU: cpu
@@ -31,7 +31,7 @@ services:
     expose:
       - "5092"
     cpus: ${PARAKEET_CPUS:-2.0}
-    mem_limit: ${PARAKEET_MEMORY_LIMIT:-3g}
+    mem_limit: ${PARAKEET_MEMORY_LIMIT:-8g}
     healthcheck:
       test:
         - CMD

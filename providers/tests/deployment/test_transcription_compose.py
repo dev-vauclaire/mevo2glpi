@@ -20,8 +20,8 @@ TRANSCRIPTION_COMPOSE_FILE = (
 )
 TRANSCRIPTION_ENV_FILE = TRANSCRIPTION_DOCKER_ROOT / "transcription.env.example"
 PARAKEET_IMAGE = (
-    "ghcr.io/achetronic/parakeet:0.8.0-int8@"
-    "sha256:00f8a02ec0ca6a7d6d5ee9f959060d8498b14f741a25e914941d22547a3f37f4"
+    "ghcr.io/achetronic/parakeet:0.8.0-fp32@"
+    "sha256:46bf3ccb62dcc5d997edb20ed812125e19a33ab2774b2c59ba639bbfeb9d548b"
 )
 DOCUMENTED_SECRET_NAMES = {"PARAKEET_API_KEY"}
 
@@ -97,7 +97,7 @@ def test_transcription_environment_documents_every_interpolated_variable() -> No
         name: documented_values[name] for name in DOCUMENTED_SECRET_NAMES
     } == dict.fromkeys(DOCUMENTED_SECRET_NAMES, "CHANGE_ME")
     assert documented_values["PARAKEET_CPUS"] == "2.0"
-    assert documented_values["PARAKEET_MEMORY_LIMIT"] == "3g"
+    assert documented_values["PARAKEET_MEMORY_LIMIT"] == "8g"
     assert documented_values["PARAKEET_LOG_LEVEL"] == "info"
     assert not re.search(
         r"(?i)(?:api[_-]?key|secret|password|token)=[0-9a-f]{32,}",
@@ -133,7 +133,7 @@ def test_parakeet_is_pinned_and_configured_for_private_cpu_inference(
     assert parakeet["restart"] == "unless-stopped"
     assert parakeet["stop_grace_period"] == "45s"
     assert parakeet["cpus"] == 2.0
-    assert parakeet["mem_limit"] == "3221225472"
+    assert parakeet["mem_limit"] == "8589934592"
     assert parakeet["healthcheck"]["start_period"] == "1m30s"
     assert "/health" in " ".join(parakeet["healthcheck"]["test"])
     assert "curl" not in " ".join(parakeet["healthcheck"]["test"])
