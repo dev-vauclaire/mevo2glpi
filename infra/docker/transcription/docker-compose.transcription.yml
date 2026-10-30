@@ -25,7 +25,7 @@ services:
       PARAKEET_API_KEY: ${PARAKEET_API_KEY:?Set PARAKEET_API_KEY}
       PARAKEET_GPU: cpu
       PARAKEET_WORKERS: "1"
-      PARAKEET_LOG_LEVEL: info
+      PARAKEET_LOG_LEVEL: ${PARAKEET_LOG_LEVEL:-info}
       PARAKEET_LOG_FORMAT: json
       PARAKEET_LONG_AUDIO: "false"
     expose:

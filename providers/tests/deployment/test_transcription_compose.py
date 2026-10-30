@@ -98,6 +98,7 @@ def test_transcription_environment_documents_every_interpolated_variable() -> No
     } == dict.fromkeys(DOCUMENTED_SECRET_NAMES, "CHANGE_ME")
     assert documented_values["PARAKEET_CPUS"] == "2.0"
     assert documented_values["PARAKEET_MEMORY_LIMIT"] == "3g"
+    assert documented_values["PARAKEET_LOG_LEVEL"] == "info"
     assert not re.search(
         r"(?i)(?:api[_-]?key|secret|password|token)=[0-9a-f]{32,}",
         example_source,
