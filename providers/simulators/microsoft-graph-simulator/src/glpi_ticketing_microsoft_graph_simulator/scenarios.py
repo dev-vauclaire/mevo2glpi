@@ -53,6 +53,7 @@ class SeedScenario(StrEnum):
     VALID_WAV = "valid-wav"
     VALID_OGG = "valid-ogg"
     VALID_WAV_ALAW = "valid-wav-alaw"
+    VALID_WAV_MULAW = "valid-wav-mulaw"
     NO_ATTACHMENT = "no-attachment"
     TWO_AUDIO_ATTACHMENTS = "two-audio-attachments"
     EMPTY_AUDIO = "empty-audio"
@@ -74,6 +75,7 @@ _SCENARIO_DESCRIPTIONS = {
     SeedScenario.VALID_WAV: "one spoken PCM16 WAV file",
     SeedScenario.VALID_OGG: "one spoken OGG/Opus file",
     SeedScenario.VALID_WAV_ALAW: "one spoken telephony G.711 A-law WAV file",
+    SeedScenario.VALID_WAV_MULAW: "one spoken telephony G.711 mu-law WAV file",
     SeedScenario.NO_ATTACHMENT: "no attachment",
     SeedScenario.TWO_AUDIO_ATTACHMENTS: "two visible audio files",
     SeedScenario.EMPTY_AUDIO: "one empty WAV file",
@@ -104,6 +106,13 @@ def build_scenario_attachments(
             _fixture_attachment(
                 "audio-telephony.wav",
                 SyntheticAudioFixture.WAV_ALAW,
+            ),
+        )
+    if scenario is SeedScenario.VALID_WAV_MULAW:
+        return (
+            _fixture_attachment(
+                "audio-telephony-mulaw.wav",
+                SyntheticAudioFixture.WAV_MULAW,
             ),
         )
     if scenario is SeedScenario.NO_ATTACHMENT:

@@ -29,6 +29,7 @@ MAXIMUM_ATTACHMENT_BYTES = 25 * 1024 * 1024
         (SeedScenario.VALID_WAV, None),
         (SeedScenario.VALID_OGG, None),
         (SeedScenario.VALID_WAV_ALAW, None),
+        (SeedScenario.VALID_WAV_MULAW, None),
         (SeedScenario.NO_ATTACHMENT, "audio_attachment_missing"),
         (SeedScenario.TWO_AUDIO_ATTACHMENTS, "attachment_count_invalid"),
         (SeedScenario.EMPTY_AUDIO, "audio_empty"),

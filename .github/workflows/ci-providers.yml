@@ -1,4 +1,4 @@
-name: CI simulateurs et transcription
+name: CI simulateurs
 
 on:
   pull_request:
@@ -9,7 +9,6 @@ on:
       - .github/workflows/ci-providers.yml
       - conftest.py
       - infra/docker/simulators/**
-      - infra/docker/transcription/**
       - providers/**
       - pyproject.toml
       - uv.lock
@@ -21,7 +20,6 @@ on:
       - .github/workflows/ci-providers.yml
       - conftest.py
       - infra/docker/simulators/**
-      - infra/docker/transcription/**
       - providers/**
       - pyproject.toml
       - uv.lock
@@ -41,7 +39,7 @@ env:
 
 jobs:
   validate:
-    name: Qualité, simulateurs et transcription
+    name: Qualité et simulateurs
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -74,5 +72,5 @@ jobs:
       - name: Exécuter l'analyse statique des simulateurs
         run: uv run ruff check providers
 
-      - name: Exécuter les tests des simulateurs et des Compose
+      - name: Exécuter les tests des simulateurs
         run: uv run pytest providers --maxfail=1

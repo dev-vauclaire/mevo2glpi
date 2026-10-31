@@ -10,6 +10,7 @@ on:
       - apps/**
       - conftest.py
       - infra/docker/apps/**
+      - infra/docker/transcription/**
       - packages/**
       - pyproject.toml
       - tests/**
@@ -23,6 +24,7 @@ on:
       - apps/**
       - conftest.py
       - infra/docker/apps/**
+      - infra/docker/transcription/**
       - packages/**
       - pyproject.toml
       - tests/**
@@ -80,7 +82,7 @@ jobs:
         run: >-
           uv run --all-packages pytest
           apps packages tests
-          -m "not database and not deployment and not glpi and not transcribe_ai and not e2e"
+          -m "not database and not deployment and not glpi and not transcription_model and not transcribe_ai and not e2e"
           --maxfail=1
 
       - name: Vérifier les manifests uv copiés dans les images
@@ -102,6 +104,12 @@ jobs:
           --env-file ./infra/docker/apps/staging.env.example
           --file infra/docker/apps/docker-compose.staging.yml
           config --quiet
+
+      - name: Valider la stack privée de transcription
+        run: >-
+          uv run pytest
+          tests/deployment/test_transcription_compose.py
+          --maxfail=1
 
       - name: Valider PostgreSQL et les migrations
         run: >-

@@ -204,16 +204,20 @@ def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
     )
     members = workspace["tool"]["uv"]["workspace"]["members"]
 
-    for application_name in (
-        "database-migrations",
-        "web",
-        "worker-automation",
-        "worker-publisher",
-        "worker-retention",
-    ):
-        dockerfile = (APPS_DOCKER_ROOT / application_name / "Dockerfile").read_text(
-            encoding="utf-8"
+    dockerfiles = [
+        APPS_DOCKER_ROOT / application_name / "Dockerfile"
+        for application_name in (
+            "database-migrations",
+            "web",
+            "worker-automation",
+            "worker-publisher",
+            "worker-retention",
         )
+    ]
+    dockerfiles.append(repository_root / "apps" / "transcription-api" / "Dockerfile")
+
+    for dockerfile_path in dockerfiles:
+        dockerfile = dockerfile_path.read_text(encoding="utf-8")
         assert "COPY pyproject.toml uv.lock README.md ./" in dockerfile
         for member in members:
             manifest = f"{member}/pyproject.toml"
@@ -221,16 +225,21 @@ def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
 
 
 def test_application_dockerfiles_embed_the_release_identity() -> None:
-    for application_name in (
-        "database-migrations",
-        "web",
-        "worker-automation",
-        "worker-publisher",
-        "worker-retention",
-    ):
-        dockerfile = (APPS_DOCKER_ROOT / application_name / "Dockerfile").read_text(
-            encoding="utf-8"
+    repository_root = DOCKER_ROOT.parent.parent
+    dockerfiles = [
+        APPS_DOCKER_ROOT / application_name / "Dockerfile"
+        for application_name in (
+            "database-migrations",
+            "web",
+            "worker-automation",
+            "worker-publisher",
+            "worker-retention",
         )
+    ]
+    dockerfiles.append(repository_root / "apps" / "transcription-api" / "Dockerfile")
+
+    for dockerfile_path in dockerfiles:
+        dockerfile = dockerfile_path.read_text(encoding="utf-8")
         assert "ARG IMAGE_VERSION\n" in dockerfile
         assert "ARG VCS_REF\n" in dockerfile
         assert "ARG IMAGE_VERSION=" not in dockerfile

@@ -1,0 +1,20 @@
+[project]
+name = "glpi-ticketing-transcription-api"
+version = "0.1.0"
+description = "API de transcription CPU OpenAI-compatible"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.116,<1",
+    "pydantic-settings>=2.10,<3",
+    "python-multipart>=0.0.20,<1",
+    "transcribe-cpp==0.4.1",
+    "transcribe-cpp-native==0.4.1",
+    "uvicorn>=0.35,<1",
+]
+
+[project.scripts]
+glpi-ticketing-transcription-api = "glpi_ticketing_transcription_api.application:main"
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"

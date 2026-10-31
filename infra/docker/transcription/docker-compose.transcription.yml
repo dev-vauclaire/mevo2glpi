@@ -9,7 +9,7 @@ x-inference-runtime: &inference-runtime
     - no-new-privileges:true
   pids_limit: 128
   tmpfs:
-    - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
   restart: unless-stopped
   logging:
     driver: json-file
@@ -18,38 +18,50 @@ x-inference-runtime: &inference-runtime
       max-file: "3"
 
 services:
-  parakeet:
+  transcription-api:
     <<: *inference-runtime
-    image: ghcr.io/achetronic/parakeet:0.8.0-fp32@sha256:46bf3ccb62dcc5d997edb20ed812125e19a33ab2774b2c59ba639bbfeb9d548b
+    build:
+      context: ../../..
+      dockerfile: apps/transcription-api/Dockerfile
+      args:
+        IMAGE_VERSION: ${APP_RELEASE:?Set APP_RELEASE to the deployed Git ref}
+        VCS_REF: ${APP_COMMIT_SHA:?Set APP_COMMIT_SHA to the deployed full Git SHA}
+        PARAKEET_ULTRA_MODEL_URL: ${PARAKEET_ULTRA_MODEL_URL:-https://huggingface.co/handy-computer/parakeet-ultra-gguf/resolve/a1539be1b849ea7463b88343e5277b373d0c4ea9/parakeet-ultra-Q8_0.gguf}
+        PARAKEET_ULTRA_MODEL_SHA256: ${PARAKEET_ULTRA_MODEL_SHA256:-007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59}
+    image: glpi-ticketing-transcription-api:parakeet-ultra-q8
+    pull_policy: build
     environment:
-      PARAKEET_API_KEY: ${PARAKEET_API_KEY:?Set PARAKEET_API_KEY}
-      PARAKEET_GPU: cpu
-      PARAKEET_WORKERS: "1"
-      PARAKEET_LOG_LEVEL: ${PARAKEET_LOG_LEVEL:-info}
-      PARAKEET_LOG_FORMAT: json
-      PARAKEET_LONG_AUDIO: "false"
+      TRANSCRIPTION_API_KEY: ${TRANSCRIPTION_API_KEY:?Set TRANSCRIPTION_API_KEY}
+      TRANSCRIPTION_MODEL_PATH: ${TRANSCRIPTION_MODEL_PATH:-/models/parakeet-ultra-Q8_0.gguf}
+      TRANSCRIPTION_MODEL_NAME: ${TRANSCRIPTION_MODEL_NAME:-parakeet-ultra}
+      TRANSCRIPTION_CPU_THREADS: ${TRANSCRIPTION_CPU_THREADS:-2}
+      TRANSCRIPTION_HOST: 0.0.0.0
+      TRANSCRIPTION_PORT: "5092"
+      TRANSCRIPTION_LOG_LEVEL: ${TRANSCRIPTION_LOG_LEVEL:-info}
+      TRANSCRIPTION_MAX_UPLOAD_BYTES: ${TRANSCRIPTION_MAX_UPLOAD_BYTES:-26214400}
+      TRANSCRIPTION_MAX_AUDIO_SECONDS: ${TRANSCRIPTION_MAX_AUDIO_SECONDS:-600}
+      TRANSCRIPTION_FFMPEG_PATH: /usr/bin/ffmpeg
+      TRANSCRIPTION_FFMPEG_TIMEOUT_SECONDS: ${TRANSCRIPTION_FFMPEG_TIMEOUT_SECONDS:-60}
     expose:
       - "5092"
-    cpus: ${PARAKEET_CPUS:-2.0}
-    mem_limit: ${PARAKEET_MEMORY_LIMIT:-8g}
+    cpus: ${TRANSCRIPTION_CPUS:-2.0}
+    mem_limit: ${TRANSCRIPTION_MEMORY_LIMIT:-4g}
     healthcheck:
       test:
         - CMD
-        - /bin/bash
-        - -ec
-        - |
-          exec 3<>/dev/tcp/127.0.0.1/5092
-          printf 'GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3
-          IFS= read -r status <&3
-          [[ "$${status}" == *" 200 "* ]]
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:5092/health/ready', timeout=4).close()
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 90s
+      start_period: 120s
     networks:
       transcription:
         aliases:
-          - ${PARAKEET_NETWORK_ALIAS:-gta-parakeet}
+          - ${TRANSCRIPTION_NETWORK_ALIAS:-gta-transcription}
     stop_grace_period: 45s
 
 networks:

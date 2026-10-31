@@ -12,4 +12,5 @@ empreinte SHA-256 avant utilisation.
 |---|---|---|
 | `valid-speech.wav` | PCM signé 16 bits, mono, 16 kHz | `477a01ce6643d7f06ef4bd2e3564d4cb2e01f3fcfa8205e220185129c8889f7d` |
 | `valid-speech-alaw.wav` | G.711 A-law, mono, 8 kHz | `86086f9f72d66f4b3b59f420e5dfd64a76880a0103a7cff99bfd1aaa7a1e611c` |
+| `valid-speech-mulaw.wav` | G.711 μ-law, mono, 8 kHz | `0efdd63f887ac7e4024ecb7c8c9b6a8d34af0c7f4a674b3568f0d1e2afa2f5f1` |
 | `valid-speech.ogg` | OGG/Opus, mono | `0eb4e93632e8530feba90abbd1e48781ffc920684538bf3c5603d1c87942dedb` |

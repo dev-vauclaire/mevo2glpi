@@ -28,6 +28,7 @@ class SyntheticAudioFixture(StrEnum):
 
     WAV_PCM = "valid-speech.wav"
     WAV_ALAW = "valid-speech-alaw.wav"
+    WAV_MULAW = "valid-speech-mulaw.wav"
     OGG_OPUS = "valid-speech.ogg"
 
 
@@ -37,6 +38,9 @@ _FIXTURE_SHA256 = {
     ),
     SyntheticAudioFixture.WAV_ALAW: (
         "86086f9f72d66f4b3b59f420e5dfd64a76880a0103a7cff99bfd1aaa7a1e611c"
+    ),
+    SyntheticAudioFixture.WAV_MULAW: (
+        "0efdd63f887ac7e4024ecb7c8c9b6a8d34af0c7f4a674b3568f0d1e2afa2f5f1"
     ),
     SyntheticAudioFixture.OGG_OPUS: (
         "0eb4e93632e8530feba90abbd1e48781ffc920684538bf3c5603d1c87942dedb"

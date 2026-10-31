@@ -47,11 +47,21 @@ def test_spoken_telephony_fixture_is_alaw_at_8_khz() -> None:
     assert int.from_bytes(content[24:28], "little") == 8_000
 
 
+def test_spoken_telephony_fixture_is_mulaw_at_8_khz() -> None:
+    content = load_synthetic_audio(SyntheticAudioFixture.WAV_MULAW)
+
+    assert content.startswith(b"RIFF")
+    assert content[8:12] == b"WAVE"
+    assert int.from_bytes(content[20:22], "little") == 7
+    assert int.from_bytes(content[24:28], "little") == 8_000
+
+
 def test_catalogue_exposes_the_approved_scenarios() -> None:
     assert tuple(scenario.value for scenario in SeedScenario) == (
         "valid-wav",
         "valid-ogg",
         "valid-wav-alaw",
+        "valid-wav-mulaw",
         "no-attachment",
         "two-audio-attachments",
         "empty-audio",
@@ -72,6 +82,7 @@ def test_catalogue_exposes_the_approved_scenarios() -> None:
         (SeedScenario.VALID_WAV, 1),
         (SeedScenario.VALID_OGG, 1),
         (SeedScenario.VALID_WAV_ALAW, 1),
+        (SeedScenario.VALID_WAV_MULAW, 1),
         (SeedScenario.NO_ATTACHMENT, 0),
         (SeedScenario.TWO_AUDIO_ATTACHMENTS, 2),
         (SeedScenario.EMPTY_AUDIO, 1),

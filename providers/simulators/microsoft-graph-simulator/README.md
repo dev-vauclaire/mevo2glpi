@@ -25,13 +25,14 @@ Depuis le conteneur :
 glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
 glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
 glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
+glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav-mulaw
 glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
 glpi-ticketing-microsoft-graph-simulator-admin reset
 ```
 
 | Scénario | Résultat publisher attendu |
 |---|---|
-| `valid-wav`, `valid-ogg`, `valid-wav-alaw` | accepté, message `Processed` |
+| `valid-wav`, `valid-ogg`, `valid-wav-alaw`, `valid-wav-mulaw` | accepté, message `Processed` |
 | `no-attachment` | rejet `audio_attachment_missing` |
 | `two-audio-attachments` | rejet `attachment_count_invalid` |
 | `empty-audio` | rejet `audio_empty` |

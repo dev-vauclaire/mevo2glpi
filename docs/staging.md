@@ -1,7 +1,7 @@
 # Environnement staging Dokploy
 
 Le staging valide le pipeline avec des données synthétiques. Microsoft Graph
-est simulé ; Parakeet réalise la transcription sur CPU dans une stack Dokploy
+est simulé ; l'API Parakeet Ultra réalise la transcription sur CPU dans une stack Dokploy
 indépendante des applications et des simulateurs. GLPI est une instance de test
 externe accessible en HTTPS. Le simulateur Transcribe AI reste disponible
 uniquement pour le contrat legacy et le retour arrière. Aucun service de
@@ -16,7 +16,7 @@ flowchart LR
     Publisher -->|SQL| PostgreSQL[(PostgreSQL staging)]
     Publisher -->|Fichier| Audio[(Volume audio staging)]
     Automation[Worker automation] -->|Lit| Audio
-    Automation -->|HTTP OpenAI compatible| Parakeet[Parakeet CPU]
+    Automation -->|HTTP OpenAI compatible| Transcription[Parakeet Ultra Q8 / transcribe.cpp]
     Automation -.->|Repli legacy| Transcribe[Transcribe AI simulator]
     Automation -->|HTTPS API V2.3.0| GLPI[GLPI de test externe]
     Retention[Worker retention] -->|HTTPS API V2.3.0| GLPI
@@ -28,19 +28,19 @@ Trois projets Compose sont déployés séparément :
 - `infra/docker/simulators/docker-compose.simulators.yml` déploie le simulateur
   Graph et le simulateur Transcribe AI legacy ;
 - `infra/docker/transcription/docker-compose.transcription.yml` déploie
-  uniquement Parakeet ;
+  uniquement l'API de transcription ;
 - `infra/docker/apps/docker-compose.staging.yml` déploie les cinq applications.
 
 Ils utilisent deux réseaux Docker privés distincts :
 
 - `gta-staging-simulators-network` relie les simulateurs aux seuls workers qui
   les consomment ;
-- `gta-staging-transcription-network` relie uniquement Parakeet et
+- `gta-staging-transcription-network` relie uniquement l'API de transcription et
   `worker-automation`.
 
 Dans Compose, `external: true` signifie que le réseau est partagé entre deux
 projets et géré hors de leur cycle de vie. Cela ne publie aucun port sur l'hôte
-et n'expose pas Parakeet à Traefik.
+et n'expose pas l'API à Traefik.
 
 PostgreSQL reste un service externe dédié au staging. Le GLPI de test n'est pas
 déployé par ce dépôt.
@@ -49,7 +49,7 @@ déployé par ce dépôt.
 
 Avant de déployer les applications :
 
-1. vérifier que les deux simulateurs et Parakeet sont `healthy` ;
+1. vérifier que les deux simulateurs et l'API de transcription sont `healthy` ;
 2. vérifier que `gta-staging-simulators-network` et
    `gta-staging-transcription-network` existent ;
 3. créer une base et un utilisateur PostgreSQL exclusivement réservés au
@@ -101,7 +101,7 @@ Déployer ensuite le moteur de transcription avec :
 
 Copier les variables de
 `infra/docker/transcription/transcription.env.example` dans ce second projet.
-La clé Parakeet et les limites CPU/RAM sont propres à cette stack.
+La clé de l'API et les limites CPU/RAM sont propres à cette stack.
 
 Enfin, créer le projet applicatif avec :
 
@@ -118,7 +118,7 @@ Environment, puis remplacer tous les placeholders. En particulier :
   transcription et applications ;
 - `TRANSCRIBE_AI_SIMULATOR_API_KEY` conserve la même valeur que dans la stack
   simulateurs pour permettre le repli legacy ;
-- `PARAKEET_API_KEY` doit avoir la même valeur dans les projets transcription
+- `TRANSCRIPTION_API_KEY` doit avoir la même valeur dans les projets transcription
   et applications ;
 - `PUBLISHER_MAILBOX_ID` doit correspondre à la boîte Graph fictive ;
 - `GLPI_BASE_URL` doit contenir l'URL HTTPS du GLPI de test ;
@@ -126,8 +126,8 @@ Environment, puis remplacer tous les placeholders. En particulier :
   PostgreSQL.
 
 Les projets Compose ne peuvent pas exprimer de `depends_on` entre eux. Les
-simulateurs et Parakeet doivent donc être déployés et sains avant les workers.
-Une indisponibilité ultérieure de Parakeet est gérée par le retry applicatif.
+simulateurs et l'API de transcription doivent donc être déployés et sains avant
+les workers. Une indisponibilité ultérieure est gérée par le retry applicatif.
 
 La production reste configurée avec `TRANSCRIPTION_PROVIDER=legacy_polling`
 pendant toute la recette. Après validation, le même Compose de transcription et
@@ -199,17 +199,17 @@ Le simulateur de transcription legacy peut être contrôlé indépendamment :
 glpi-ticketing-transcribe-ai-simulator-smoke
 ```
 
-Parakeet doit rester invisible depuis l'hôte et Traefik. Sa sonde peut être
+L'API de transcription doit rester invisible depuis l'hôte et Traefik. Sa sonde peut être
 interrogée depuis `worker-automation` :
 
 ```bash
-python -c 'import httpx; print(httpx.get("http://gta-staging-parakeet:5092/health", timeout=5).json())'
+python -c 'import httpx; print(httpx.get("http://gta-staging-transcription:5092/health/ready", timeout=5).json())'
 ```
 
 ## Limites
 
 - le simulateur Graph valide son contrat HTTP, pas Microsoft Entra ID ;
-- Parakeet permet une recette fonctionnelle mais ne garantit pas à lui seul la
+- Parakeet Ultra permet une recette fonctionnelle mais ne garantit pas à lui seul la
   qualité de transcription sur les audios représentatifs ;
 - le staging partage les contraintes réseau et TLS de la VM qui l'héberge ;
 - un rollback applicatif ne supprime ni ne rétrograde automatiquement les

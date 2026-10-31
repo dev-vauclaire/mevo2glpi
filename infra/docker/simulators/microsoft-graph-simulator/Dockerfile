@@ -18,6 +18,7 @@ WORKDIR /app
 COPY --from=uv-binary /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock README.md ./
 COPY apps/database-migrations/pyproject.toml apps/database-migrations/pyproject.toml
+COPY apps/transcription-api/pyproject.toml apps/transcription-api/pyproject.toml
 COPY apps/web/pyproject.toml apps/web/pyproject.toml
 COPY apps/worker-automation/pyproject.toml apps/worker-automation/pyproject.toml
 COPY apps/worker-publisher/pyproject.toml apps/worker-publisher/pyproject.toml

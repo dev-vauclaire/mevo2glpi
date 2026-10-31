@@ -9,6 +9,12 @@
 !apps/database-migrations/pyproject.toml
 !apps/database-migrations/src/
 !apps/database-migrations/src/**
+!apps/transcription-api/
+!apps/transcription-api/Dockerfile
+!apps/transcription-api/THIRD_PARTY_NOTICES.md
+!apps/transcription-api/pyproject.toml
+!apps/transcription-api/src/
+!apps/transcription-api/src/**
 !apps/web/
 !apps/web/pyproject.toml
 !apps/web/src/

@@ -12,6 +12,7 @@ package = false
 [tool.uv.workspace]
 members = [
     "apps/database-migrations",
+    "apps/transcription-api",
     "apps/web",
     "apps/worker-automation",
     "apps/worker-publisher",
@@ -49,6 +50,7 @@ markers = [
     "database: démarre une instance PostgreSQL jetable pour valider le schéma et les migrations",
     "deployment: valide le Compose Dokploy et les images runtime du MVP",
     "glpi: démarre une instance GLPI jetable avec Testcontainers",
+    "transcription_model: exécute une validation CPU avec le modèle de transcription réel",
     "transcribe_ai: démarre une stack Transcribe AI jetable avec Testcontainers",
     "e2e: assemble la stack MVP complète avec GLPI et Transcribe AI jetables",
 ]
@@ -58,6 +60,7 @@ target-version = "py312"
 line-length = 88
 src = [
     "apps/database-migrations/src",
+    "apps/transcription-api/src",
     "apps/web/src",
     "apps/worker-automation/src",
     "apps/worker-publisher/src",

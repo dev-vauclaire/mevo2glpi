@@ -127,10 +127,11 @@ def test_list_scenarios_requires_no_admin_token(
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    assert [item["name"] for item in payload][:3] == [
+    assert [item["name"] for item in payload][:4] == [
         "valid-wav",
         "valid-ogg",
         "valid-wav-alaw",
+        "valid-wav-mulaw",
     ]
 
 

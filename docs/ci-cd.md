@@ -35,19 +35,19 @@ La CI est séparée en deux workflows, déclenchés par une Pull Request vers
 `main`, un push sur `main` ou une demande manuelle :
 
 - [`.github/workflows/ci-apps.yml`](../.github/workflows/ci-apps.yml) valide le
-  workspace applicatif lorsque `apps/`, `packages/`, ses tests ou son
-  infrastructure changent ;
+  workspace applicatif et la stack privée de transcription lorsque `apps/`,
+  `packages/`, leurs tests ou leur infrastructure changent ;
 - [`.github/workflows/ci-providers.yml`](../.github/workflows/ci-providers.yml)
-  valide les packages des simulateurs ainsi que les Compose simulateurs et
-  transcription lorsque leur code, leurs tests ou leur infrastructure changent.
+  valide les packages et le Compose des simulateurs lorsque leur code, leurs
+  tests ou leur infrastructure changent.
 
 Le workspace uv et son unique `uv.lock` sont partagés par les deux périmètres.
 Une modification du manifeste ou du verrouillage déclenche donc les deux
-workflows. Une modification limitée au code des simulateurs ou aux Compose
-simulateurs et transcription ne lance que leur workflow ; `.dockerignore`,
-utilisé par toutes les images, déclenche également les deux. Un lancement
-manuel ignore les filtres de chemins et permet de rejouer chaque workflow
-indépendamment.
+workflows. Une modification limitée au code des simulateurs ou à leur Compose
+ne lance que leur workflow. Une modification de l'API ou du Compose de
+transcription lance la CI applicative. `.dockerignore`, utilisé par toutes les
+images, déclenche également les deux workflows. Un lancement manuel ignore les
+filtres de chemins et permet de rejouer chaque workflow indépendamment.
 
 Les contrôles restent déterministes et utilisent uniquement des données
 synthétiques :
@@ -63,10 +63,10 @@ ainsi que les suites `glpi`, `transcribe_ai` et `e2e`, ne font pas partie du
 contrôle automatique de chaque Pull Request. Ils restent des contrôles de
 recette manuels. Les contrats Compose statiques des simulateurs et du moteur de
 transcription, également marqués `deployment`, restent en revanche exécutés par
-leur CI sans démarrer de conteneur. Le staging déployé exerce Graph et le
-provider legacy au moyen de deux simulateurs séparés, utilise Parakeet dans une
-stack privée indépendante et contacte une instance GLPI de test externe en
-HTTPS.
+leur CI respective sans démarrer de conteneur. Le staging déployé exerce Graph
+et le provider legacy au moyen de deux simulateurs séparés, utilise Parakeet
+dans une stack privée indépendante et contacte une instance GLPI de test externe
+en HTTPS.
 
 La CI ne réalise aucune des opérations suivantes :
 
@@ -90,7 +90,7 @@ Exécuter la qualité et la suite locale :
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run --all-packages pytest apps packages tests -m "not database and not deployment and not glpi and not transcribe_ai and not e2e"
+uv run --all-packages pytest apps packages tests -m "not database and not deployment and not glpi and not transcription_model and not transcribe_ai and not e2e"
 uv run pytest providers --maxfail=1
 ```
 

@@ -54,6 +54,7 @@ def test_staging_entrypoint_exposes_only_the_five_applications() -> None:
     for removed_service in (
         "provider-simulator",
         "parakeet",
+        "transcription-api",
         "glpi-db",
         "glpi",
         "glpi-bootstrap",
@@ -180,10 +181,10 @@ def test_staging_uses_the_separated_simulator_and_transcription_services(
     )
     assert automation_environment["TRANSCRIPTION_PROVIDER"] == "openai_compatible"
     assert automation_environment["OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL"] == (
-        "http://gta-staging-parakeet:5092/v1"
+        "http://gta-staging-transcription:5092/v1"
     )
     assert automation_environment["OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL"] == (
-        "parakeet-tdt-0.6b"
+        "parakeet-ultra"
     )
     assert automation_environment["OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE"] == "fr"
     assert automation_environment["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "120"
