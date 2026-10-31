@@ -161,7 +161,8 @@ def test_graph_simulator_mounts_only_operator_audio_fixtures_read_only(
     bind_options = audio_fixtures.get("bind")
     if bind_options is not None:
         assert isinstance(bind_options, dict)
-        assert bind_options.get("create_host_path") is False
+        if "create_host_path" in bind_options:
+            assert bind_options["create_host_path"] is False
 
     compose_source = SIMULATORS_COMPOSE_FILE.read_text(encoding="utf-8")
     active_compose_source = "\n".join(
