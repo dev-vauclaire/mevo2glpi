@@ -124,6 +124,8 @@ def staging_simulator_environment(
     runtime_root = tmp_path_factory.mktemp("gta-staging-simulator")
     environment_file = runtime_root / "compose.env"
     override_file = runtime_root / "compose.override.yml"
+    audio_fixtures_root = runtime_root / "audio-fixtures"
+    audio_fixtures_root.mkdir(mode=0o755)
     admin_token = secrets.token_urlsafe(32)
     transcription_api_key = secrets.token_urlsafe(32)
     graph_host_port = _reserve_loopback_port()
@@ -136,6 +138,9 @@ def staging_simulator_environment(
         {
             "COMPOSE_PROJECT_NAME": project_name,
             "SIMULATORS_NETWORK_NAME": simulators_network_name,
+            "MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH": str(
+                audio_fixtures_root
+            ),
             "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN": admin_token,
             "TRANSCRIBE_AI_SIMULATOR_API_KEY": transcription_api_key,
         }
