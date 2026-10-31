@@ -35,7 +35,7 @@ def _transcriber(
         OpenAICompatibleTranscriber(
             base_url="https://asr.example.test/prefix/v1",
             api_key=SecretStr(API_KEY),
-            model="parakeet-tdt-0.6b",
+            model="synthetic-openai-model",
             language="fr",
             http_client=client,
             timeout=12,
@@ -85,7 +85,7 @@ def test_transcribe_uses_the_strict_openai_multipart_contract(
         audio_path.name.encode(),
         media_type.encode(),
         b'name="model"',
-        b"parakeet-tdt-0.6b",
+        b"synthetic-openai-model",
         b'name="language"',
         b"fr",
         b'name="response_format"',

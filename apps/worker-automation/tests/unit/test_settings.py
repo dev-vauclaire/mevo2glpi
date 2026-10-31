@@ -595,9 +595,11 @@ def test_openai_compatible_provider_requires_only_its_configuration(
     settings = WorkerSettings(
         public_base_url="http://localhost:8000",
         transcription_provider="openai_compatible",
-        openai_compatible_transcription_base_url="http://parakeet:5092/v1",
+        openai_compatible_transcription_base_url=(
+            "http://transcription-provider.test/v1"
+        ),
         openai_compatible_transcription_api_key="synthetic-provider-key",
-        openai_compatible_transcription_model="parakeet-tdt-0.6b",
+        openai_compatible_transcription_model="synthetic-openai-model",
         _env_file=None,
     )
 
@@ -622,9 +624,11 @@ def test_selected_openai_compatible_configuration_is_required(
     monkeypatch.delenv("LEGACY_TRANSCRIPTION_BASE_URL")
     monkeypatch.delenv("LEGACY_TRANSCRIPTION_API_KEY")
     values: dict[str, object] = {
-        "openai_compatible_transcription_base_url": "http://parakeet:5092/v1",
+        "openai_compatible_transcription_base_url": (
+            "http://transcription-provider.test/v1"
+        ),
         "openai_compatible_transcription_api_key": "synthetic-provider-key",
-        "openai_compatible_transcription_model": "parakeet-tdt-0.6b",
+        "openai_compatible_transcription_model": "synthetic-openai-model",
     }
     values.pop(missing_field)
 

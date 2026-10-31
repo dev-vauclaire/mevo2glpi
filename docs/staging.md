@@ -4,7 +4,7 @@ Le staging valide le pipeline avec des données synthétiques. Microsoft Graph
 est simulé ; l'API Parakeet Ultra réalise la transcription sur CPU dans une stack Dokploy
 indépendante des applications et des simulateurs. GLPI est une instance de test
 externe accessible en HTTPS. Le simulateur Transcribe AI reste disponible
-uniquement pour le contrat legacy et le retour arrière. Aucun service de
+uniquement pour le contrat legacy et une bascule manuelle. Aucun service de
 production ni aucune donnée réelle ne doit être utilisé.
 
 ## Architecture
@@ -17,7 +17,7 @@ flowchart LR
     Publisher -->|Fichier| Audio[(Volume audio staging)]
     Automation[Worker automation] -->|Lit| Audio
     Automation -->|HTTP OpenAI compatible| Transcription[Parakeet Ultra Q8 / transcribe.cpp]
-    Automation -.->|Repli legacy| Transcribe[Transcribe AI simulator]
+    Automation -.->|Bascule manuelle| Transcribe[Transcribe AI simulator]
     Automation -->|HTTPS API V2.3.0| GLPI[GLPI de test externe]
     Retention[Worker retention] -->|HTTPS API V2.3.0| GLPI
     Web[Dashboard] -->|SQL| PostgreSQL
@@ -117,7 +117,7 @@ Environment, puis remplacer tous les placeholders. En particulier :
 - `TRANSCRIPTION_NETWORK_NAME` doit être identique dans les projets
   transcription et applications ;
 - `TRANSCRIBE_AI_SIMULATOR_API_KEY` conserve la même valeur que dans la stack
-  simulateurs pour permettre le repli legacy ;
+  simulateurs pour permettre une bascule manuelle vers le provider legacy ;
 - `TRANSCRIPTION_API_KEY` doit avoir la même valeur dans les projets transcription
   et applications ;
 - `PUBLISHER_MAILBOX_ID` doit correspondre à la boîte Graph fictive ;
@@ -129,10 +129,12 @@ Les projets Compose ne peuvent pas exprimer de `depends_on` entre eux. Les
 simulateurs et l'API de transcription doivent donc être déployés et sains avant
 les workers. Une indisponibilité ultérieure est gérée par le retry applicatif.
 
-La production reste configurée avec `TRANSCRIPTION_PROVIDER=legacy_polling`
-pendant toute la recette. Après validation, le même Compose de transcription et
-le même digest pourront être déployés dans un projet de production distinct,
-avec un réseau et une clé propres, avant de basculer le worker.
+La production conserve `TRANSCRIPTION_PROVIDER=legacy_polling` tant qu'une
+bascule n'est pas décidée. Pour utiliser la transcription locale, déployer le
+même Compose et le même digest dans un projet de production distinct, puis
+sélectionner `openai_compatible` et redéployer le worker. Le retour vers
+`legacy_polling` suit la même procédure. Les deux configurations peuvent
+coexister, mais aucun basculement automatique n'est effectué.
 
 Le futur domaine Dokploy concernera uniquement le service `web`, sur son port
 interne `8000`. Il n'est pas nécessaire pour valider l'exécution des workers,

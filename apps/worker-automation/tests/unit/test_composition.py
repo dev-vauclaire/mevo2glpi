@@ -227,9 +227,11 @@ def test_openai_compatible_provider_is_composed_without_polling(
         transcription_provider="openai_compatible",
         legacy_transcription_base_url=None,
         legacy_transcription_api_key=None,
-        openai_compatible_transcription_base_url="http://parakeet:5092/v1",
+        openai_compatible_transcription_base_url=(
+            "http://transcription-provider.test/v1"
+        ),
         openai_compatible_transcription_api_key="synthetic-provider-key",
-        openai_compatible_transcription_model="parakeet-tdt-0.6b",
+        openai_compatible_transcription_model="synthetic-openai-model",
         openai_compatible_transcription_language="fr",
     )
     captured: dict[str, object] = {}
@@ -256,9 +258,9 @@ def test_openai_compatible_provider_is_composed_without_polling(
     assert result is transcriber
     assert captured.pop("http_client") is http_client
     assert captured == {
-        "base_url": "http://parakeet:5092/v1",
+        "base_url": "http://transcription-provider.test/v1",
         "api_key": settings.openai_compatible_transcription_api_key,
-        "model": "parakeet-tdt-0.6b",
+        "model": "synthetic-openai-model",
         "language": "fr",
         "timeout": settings.transcription_http_timeout_seconds,
     }

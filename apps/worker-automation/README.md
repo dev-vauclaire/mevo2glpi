@@ -436,6 +436,11 @@ Les variables obligatoires sont chargées depuis l'environnement ou `.env` :
 | `GLPI_TICKET_REQUEST_SOURCE_ID` | Identifiant positif de la source MEVO dans l'instance GLPI ciblée. |
 | `GLPI_TICKET_URGENCY`, `GLPI_TICKET_IMPACT` | Niveaux GLPI de 1 à 5. |
 
+Les configurations des deux providers peuvent coexister. Au démarrage,
+`TRANSCRIPTION_PROVIDER` sélectionne l'unique adaptateur utilisé par le worker ;
+aucune bascule automatique n'est effectuée en cas d'erreur. Changer de provider
+nécessite de modifier cette variable puis de redéployer le worker.
+
 Principaux réglages optionnels :
 
 | Variable | Défaut | Rôle |
