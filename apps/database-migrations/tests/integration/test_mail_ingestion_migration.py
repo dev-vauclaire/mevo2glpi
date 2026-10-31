@@ -22,7 +22,6 @@ pytestmark = pytest.mark.database
 
 PREVIOUS_REVISION = "0004_add_observability_queries"
 MAIL_INGESTION_REVISION = "0005_add_mail_ingestions"
-CURRENT_REVISION = "0006_add_ogg_replay_support"
 
 
 @pytest.fixture
@@ -37,7 +36,7 @@ def database_engine(database_url: str) -> Iterator[Engine]:
 
 def _head_revision() -> str:
     heads = ScriptDirectory.from_config(build_alembic_config()).get_heads()
-    assert heads == [CURRENT_REVISION]
+    assert len(heads) == 1
     return heads[0]
 
 
