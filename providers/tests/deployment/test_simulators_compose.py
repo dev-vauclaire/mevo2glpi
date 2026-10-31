@@ -158,7 +158,25 @@ def test_graph_simulator_mounts_only_operator_audio_fixtures_read_only(
     assert audio_fixtures["source"] == "/srv/gta-staging/audio-fixtures"
     assert audio_fixtures["target"] == "/fixtures/audio"
     assert audio_fixtures["read_only"] is True
-    assert audio_fixtures["bind"]["create_host_path"] is False
+    bind_options = audio_fixtures.get("bind")
+    if bind_options is not None:
+        assert isinstance(bind_options, dict)
+        assert bind_options.get("create_host_path") is False
+
+    compose_source = SIMULATORS_COMPOSE_FILE.read_text(encoding="utf-8")
+    active_compose_source = "\n".join(
+        line
+        for line in compose_source.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    graph_service_source = active_compose_source.split(
+        "  microsoft-graph-simulator:",
+        maxsplit=1,
+    )[1].split("\n  transcribe-ai-simulator:", maxsplit=1)[0]
+    assert re.search(
+        r"(?m)^        bind:\s*\n          create_host_path: false\s*$",
+        graph_service_source,
+    )
     assert services["transcribe-ai-simulator"].get("volumes", []) == []
 
 
