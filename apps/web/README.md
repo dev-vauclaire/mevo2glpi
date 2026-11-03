@@ -82,8 +82,9 @@ de droit d'écriture pour une ingestion.
 Le healthcheck de l'image appelle `/health`, qui reste une liveness locale et
 ne transforme pas PostgreSQL en dépendance de disponibilité HTTP. Le service
 web ne publie aucun port hôte ; le Traefik fourni par Dokploy route son port
-interne `8000`. Le contrat de démarrage est décrit dans la section
-[déploiement Dokploy](../../README.md#déploiement-dokploy).
+interne `8000`. Les contrôles de déploiement sont décrits dans les procédures
+de [staging](../../docs/procedures/staging.md) et de
+[production](../../docs/procedures/production.md).
 
 ## Flux de consultation
 
@@ -210,7 +211,7 @@ Depuis la racine :
 
 ```bash
 uv sync --all-packages --all-groups
-uv run glpi-ticketing-web
+uv run --package glpi-ticketing-web glpi-ticketing-web
 ```
 
 Tests sans service externe :

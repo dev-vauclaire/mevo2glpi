@@ -15,13 +15,13 @@ from glpi_ticketing_glpi import GLPI_API_VERSION
 pytestmark = pytest.mark.glpi
 
 GLPI_TEST_DIRECTORY = Path(__file__).resolve().parent
+REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
+GLPI_IMAGE_DIRECTORY = REPOSITORY_ROOT / "infra" / "docker" / "providers" / "glpi-test"
 GLPI_COMPOSE_FILE = GLPI_TEST_DIRECTORY / "compose.yml"
-GLPI_DOCKERFILE = GLPI_TEST_DIRECTORY / "image" / "Dockerfile"
-GLPI_BOOTSTRAP = GLPI_TEST_DIRECTORY / "image" / "bootstrap_oauth.php"
-GLPI_REQUEST_SOURCE_BOOTSTRAP = (
-    GLPI_TEST_DIRECTORY / "image" / "bootstrap_request_source.php"
-)
-GLPI_STATUS_HELPER = GLPI_TEST_DIRECTORY / "image" / "set_ticket_status.php"
+GLPI_DOCKERFILE = GLPI_IMAGE_DIRECTORY / "Dockerfile"
+GLPI_BOOTSTRAP = GLPI_IMAGE_DIRECTORY / "bootstrap_oauth.php"
+GLPI_REQUEST_SOURCE_BOOTSTRAP = GLPI_IMAGE_DIRECTORY / "bootstrap_request_source.php"
+GLPI_STATUS_HELPER = GLPI_IMAGE_DIRECTORY / "set_ticket_status.php"
 PINNED_GLPI_API_VERSION = "2.3.0"
 PINNED_OPENAPI_VERSION = "3.0.0"
 GLPI_API_ROOT = f"/api.php/v{PINNED_GLPI_API_VERSION}"
@@ -30,6 +30,16 @@ GLPI_TICKET_OPENAPI_PATH = "/Assistance/Ticket"
 GLPI_TICKET_BY_ID_OPENAPI_PATH = "/Assistance/Ticket/{id}"
 GLPI_REQUEST_TYPE_OPENAPI_PATH = "/Dropdowns/RequestType"
 GLPI_HTTP_TIMEOUT_SECONDS = 10.0
+
+
+def test_glpi_compose_uses_the_canonical_test_image() -> None:
+    compose_file = GLPI_COMPOSE_FILE.read_text(encoding="utf-8")
+
+    assert GLPI_IMAGE_DIRECTORY.is_dir()
+    assert "context: ../../../../../infra/docker/providers/glpi-test" in compose_file
+    assert "GLPI_TEST_CLIENT_ID:" in compose_file
+    assert "GLPI_TEST_CLIENT_SECRET:" in compose_file
+    assert not (GLPI_TEST_DIRECTORY / "image" / "Dockerfile").exists()
 
 
 def _require_mapping(
@@ -256,6 +266,9 @@ def test_custom_image_contains_no_real_secret(glpi_environment) -> None:
     assert "$requestType->update" in request_source_bootstrap
     assert "Europe/Paris" in bootstrap
     assert "$user->update" in bootstrap
+    assert "GLPI_TEST_CLIENT_ID" in bootstrap
+    assert "GLPI_TEST_CLIENT_SECRET" in bootstrap
+    assert "hash_equals($storedClientSecret, $clientSecret)" in bootstrap
     assert "INSERT " not in status_helper
     assert "UPDATE " not in status_helper
     assert "DELETE " not in status_helper

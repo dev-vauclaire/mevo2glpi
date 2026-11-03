@@ -56,7 +56,8 @@ GGUF. Le smoke test CPU réel est volontairement séparé :
 
 ```bash
 TRANSCRIPTION_MODEL_TEST_PATH=/models/parakeet-ultra-Q8_0.gguf \
-  uv run pytest -m transcription_model \
+  uv run --package glpi-ticketing-transcription-api \
+  pytest -m transcription_model \
   apps/transcription-api/tests/integration/test_real_model.py -vv
 ```
 

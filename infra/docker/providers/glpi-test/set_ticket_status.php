@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Glpi\Application\ResourcesChecker;
 use Glpi\Kernel\Kernel;
 
+// This helper is restricted to synthetic development and integration data.
+
 $stage = 'read_environment';
 
 try {

@@ -18,6 +18,9 @@ Variables optionnelles :
 
 | Variable | Défaut | Rôle |
 | --- | --- | --- |
+| `APP_ENVIRONMENT` | `development` | Environnement `development`, `staging` ou `production` de l'identité déployée |
+| `APP_RELEASE` | `development` | `main` ou tag `vX.Y.Z`, selon l'environnement |
+| `APP_COMMIT_SHA` | `unknown` | SHA Git complet, obligatoire hors développement local |
 | `DATABASE_READY_TIMEOUT_SECONDS` | `60` | Fenêtre pendant laquelle relancer PostgreSQL |
 | `DATABASE_READY_INTERVAL_SECONDS` | `1` | Intervalle entre deux essais |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Limite de chaque connexion, entre 1 et 60 secondes |
@@ -25,13 +28,15 @@ Variables optionnelles :
 Lancement depuis la racine du workspace :
 
 ```bash
-uv run glpi-ticketing-database-migrations
+uv run --package glpi-ticketing-database-migrations \
+  glpi-ticketing-database-migrations
 ```
 
 La forme module est équivalente :
 
 ```bash
-uv run python -m glpi_ticketing_database_migrations
+uv run --package glpi-ticketing-database-migrations \
+  python -m glpi_ticketing_database_migrations
 ```
 
 Les ressources Alembic sont embarquées dans le package Python. Leur résolution
@@ -48,8 +53,9 @@ one-shot sans healthcheck ni politique de redémarrage.
 Cette application accède seulement à PostgreSQL. Elle ne monte pas le volume
 audio `/data/audios`. Elle attend elle-même la base externe dans un délai borné
 et sa réussite conditionne le démarrage des applications persistantes du MVP.
-Le contrat est décrit dans la section
-[déploiement Dokploy](../../README.md#déploiement-dokploy).
+Les ordres de démarrage et les contrôles opérateur sont décrits dans les
+procédures de [staging](../../docs/procedures/staging.md) et de
+[production](../../docs/procedures/production.md).
 
 ## Historique courant
 
@@ -153,6 +159,6 @@ parallélisée :
 ```bash
 uv run pytest -m database \
   apps/database-migrations/tests/integration \
-  apps/web/tests/integration/test_job_ingestion.py \
+  apps/web/tests/integration \
   -vv --maxfail=1
 ```

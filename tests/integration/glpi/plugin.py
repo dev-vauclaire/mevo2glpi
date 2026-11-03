@@ -191,6 +191,8 @@ def _new_environment() -> dict[str, str]:
         "GLPI_TEST_USERNAME": f"glpi-test-user-{suffix}",
         "GLPI_TEST_PASSWORD": f"T!9a-{secrets.token_urlsafe(32)}",
         "GLPI_TEST_OAUTH_CLIENT_NAME": f"glpi-test-oauth-{suffix}",
+        "GLPI_TEST_CLIENT_ID": f"glpi-test-client-{suffix}",
+        "GLPI_TEST_CLIENT_SECRET": secrets.token_urlsafe(48),
         "GLPI_TEST_REQUEST_SOURCE_NAME": "MEVO",
         "GLPI_TEST_TIMEZONE": "Europe/Paris",
     }
@@ -538,6 +540,11 @@ def _assert_expected_credentials(
     matches = (
         result.username == environment["GLPI_TEST_USERNAME"]
         and hmac.compare_digest(result.password, environment["GLPI_TEST_PASSWORD"])
+        and hmac.compare_digest(result.client_id, environment["GLPI_TEST_CLIENT_ID"])
+        and hmac.compare_digest(
+            result.client_secret,
+            environment["GLPI_TEST_CLIENT_SECRET"],
+        )
         and result.grant_type == "password"
         and result.scope == "api"
         and result.timezone == environment["GLPI_TEST_TIMEZONE"]
@@ -680,7 +687,7 @@ def glpi_environment(
                 environment["GLPI_DB_PASSWORD"],
                 environment["GLPI_DB_ROOT_PASSWORD"],
                 environment["GLPI_TEST_PASSWORD"],
-                first_bootstrap.client_secret,
+                environment["GLPI_TEST_CLIENT_SECRET"],
             )
 
             yield GlpiTestEnvironment(

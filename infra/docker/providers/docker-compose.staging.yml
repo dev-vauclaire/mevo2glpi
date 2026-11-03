@@ -1,0 +1,66 @@
+name: ${COMPOSE_PROJECT_NAME:-gta-staging-simulators}
+
+x-simulator-runtime: &simulator-runtime
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  microsoft-graph-simulator:
+    <<: *simulator-runtime
+    image: ${COMPOSE_PROJECT_NAME:-gta-staging-simulators}-microsoft-graph-simulator:0.1.0
+    build:
+      context: ../../..
+      dockerfile: infra/docker/providers/microsoft-graph-simulator/Dockerfile
+    environment:
+      MICROSOFT_GRAPH_SIMULATOR_HOST: 0.0.0.0
+      MICROSOFT_GRAPH_SIMULATOR_PORT: "8080"
+      MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID: ${MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID:?Set MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID}
+      MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN: ${MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN:?Set MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN}
+    volumes:
+      - type: bind
+        source: ${MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH:?Set MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH}
+        target: /fixtures/audio
+        read_only: true
+        bind:
+          create_host_path: false
+    expose:
+      - "8080"
+    networks:
+      simulators:
+        aliases:
+          - gta-staging-microsoft-graph
+
+  transcribe-ai-simulator:
+    <<: *simulator-runtime
+    image: ${COMPOSE_PROJECT_NAME:-gta-staging-simulators}-transcribe-ai-simulator:0.1.0
+    build:
+      context: ../../..
+      dockerfile: infra/docker/providers/transcribe-ai-simulator/Dockerfile
+    environment:
+      TRANSCRIBE_AI_SIMULATOR_HOST: 0.0.0.0
+      TRANSCRIBE_AI_SIMULATOR_PORT: "8080"
+      TRANSCRIBE_AI_SIMULATOR_API_KEY: ${TRANSCRIBE_AI_SIMULATOR_API_KEY:?Set TRANSCRIBE_AI_SIMULATOR_API_KEY}
+    expose:
+      - "8080"
+    networks:
+      simulators:
+        aliases:
+          - gta-staging-transcribe-ai
+
+networks:
+  simulators:
+    name: ${SIMULATORS_NETWORK_NAME:-gta-staging-simulators-network}
+    external: true

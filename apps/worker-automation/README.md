@@ -1,10 +1,11 @@
 # Worker d'automatisation
 
-Cette application consomme les jobs persistés par le web, demande leur
-transcription, retrouve ou crée le ticket GLPI correspondant, puis finalise le
-cycle de vie en base. Depuis l'itération 3 du MVP, **PostgreSQL est l'unique
-source de vérité** : le worker ne scanne aucun répertoire et ne déplace jamais
-un audio pour représenter son état.
+Cette application consomme les jobs persistés par le worker publisher, demande
+leur transcription, retrouve ou crée le ticket GLPI correspondant, puis
+finalise le cycle de vie en base. **PostgreSQL est l'unique source de vérité** :
+le worker ne scanne aucun répertoire et ne déplace jamais un audio pour
+représenter son état. Le web reste une interface de consultation et de
+réarmement opérateur.
 
 Le MVP reste volontairement mono-worker. Une connexion PostgreSQL dédiée
 conserve un verrou advisory pendant toute la durée du processus ; une seconde
@@ -131,8 +132,8 @@ sommeil. Les frontières de reprise importantes sont donc durables :
 
 La transcription n'étant pas persistée localement, un redémarrage retranscrit
 tout job `processing` sans `glpi_ticket_id`. Si l'identifiant GLPI est déjà présent,
-le worker reprend directement la finalisation sans rappeler Transcribe AI ni
-GLPI. `ensure_ticket()` réconcilie les autres reprises grâce à
+le worker reprend directement la finalisation sans rappeler le provider de
+transcription ni GLPI. `ensure_ticket()` réconcilie les autres reprises grâce à
 `external_id = audio_uuid`.
 
 Pour un nouveau ticket, `mail_ingestions.received_at` reste la source de vérité
@@ -141,10 +142,10 @@ renseigner la date d'ouverture métier `date` de GLPI. Il ne modifie jamais
 `date_creation`, qui conserve l'heure technique d'insertion dans GLPI. Une
 ingestion absente ou incohérente bloque le job avec le code expurgé
 `source_received_at_missing`, sans inventer de date de repli et avant tout appel
-à Transcribe AI ou GLPI. Un ticket dont l'identifiant est déjà persisté reste
-finalisé sans dépendre de cette métadonnée.
+au provider de transcription ou à GLPI. Un ticket dont l'identifiant est déjà
+persisté reste finalisé sans dépendre de cette métadonnée.
 
-Si la persistance de l'identifiant Transcribe AI échoue juste après un `POST`
+Si la persistance de l'identifiant distant legacy échoue juste après un `POST`
 accepté, l'exception d'origine est remplacée par le code expurgé
 `submission_persistence_failed`. Le worker traite cette ambiguïté comme un
 blocage **système**, jamais comme un échec terminal du job : celui-ci reste
@@ -165,10 +166,11 @@ les valeurs par défaut. Le plafond reste ensuite à 300 secondes. Le MVP
 n'ajoute volontairement pas de jitter puisqu'un seul worker est prévu.
 
 Le compteur est global au pipeline d'un job : chaque tentative qui se termine
-par un retry l'incrémente, que l'indisponibilité vienne de Transcribe AI ou de
-GLPI. Une étape intermédiaire réussie ne le remet pas à zéro, puisque la reprise
-GLPI doit actuellement retranscrire l'audio. L'action opérateur de réarmement
-prévue à l'itération 4 réinitialisera cette série.
+par un retry l'incrémente, que l'indisponibilité vienne du provider de
+transcription ou de GLPI. Une étape intermédiaire réussie ne le remet pas à
+zéro, puisque la reprise GLPI doit actuellement retranscrire l'audio. L'action
+opérateur de réarmement exposée par `POST /api/jobs/{uuid}/retry` réinitialise
+cette série.
 
 Par défaut, le worker autorise trois reprogrammations après la tentative
 initiale. À épuisement, une indisponibilité de transcription devient le code
@@ -211,8 +213,8 @@ répertoire `failed` et n'écrit aucun sidecar JSON.
 Une incohérence limitée à un job, par exemple une `storage_key` invalide, un
 audio absent ou plusieurs tickets portant le même `external_id`, devient un
 état `blocked` persistant. Sa rétention absolue est planifiée à 90 jours par
-défaut. Le runner continue avec la file ; une future action opérateur devra
-réarmer explicitement le job.
+défaut. Le runner continue avec la file ; l'opérateur peut le réarmer
+explicitement depuis le web après avoir corrigé la cause.
 
 ### Blocage système
 
@@ -254,7 +256,7 @@ d'abord l'UUID audio dans `external_id`, puis crée le ticket uniquement si
 aucun résultat exact n'existe. Le titre et les niveaux du ticket proviennent de
 la configuration ; la description contient la transcription et l'URL audio.
 `TitleGeneratorProtocol` isole désormais la génération du titre ; cette
-itération utilise `DefaultTitleGenerator`, qui retourne le titre configuré.
+version utilise `DefaultTitleGenerator`, qui retourne le titre configuré.
 
 Une réponse de création ambiguë reste récupérable et sera réconciliée à la
 tentative suivante. Une duplication réelle d'`external_id` bloque uniquement
@@ -268,15 +270,15 @@ comme obsolète d'initier l'appel suivant, mais ne peuvent ni annuler un `POST`
 GLPI déjà en vol ni imposer une contrainte d'unicité distante. La recherche
 par `external_id` reste donc la réconciliation du MVP, pas un verrou distribué.
 Si le résultat d'un `POST` reste inconnu et que la recherche suivante est
-encore vide, une future itération peut tenter une nouvelle création. Sans
+encore vide, une tentative suivante peut lancer une nouvelle création. Sans
 unicité GLPI, ce délai de visibilité constitue un risque résiduel explicite du
 MVP ; sa suppression demande une intention de création persistée et une reprise
 « reconciliation-only », ou une contrainte d'unicité fournie par GLPI.
 
 ## Rétention planifiée
 
-L'itération 3 crée ou active la ligne `audio_retentions` en même temps que
-l'état final :
+Le worker crée ou active la ligne `audio_retentions` en même temps que l'état
+final :
 
 | État du job | Politique par défaut |
 | --- | --- |
@@ -298,8 +300,8 @@ de la boucle. Le runtime :
 1. ouvre le moteur et acquiert le verrou advisory `automation` ;
 2. écrit les états `starting`, puis `running` ;
 3. exécute toutes les transactions du worker sur la connexion qui détient le
-   verrou, puis le vérifie aussi autour de chaque `run_once()` et appel
-   Transcribe AI ou GLPI ;
+   verrou, puis le vérifie aussi autour de chaque `run_once()` et de chaque
+   appel au provider de transcription ou à GLPI ;
 4. le revalide avant la soumission, autour de chaque lecture du polling et
    après chaque attente de transcription ;
 5. écrit `degraded` après un retry ou `blocked` après un blocage système ;
@@ -312,7 +314,7 @@ Une transaction SQL du worker ne peut pas être validée après la perte du verr
 car les deux partagent la même connexion PostgreSQL. L'ancienne instance
 n'initie alors pas l'étape externe suivante. Cette garantie clôt les écritures
 locales, mais ne constitue pas un jeton de fencing distribué auprès de
-Transcribe AI ou de GLPI.
+du provider de transcription ou de GLPI.
 
 Le heartbeat est rafraîchi aux frontières du pipeline et pendant chaque
 attente coopérative. Une attente plus longue que
@@ -339,10 +341,10 @@ doit être strictement supérieur à `WORKER_HEARTBEAT_INTERVAL_SECONDS`. La son
 n'émet qu'un code technique expurgé et ne journalise ni URL SQL ni secret.
 
 `SIGINT` et `SIGTERM` demandent un arrêt coopératif et interrompent les attentes
-injectées. Si le signal survient pendant le polling Transcribe AI, le worker
-retourne `InterruptedOutcome` : il ne programme ni retry ni erreur et le job
-reste `processing` pour une reprise prioritaire au prochain démarrage. Une
-requête HTTP synchrone déjà en cours n'est observée qu'à son retour ou à
+injectées. Si le signal survient pendant le polling du provider legacy, le
+worker retourne `InterruptedOutcome` : il ne programme ni retry ni erreur et
+le job reste `processing` pour une reprise prioritaire au prochain démarrage.
+Une requête HTTP synchrone déjà en cours n'est observée qu'à son retour ou à
 l'expiration d'un timeout d'inactivité de phase. Les codes de sortie sont :
 
 | Code | Signification |
@@ -375,6 +377,9 @@ apps/worker-automation/
 │   │   ├── heartbeat.py     # outcomes vers état runtime
 │   │   ├── healthcheck.py   # adaptateur PostgreSQL de la sonde conteneur
 │   │   └── signals.py       # arrêt coopératif SIGINT/SIGTERM
+│   ├── title_generation/
+│   │   ├── contracts.py     # protocole de génération de titre
+│   │   └── default.py       # titre configuré déterministe
 │   ├── transcription/       # client HTTP, polling et contrats
 │   └── worker/
 │       ├── audio.py         # inspection du stockage canonique
@@ -413,7 +418,8 @@ Chaque repository ne manipule qu'un modèle et ne fait jamais de `commit`.
 `AutomationJobLifecycleService` possède les transactions courtes et coordonne
 les écritures du job, de son événement et de sa rétention. `AutomationWorker`
 ne définit que l'ordre du pipeline ; l'inspection audio, les classifications
-Transcribe AI/GLPI et les transitions observables sont testables séparément.
+des providers de transcription, de GLPI et les transitions observables sont
+testables séparément.
 
 ## Configuration
 
@@ -445,6 +451,9 @@ Principaux réglages optionnels :
 
 | Variable | Défaut | Rôle |
 | --- | ---: | --- |
+| `APP_ENVIRONMENT` | `development` | Environnement `development`, `staging` ou `production`. |
+| `APP_RELEASE` | `development` | Branche `main` en staging ou tag stable `vX.Y.Z` en production. |
+| `APP_COMMIT_SHA` | `unknown` | SHA Git complet obligatoire hors développement local. |
 | `AUDIO_ROOT` | `/data/audios` | Racine du stockage canonique. |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Timeout de connexion PostgreSQL. |
 | `WORKER_LOG_LEVEL` | `INFO` | Niveau des logs applicatifs ; `DEBUG` ajoute des diagnostics GLPI réseau/TLS expurgés. |
@@ -482,22 +491,26 @@ complète, ni transcription. Revenir à `INFO` après l'investigation.
 La base doit être migrée et la racine audio doit exister avant le démarrage :
 
 ```bash
-uv run glpi-ticketing-worker
+uv run --package glpi-ticketing-worker-automation \
+  glpi-ticketing-worker
 ```
 
 La forme module est équivalente :
 
 ```bash
-uv run python -m glpi_ticketing_worker_automation
+uv run --package glpi-ticketing-worker-automation \
+  python -m glpi_ticketing_worker_automation
 ```
 
 Le [Dockerfile du worker](../../infra/docker/apps/worker-automation/Dockerfile)
 installe cette application sans dépendances de développement et l'exécute en
 non-root. Le volume partagé `/data/audios` est monté en lecture seule : le
 worker inspecte et transmet les octets, mais ne peut ni les modifier ni les
-supprimer. Le [déploiement Dokploy](../../README.md#déploiement-dokploy)
-centralise sa configuration et monte le bundle de confiance interne en lecture
-seule sans désactiver la vérification TLS.
+supprimer. Les procédures de
+[staging](../../docs/procedures/staging.md) et de
+[production](../../docs/procedures/production.md) décrivent sa configuration
+Dokploy et le montage en lecture seule du bundle de confiance interne, sans
+désactiver la vérification TLS.
 
 Suite unitaire du workspace :
 

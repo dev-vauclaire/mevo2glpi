@@ -6,36 +6,24 @@ crée les tickets, expose leur progression et conserve les fichiers jusqu'à la
 fermeture du ticket ou leur échéance absolue.
 
 La branche stable est `main`. Les releases courantes utilisent des tags
-immuables `vX.Y.Z` ; la baseline de cette documentation est `v0.4.0`. Les tags
-`poc-*` et `mvp-*` sont uniquement des archives historiques.
+immuables `vX.Y.Z`. Les tags `poc-*` et `mvp-*` sont uniquement des archives
+historiques.
 
 ## Sommaire
 
-- [GLPI Ticketing Automation](#glpi-ticketing-automation)
-  - [Sommaire](#sommaire)
-  - [Fonctionnalités principales](#fonctionnalités-principales)
-  - [Architecture](#architecture)
-    - [Compose applicatif](#compose-applicatif)
-      - [Worker retention](#worker-retention)
-      - [Worker automation](#worker-automation)
-      - [Worker publisher](#worker-publisher)
-      - [Migration Alembic one-shot](#migration-alembic-one-shot)
-      - [Web et dashboard](#web-et-dashboard)
-      - [PostgreSQL](#postgresql)
-      - [Volume audio](#volume-audio)
-    - [Providers et services externes](#providers-et-services-externes)
-      - [Provider de transcription](#provider-de-transcription)
-      - [Exchange Online](#exchange-online)
-      - [GLPI](#glpi)
-  - [Procédures par environnement](#procédures-par-environnement)
-  - [Architecture du dépôt](#architecture-du-dépôt)
-    - [Workspace uv](#workspace-uv)
-    - [Répertoires structurants](#répertoires-structurants)
-  - [Convention des tags](#convention-des-tags)
-  - [Feuille de route](#feuille-de-route)
-    - [Évolutions prioritaires](#évolutions-prioritaires)
-    - [Sécurité de l'interface web](#sécurité-de-linterface-web)
-    - [Génération assistée du ticket par LLM](#génération-assistée-du-ticket-par-llm)
+- [Fonctionnalités principales](#fonctionnalités-principales)
+- [Architecture](#architecture)
+  - [Compose applicatif](#compose-applicatif)
+  - [Providers et services externes](#providers-et-services-externes)
+- [Procédures par environnement](#procédures-par-environnement)
+- [Architecture du dépôt](#architecture-du-dépôt)
+  - [Workspace uv](#workspace-uv)
+  - [Répertoires structurants](#répertoires-structurants)
+- [Convention des tags](#convention-des-tags)
+- [Feuille de route](#feuille-de-route)
+  - [Évolutions prioritaires](#évolutions-prioritaires)
+  - [Sécurité de l'interface web](#sécurité-de-linterface-web)
+  - [Génération assistée du ticket par LLM](#génération-assistée-du-ticket-par-llm)
 
 ## Fonctionnalités principales
 
@@ -172,12 +160,16 @@ Les déploiements en staging et en production s'effectuent avec **Dokploy**.
 - [production](docs/procedures/production.md) ;
 - [mise à jour](docs/procedures/mise-a-jour.md).
 
+Les références transversales décrivent la
+[CI/CD](docs/reference/ci-cd.md) et la
+[stratégie de tests](docs/reference/tests.md).
+
 ## Architecture du dépôt
 
 ### Workspace uv
 
 La racine est un workspace uv non publiable. `uv.lock` est l'unique verrou de
-dépendances pour ses onze membres. Le tableau ci-dessous reprend uniquement les
+dépendances pour ses douze membres. Le tableau ci-dessous reprend uniquement les
 chemins déclarés dans `[tool.uv.workspace].members` du fichier
 [`pyproject.toml`](pyproject.toml).
 
@@ -193,6 +185,7 @@ chemins déclarés dans `[tool.uv.workspace].members` du fichier
 | `packages/database` | Modèles, repositories et verrous PostgreSQL | [README](packages/database/README.md) |
 | `packages/glpi-client` | Client et contrats GLPI V2.3.0 | [README](packages/glpi-client/README.md) |
 | `providers/simulators/microsoft-graph-simulator` | Simulateur Graph de staging | [README](providers/simulators/microsoft-graph-simulator/README.md) |
+| `providers/simulators/openai-transcription-simulator` | Simulateur synchrone OpenAI-compatible | [README](providers/simulators/openai-transcription-simulator/README.md) |
 | `providers/simulators/transcribe-ai-simulator` | Simulateur Transcribe AI | [README](providers/simulators/transcribe-ai-simulator/README.md) |
 
 Les applications n'importent pas les modules internes d'une autre application.
@@ -204,9 +197,9 @@ Le code partagé appartient aux packages.
 | --- | --- |
 | `apps/` | Contient les six applications exécutables du projet. Leurs tests unitaires et d'intégration propres restent au plus près du code concerné. |
 | `packages/` | Contient les trois bibliothèques partagées par les applications : utilitaires communs, persistance PostgreSQL et client GLPI. |
-| `providers/` | Contient les simulateurs Microsoft Graph et Transcribe AI réservés au staging et aux tests, ainsi que leurs tests de déploiement. Les deux simulateurs sont également membres du workspace uv. |
+| `providers/` | Contient les simulateurs Microsoft Graph, Transcribe AI et OpenAI-compatible réservés au développement, au staging et aux tests. |
 | `infra/` | Regroupe les images, les fichiers Compose et les exemples de configuration nécessaires aux différents environnements. |
-| `docs/` | Contient les procédures d'exploitation, la documentation CI/CD, la recette et les feuilles de route. |
+| `docs/` | Contient les procédures d'exploitation, les références techniques et les conceptions futures validées. |
 | `tests/` | Contient les tests transversaux de déploiement, d'intégration et de bout en bout, ainsi que leur support partagé. |
 | `.github/` | Définit les workflows d'intégration continue et le modèle de Pull Request. |
 
@@ -214,12 +207,11 @@ Le dossier `infra/docker/` est organisé par périmètre de déploiement :
 
 - `apps/` construit et orchestre les applications pour le staging et la
   production ;
-- `simulators/` construit et orchestre les providers simulés utilisés en
+- `development/` orchestre PostgreSQL et les services de test locaux ;
+- `providers/` regroupe les images des services de test et leur orchestration
   staging ;
 - `transcription/` déploie indépendamment le service local de transcription
-  CPU ;
-- `docker-compose.local.yaml` fournit l'orchestration destinée au développement
-  local.
+  CPU.
 
 ## Convention des tags
 
@@ -251,7 +243,7 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
   immuable du message Exchange afin de renforcer l'idempotence et les reprises
   après rollback.
 - [ ] Mettre en œuvre la
-  [rétention de l'historique PostgreSQL](docs/roadmap/database-retention.md)
+  [rétention de l'historique PostgreSQL](docs/conception/retention-postgresql.md)
   selon la politique validée.
 - [ ] Étendre l'ingestion Exchange aux formats MP3 et M4A après validation de
   leur structure et de leur compatibilité avec le service de transcription.

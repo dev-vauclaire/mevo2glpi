@@ -31,16 +31,46 @@ function assert_test_only_name(string $value, string $environmentName): void
     }
 }
 
+/**
+ * Validate one configured OAuth identifier without exposing its value.
+ */
+function assert_test_oauth_identifier(string $value): void
+{
+    if (
+        strlen($value) < 16
+        || strlen($value) > 128
+        || preg_match('/^[A-Za-z0-9._-]+$/', $value) !== 1
+    ) {
+        throw new RuntimeException('GLPI_TEST_CLIENT_ID has an invalid format');
+    }
+}
+
+/**
+ * Keep synthetic secrets usable without accepting accidental empty values.
+ */
+function assert_test_oauth_secret(string $value): void
+{
+    if (strlen($value) < 32 || strlen($value) > 256) {
+        throw new RuntimeException(
+            'GLPI_TEST_CLIENT_SECRET must contain between 32 and 256 characters'
+        );
+    }
+}
+
 $stage = 'read_environment';
 
 try {
     $username = required_test_environment('GLPI_TEST_USERNAME');
     $password = required_test_environment('GLPI_TEST_PASSWORD');
     $clientName = required_test_environment('GLPI_TEST_OAUTH_CLIENT_NAME');
+    $clientIdentifier = required_test_environment('GLPI_TEST_CLIENT_ID');
+    $clientSecret = required_test_environment('GLPI_TEST_CLIENT_SECRET');
     $timezone = required_test_environment('GLPI_TEST_TIMEZONE');
 
     assert_test_only_name($username, 'GLPI_TEST_USERNAME');
     assert_test_only_name($clientName, 'GLPI_TEST_OAUTH_CLIENT_NAME');
+    assert_test_oauth_identifier($clientIdentifier);
+    assert_test_oauth_secret($clientSecret);
     if ($timezone !== 'Europe/Paris') {
         throw new RuntimeException('GLPI_TEST_TIMEZONE must be Europe/Paris');
     }
@@ -124,6 +154,7 @@ try {
 
     $stage = 'ensure_oauth_client';
     $oauthClient = new OAuthClient();
+    $oauthClientWasCreated = false;
     if (!$oauthClient->getFromDBByCrit(['name' => $clientName])) {
         $oauthClientId = $oauthClient->add([
             'name' => $clientName,
@@ -140,25 +171,62 @@ try {
         if (!$oauthClient->getFromDB((int) $oauthClientId)) {
             throw new RuntimeException('The new GLPI OAuth test client could not be loaded');
         }
+        $oauthClientWasCreated = true;
     }
 
-    $grants = $oauthClient->fields['grants'] ?? [];
-    $scopes = $oauthClient->fields['scopes'] ?? [];
+    $storedClientSecret = (new GLPIKey())->decrypt(
+        (string) ($oauthClient->fields['secret'] ?? '')
+    );
+    if (
+        !$oauthClientWasCreated
+        && (
+            (string) ($oauthClient->fields['identifier'] ?? '') !== $clientIdentifier
+            || !is_string($storedClientSecret)
+            || !hash_equals($storedClientSecret, $clientSecret)
+        )
+    ) {
+        throw new RuntimeException(
+            'The existing GLPI OAuth test credentials differ from the configured contract'
+        );
+    }
+
+    $clientNeedsUpdate = $oauthClientWasCreated || (
+        (int) ($oauthClient->fields['is_active'] ?? 0) !== 1
+        || (int) ($oauthClient->fields['is_confidential'] ?? 0) !== 1
+        || ($oauthClient->fields['grants'] ?? []) !== ['password']
+        || ($oauthClient->fields['scopes'] ?? []) !== ['api']
+    );
+    if ($clientNeedsUpdate) {
+        $clientUpdate = [
+            'id' => (int) $oauthClient->getID(),
+            'is_active' => 1,
+            'is_confidential' => 1,
+            'grants' => ['password'],
+            'scopes' => ['api'],
+        ];
+        if ($oauthClientWasCreated) {
+            $clientUpdate['identifier'] = $clientIdentifier;
+            $clientUpdate['secret'] = $clientSecret;
+        }
+        $updated = $oauthClient->update($clientUpdate);
+        if (!$updated || !$oauthClient->getFromDB((int) $oauthClient->getID())) {
+            throw new RuntimeException('The GLPI OAuth test client could not be reconciled');
+        }
+    }
+
+    $storedClientSecret = (new GLPIKey())->decrypt(
+        (string) ($oauthClient->fields['secret'] ?? '')
+    );
     if (
         (int) ($oauthClient->fields['is_active'] ?? 0) !== 1
         || (int) ($oauthClient->fields['is_confidential'] ?? 0) !== 1
-        || $grants !== ['password']
-        || $scopes !== ['api']
+        || ($oauthClient->fields['grants'] ?? []) !== ['password']
+        || ($oauthClient->fields['scopes'] ?? []) !== ['api']
+        || (string) ($oauthClient->fields['identifier'] ?? '') !== $clientIdentifier
+        || !is_string($storedClientSecret)
+        || !hash_equals($storedClientSecret, $clientSecret)
     ) {
-        throw new RuntimeException('The existing GLPI OAuth test client has an invalid contract');
-    }
-
-    $clientIdentifier = (string) ($oauthClient->fields['identifier'] ?? '');
-    $clientSecret = (new GLPIKey())->decrypt(
-        (string) ($oauthClient->fields['secret'] ?? '')
-    );
-    if ($clientIdentifier === '' || !is_string($clientSecret) || $clientSecret === '') {
-        throw new RuntimeException('The GLPI OAuth test credentials are unavailable');
+        throw new RuntimeException('The GLPI OAuth test client is not usable');
     }
 
     $stage = 'write_result';

@@ -22,7 +22,7 @@ services:
   glpi:
     image: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}-glpi-test:11.0.7
     build:
-      context: image
+      context: ../../../../../infra/docker/providers/glpi-test
       dockerfile: Dockerfile
     depends_on:
       db:
@@ -38,6 +38,8 @@ services:
       GLPI_TEST_USERNAME: ${GLPI_TEST_USERNAME:?GLPI_TEST_USERNAME is required}
       GLPI_TEST_PASSWORD: ${GLPI_TEST_PASSWORD:?GLPI_TEST_PASSWORD is required}
       GLPI_TEST_OAUTH_CLIENT_NAME: ${GLPI_TEST_OAUTH_CLIENT_NAME:?GLPI_TEST_OAUTH_CLIENT_NAME is required}
+      GLPI_TEST_CLIENT_ID: ${GLPI_TEST_CLIENT_ID:?GLPI_TEST_CLIENT_ID is required}
+      GLPI_TEST_CLIENT_SECRET: ${GLPI_TEST_CLIENT_SECRET:?GLPI_TEST_CLIENT_SECRET is required}
       GLPI_TEST_REQUEST_SOURCE_NAME: ${GLPI_TEST_REQUEST_SOURCE_NAME:?GLPI_TEST_REQUEST_SOURCE_NAME is required}
       GLPI_TEST_TIMEZONE: ${GLPI_TEST_TIMEZONE:?GLPI_TEST_TIMEZONE is required}
     ports:

@@ -21,8 +21,8 @@ par modèle, et les verrous advisory protègent l'unicité des workers persistan
   ne peut produire aucun job ;
 - ajouter séparément des événements append-only et des politiques de
   rétention dans la transaction appartenant à l'application ;
-- persister l'identifiant Transcribe AI dès la soumission et l'identifiant
-  GLPI avant la finalisation ;
+- persister l'identifiant distant du provider legacy dès la soumission et
+  l'identifiant GLPI avant la finalisation ;
 - exposer le heartbeat expurgé des workers singleton ;
 - exposer des agrégats bornés de lecture pour l'observabilité, sans persister
   d'alerte ;
@@ -296,12 +296,16 @@ with session_factory.begin() as session:
         status=snapshot.status,
         stage=snapshot.stage,
         event_type=JobEventType.JOB_CREATED,
-        actor=JobEventActor.WEB,
+        actor=JobEventActor.WORKER_PUBLISHER,
     )
 ```
 
-Aucune transaction ne doit rester ouverte pendant un appel GLPI, Transcribe AI
-ou une attente de polling.
+Aucune responsabilité inter-modèles n'est cachée dans un repository : dans le
+flux réel, le publisher orchestre explicitement la création du job, de son
+événement et du lien d'ingestion dans cette même transaction.
+
+Aucune transaction ne doit rester ouverte pendant un appel GLPI, un appel au
+provider de transcription ou une attente de polling.
 
 ## Configuration
 

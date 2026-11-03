@@ -6,7 +6,7 @@ use Glpi\Application\ResourcesChecker;
 use Glpi\Kernel\Kernel;
 
 /**
- * Restrict this test-only bootstrap to the expected disposable request source.
+ * Restrict this development/test bootstrap to the expected request source.
  */
 function required_request_source_name(): string
 {

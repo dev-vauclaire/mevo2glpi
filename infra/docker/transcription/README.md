@@ -1,9 +1,10 @@
 # API de transcription CPU
 
 Cette stack déploie l'API OpenAI-compatible du projet avec Parakeet Ultra Q8
-et `transcribe.cpp`. Elle reste indépendante des applications et des
-simulateurs pendant la qualification staging. Après validation, elle pourra
-être intégrée aux services applicatifs communs.
+et `transcribe.cpp`. Depuis `v0.4.0`, elle reste volontairement indépendante
+du Compose applicatif et des simulateurs dans tous les environnements. Cette
+séparation permet de qualifier, dimensionner, redémarrer ou remplacer le
+provider CPU sans redéployer les autres services.
 
 Le service est accessible uniquement par `worker-automation` sur un réseau
 Docker privé partagé. Aucun port n'est publié vers l'hôte et le service n'est
@@ -22,25 +23,25 @@ testé en reconstruisant l'image avec une URL immuable et son SHA-256. Une URL
 de modèle arbitraire n'est jamais acceptée au démarrage et
 `TRANSCRIPTION_MODEL_PATH` ne déclenche aucun téléchargement.
 
-## Déploiement staging
+## Contrat de la stack
 
-Créer une fois le réseau privé :
+Le point d'entrée est `docker-compose.transcription.yml` et son modèle de
+configuration est `transcription.env.example`.
 
-```bash
-sudo docker network create --driver bridge --internal gta-staging-transcription-network
-```
+La stack exige :
 
-Créer un projet Docker Compose Dokploy utilisant :
+- un réseau externe privé nommé par `TRANSCRIPTION_NETWORK_NAME` ;
+- une `TRANSCRIPTION_API_KEY` partagée uniquement avec le worker
+  d'automatisation du même environnement ;
+- une release et un SHA Git complet injectés au build ;
+- une URL immuable et un SHA-256 lorsque le modèle par défaut est remplacé ;
+- des limites CPU, mémoire, taille et durée adaptées à l'environnement.
 
-```text
-./infra/docker/transcription/docker-compose.transcription.yml
-```
-
-Copier les variables de `transcription.env.example`, remplacer
-`APP_COMMIT_SHA` et `TRANSCRIPTION_API_KEY`, puis déployer cette stack avant
-les applications staging. La même clé doit être configurée dans le projet
-applicatif staging. `APP_RELEASE` et `APP_COMMIT_SHA` identifient exactement le
-code ayant construit l'image.
+Le service rejoint ce réseau avec `TRANSCRIPTION_NETWORK_ALIAS`, expose
+uniquement le port conteneur `5092` et ne rejoint jamais Traefik. Le projet
+applicatif sélectionne `TRANSCRIPTION_PROVIDER=openai_compatible` et utilise
+une URL de base terminée par `/v1`. Aucun basculement automatique avec
+`legacy_polling` n'est réalisé.
 
 Watch path recommandé :
 
@@ -51,39 +52,25 @@ pyproject.toml
 uv.lock
 ```
 
-## Vérifications
+## Healthcheck
 
-Le service `transcription-api` doit devenir `healthy`. Depuis le terminal du
-conteneur `worker-automation`, vérifier sa sonde sans afficher de clé ni de
-transcription :
+Le service doit devenir `healthy`. Sa readiness interne est exposée sur
+`GET /health/ready`. Depuis un conteneur autorisé du même réseau, elle peut être
+interrogée sans afficher de clé ni de transcription :
 
 ```bash
 python -c 'import httpx; print(httpx.get("http://gta-staging-transcription:5092/health/ready", timeout=5).json())'
 ```
 
-Le résultat attendu indique que le modèle est prêt. Une recette avec des
-audios synthétiques puis des enregistrements fictifs représentatifs reste
-obligatoire pour valider la détection du français, la qualité et les limites
-CPU/mémoire.
+Le résultat attendu indique que le modèle est prêt. Les erreurs de décodage
+sont terminales pour la tentative de transcription et ne doivent jamais
+provoquer une boucle infinie. Les erreurs HTTP temporaires restent soumises à
+la politique bornée de retry du worker.
 
-Le simulateur Microsoft Graph fournit notamment ces scénarios sans donnée
-sensible :
+## Critères de validation d'une release
 
-```bash
-glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
-glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
-glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav-alaw
-glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav-mulaw
-```
-
-Les erreurs de décodage sont terminales pour la tentative de transcription et
-ne doivent jamais provoquer une boucle infinie. Les erreurs HTTP temporaires
-restent soumises à la politique bornée de retry du worker.
-
-## Critères de promotion
-
-La production ne doit pas utiliser cette stack avant validation des points
-suivants :
+Une nouvelle version du moteur, du modèle ou de l'image ne doit pas être promue
+avant validation des points suivants :
 
 - français correctement détecté sur les messages courts ou bruités ;
 - aucune perte de parole sur les messages de plus de 30 secondes présentant
@@ -94,12 +81,8 @@ suivants :
 Le contrôle des variations de volume couvre notamment le
 [problème long-form connu de transcribe.cpp 0.4.1](https://github.com/handy-computer/transcribe.cpp/issues/235).
 
-Pour une future stack de production, utiliser au minimum des noms distincts :
-
-```text
-COMPOSE_PROJECT_NAME=gta-prod-transcription
-TRANSCRIPTION_NETWORK_NAME=gta-prod-transcription-network
-TRANSCRIPTION_NETWORK_ALIAS=gta-prod-transcription
-```
-
-La clé de staging ne doit jamais être réutilisée en production.
+L'ordre de déploiement, les valeurs propres à chaque environnement et la
+recette audio sont décrits dans les procédures de
+[staging](../../../docs/procedures/staging.md) et de
+[production](../../../docs/procedures/production.md). Les réseaux, clés et
+noms de projet doivent être distincts entre ces environnements.

@@ -2,9 +2,13 @@
 
 ## Objectif et périmètre
 
-Cette procédure prépare le workspace Python, une base PostgreSQL de
-développement, un volume audio local ainsi que les simulateurs externes
-Microsoft Graph, GLPI et le service de transcription.
+Cette procédure lance les applications Python depuis le workspace uv et leurs
+dépendances locales dans Docker : PostgreSQL 18, GLPI 11.0.7, Microsoft Graph,
+Transcribe AI et une API de transcription OpenAI-compatible.
+
+Tous les comptes, messages et contenus utilisés localement doivent être
+fictifs. Aucun secret, certificat interne, audio réel ou donnée sensible ne doit
+être copié dans cet environnement.
 
 ## Prérequis
 
@@ -26,76 +30,128 @@ cp .env.example .env
 mkdir -p infra/docker/runtime/audios
 ```
 
-Renseigner au minimum :
+Le fichier `.env.example` est prérempli avec des identifiants exclusivement
+synthétiques et des URLs loopback. Le fichier `.env` reste local et ne doit
+jamais être commité.
 
-- `DATABASE_URL`, déjà préremplie pour le PostgreSQL de développement ;
-- `AUDIO_ROOT=./infra/docker/runtime/audios` ;
-- les variables du ou des composants réellement exécutés.
-
-Le fichier [.env.example](../../.env.example) décrit le contrat complet. Les
-README des applications détaillent leurs variables propres.
-
-## Préparer PostgreSQL
-
-Depuis la racine du dépôt, démarrer le PostgreSQL 18 de développement et
-attendre son healthcheck :
+## Démarrer PostgreSQL
 
 ```bash
 docker compose --file infra/docker/development/docker-compose.postgres.yml up --detach --wait
 ```
 
-Le service écoute uniquement sur `127.0.0.1:5432`. Sa connexion correspond à
-la valeur `DATABASE_URL` du fichier `.env.example` :
+PostgreSQL écoute uniquement sur `127.0.0.1:5432`. Si ce port est déjà utilisé,
+adapter ensemble `GTA_DEV_POSTGRES_PORT` dans l'environnement de la commande et
+le port de `DATABASE_URL` dans `.env`.
 
-```text
-postgresql+psycopg://gta_dev:gta_dev_only@127.0.0.1:5432/glpi_ticketing_dev
-```
+PostgreSQL 18 monte son volume sur `/var/lib/postgresql`. Le volume nommé
+`gta-development-postgres18-data` ne doit pas être remplacé par un ancien volume
+PostgreSQL 16 ou 17 sans migration explicite.
 
-Si le port `5432` est déjà utilisé, choisir un autre port et adapter
-`DATABASE_URL` dans `.env` :
-
-```bash
-GTA_DEV_POSTGRES_PORT=55432 docker compose --file infra/docker/development/docker-compose.postgres.yml up --detach --wait
-```
-
-Exécuter ensuite l'application de migration one-shot :
+Exécuter ensuite la migration one-shot :
 
 ```bash
-uv run glpi-ticketing-database-migrations
+uv run --package glpi-ticketing-database-migrations glpi-ticketing-database-migrations
 ```
 
-La commande doit terminer avec le code `0`. Ne lancer les applications qu'après
-ce succès. Les tests marqués `database` créent leur propre PostgreSQL jetable et
-n'utilisent pas cette base locale.
+La commande doit terminer avec le code `0` avant le lancement des applications.
 
-Commandes d'exploitation non destructives :
+## Démarrer les services externes de test
+
+Construire puis attendre les quatre services HTTP. MySQL est démarré
+automatiquement comme dépendance privée de GLPI :
 
 ```bash
-docker compose --file infra/docker/development/docker-compose.postgres.yml ps
-docker compose --file infra/docker/development/docker-compose.postgres.yml stop
-docker compose --file infra/docker/development/docker-compose.postgres.yml start
-docker compose --file infra/docker/development/docker-compose.postgres.yml down
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml up --detach --build --wait microsoft-graph-simulator transcribe-ai-simulator openai-transcription-simulator glpi-test
 ```
 
-`down` supprime le conteneur et le réseau du projet, mais conserve le volume
-nommé `gta-development-postgres18-data`. Ne pas utiliser `down -v`, qui
-supprimerait les données locales.
+Initialiser ensuite l'API V2, le client OAuth Password et la source GLPI
+`MEVO`. Le bootstrap est idempotent :
 
-PostgreSQL 18 stocke ses données dans une arborescence différente des versions
-16 et 17. Le Compose monte donc le volume sur `/var/lib/postgresql`. Un ancien
-volume PostgreSQL 16 ne doit pas être réutilisé directement : conserver ce
-volume séparément et effectuer une migration explicite si ses données doivent
-être reprises.
+```bash
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml run --rm glpi-bootstrap
+```
+
+Les services sont accessibles uniquement depuis la machine locale :
+
+| Service | URL locale | Usage |
+| --- | --- | --- |
+| Microsoft Graph simulé | `http://127.0.0.1:18080` | boîte Exchange synthétique |
+| Transcribe AI simulé | `http://127.0.0.1:18081` | contrat historique avec polling |
+| Transcription OpenAI simulée | `http://127.0.0.1:18082/v1` | contrat synchrone sans modèle |
+| GLPI 11.0.7 | `http://127.0.0.1:18083` | API et interface de test |
+
+MySQL GLPI n'est jamais publié sur l'hôte. Les quatre ports HTTP peuvent être
+modifiés avec les variables `GTA_DEV_*_PORT` documentées dans `.env.example` ;
+les URLs applicatives de `.env` doivent alors être adaptées.
+
+Vérifier les services :
+
+```bash
+curl --fail http://127.0.0.1:18080/health
+curl --fail http://127.0.0.1:18081/health
+curl --fail http://127.0.0.1:18082/health
+curl --fail http://127.0.0.1:18083/api.php/v2.3.0/doc.json
+```
+
+Récupérer l'identifiant local de la source `MEVO` :
+
+```bash
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml exec -T glpi-test php /opt/glpi-test/bootstrap_request_source.php
+```
+
+Reporter la valeur JSON `id` dans `GLPI_TICKET_REQUEST_SOURCE_ID` du fichier
+`.env` avant de lancer le worker d'automatisation.
+
+Injecter un message audio synthétique dans la boîte Graph :
+
+```bash
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml exec microsoft-graph-simulator glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
+```
+
+La liste des scénarios est disponible avec :
+
+```bash
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml exec microsoft-graph-simulator glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
+```
+
+## Choisir le provider de transcription
+
+Les deux simulateurs peuvent rester démarrés, mais le worker n'en utilise qu'un
+à la fois.
+
+Le contrat OpenAI-compatible synchrone est sélectionné par défaut :
+
+```dotenv
+TRANSCRIPTION_PROVIDER=openai_compatible
+OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL=http://127.0.0.1:18082/v1
+```
+
+Pour tester l'ancien contrat avec polling :
+
+```dotenv
+TRANSCRIPTION_PROVIDER=legacy_polling
+LEGACY_TRANSCRIPTION_BASE_URL=http://127.0.0.1:18081
+```
+
+Le simulateur OpenAI-compatible retourne un texte fixe et ne mesure pas la
+qualité d'une transcription. Pour utiliser le véritable moteur Parakeet, suivre
+la documentation de [`infra/docker/transcription`](../../infra/docker/transcription/README.md)
+et adapter l'URL ainsi que la clé dans `.env`.
 
 ## Lancer les applications
 
-Lancer uniquement les processus dont les dépendances locales sont configurées,
-chacun dans un terminal séparé :
+Lancer chaque processus dans un terminal séparé :
+
+Dans ce workspace, `--package` sélectionne explicitement le membre uv dont les
+dépendances et le script doivent être utilisés. Le dernier argument est le
+script console déclaré par ce membre ; son nom peut donc différer de celui du
+package.
 
 ```bash
-uv run glpi-ticketing-web
+uv run --package glpi-ticketing-web glpi-ticketing-web
 uv run --package glpi-ticketing-worker-publisher glpi-ticketing-publisher
-uv run glpi-ticketing-worker
+uv run --package glpi-ticketing-worker-automation glpi-ticketing-worker
 uv run --package glpi-ticketing-worker-retention glpi-ticketing-worker-retention
 ```
 
@@ -105,32 +161,36 @@ Vérifier le web :
 curl --fail http://127.0.0.1:8000/health
 ```
 
-Une seconde instance d'un même worker est refusée par son verrou advisory et
+Une seconde instance d'un même worker est refusée par son verrou PostgreSQL et
 se termine avec le code `3`.
 
-Pour exercer le flux complet sans service métier réel :
+## Arrêter ou réinitialiser l'environnement
 
-- utiliser les simulateurs décrits dans
-  [`infra/docker/simulators`](../../infra/docker/simulators/README.md) ;
-- utiliser la stack CPU décrite dans
-  [`infra/docker/transcription`](../../infra/docker/transcription/README.md) ;
-- conserver des réseaux, volumes et données distincts des environnements
-  staging et production.
+Arrêt non destructif :
 
-## Reproduire la CI
+```bash
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml down
+docker compose --file infra/docker/development/docker-compose.postgres.yml down
+```
 
-Qualité et suites locales :
+Ces commandes conservent les volumes nommés. Pour repartir d'un GLPI et d'un
+MySQL neufs, la commande suivante supprime uniquement les volumes du projet
+local des services de test :
+
+```bash
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml down --volumes
+```
+
+Cette suppression est irréversible. Ne jamais réutiliser cette commande contre
+un projet staging ou production.
+
+## Reproduire les validations
 
 ```bash
 uv run ruff format --check .
 uv run ruff check .
 uv run --all-packages pytest apps packages tests -m "not database and not deployment and not glpi and not transcription_model and not transcribe_ai and not e2e" --maxfail=1
 uv run pytest providers --maxfail=1
-```
-
-Intégrations PostgreSQL jetables :
-
-```bash
 uv run --all-packages pytest -m database -vv --maxfail=1
 ```
 
@@ -138,34 +198,23 @@ Valider les manifestes sans démarrer les services :
 
 ```bash
 docker compose --file infra/docker/development/docker-compose.postgres.yml config --quiet
+docker compose --env-file .env.example --file infra/docker/development/docker-compose.test-services.yml config --quiet
 docker compose --env-file ./infra/docker/apps/.env.example --file infra/docker/apps/docker-compose.prod.yml config --quiet
 docker compose --env-file ./infra/docker/apps/staging.env.example --file infra/docker/apps/docker-compose.staging.yml config --quiet
-docker compose --env-file ./infra/docker/simulators/simulators.env.example --file infra/docker/simulators/docker-compose.simulators.yml config --quiet
+docker compose --env-file ./infra/docker/providers/staging.env.example --file infra/docker/providers/docker-compose.staging.yml config --quiet
 docker compose --env-file ./infra/docker/transcription/transcription.env.example --file infra/docker/transcription/docker-compose.transcription.yml config --quiet
 ```
 
-Les fichiers d'exemple contiennent exclusivement des valeurs fictives. Ne pas
-remplacer ces commandes par un fichier d'environnement réel dans les logs ou
-dans une CI.
+Les tests marqués `database` et `glpi` utilisent leurs propres environnements
+jetables et ne manipulent pas les volumes locaux décrits ici.
 
-## Validation attendue
+## Diagnostic
 
-- `uv sync --locked` ne modifie pas `uv.lock` ;
-- la migration atteint la révision Alembic courante ;
-- le web répond sur `/health` lorsqu'il est lancé ;
-- Ruff et les suites pertinentes terminent sans erreur ;
-- `git status --short` ne montre aucun secret ni artefact local à versionner.
-
-## Diagnostic et nettoyage
-
-- une erreur de connexion PostgreSQL impose de vérifier l'hôte, le port et le
-  certificat configurés dans `DATABASE_URL` ;
-- un conflit singleton signifie qu'une autre instance du worker détient déjà
-  son verrou ;
-- une erreur TLS doit être corrigée en fournissant la CA attendue, jamais en
-  désactivant la vérification ;
+- vérifier les conteneurs avec `docker compose ... ps` avant de lire les logs ;
+- une erreur de connexion PostgreSQL impose de vérifier ensemble le port publié
+  et `DATABASE_URL` ;
+- une erreur GLPI après modification des identifiants locaux nécessite un
+  nouveau volume ou une rotation explicite, jamais une réconciliation forcée ;
+- une erreur TLS doit être corrigée avec la CA attendue, jamais en désactivant
+  la vérification ;
 - les fichiers `.env`, certificats, clés et audios locaux restent hors Git.
-
-Avant de supprimer une base, un volume ou un conteneur local, vérifier son nom
-exact. Ne jamais appliquer une commande destructive à un environnement staging
-ou production.

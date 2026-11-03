@@ -1,9 +1,9 @@
 # Package `glpi-ticketing-common`
 
 `glpi-ticketing-common` contient les primitives de stockage audio, de backoff,
-d'attente coopérative et de healthcheck runtime partagées par le web et les
-trois workers. Il ne connaît ni PostgreSQL, ni FastAPI, ni GLPI, ni Transcribe AI
-et ne porte aucune politique métier.
+d'attente coopérative, de healthcheck runtime et d'identité de release
+partagées par les applications. Il ne connaît ni PostgreSQL, ni FastAPI, ni
+GLPI, ni provider de transcription et ne porte aucune politique métier.
 
 ## Stockage canonique unique
 
@@ -49,7 +49,7 @@ Les primitives de stockage courant se trouvent dans
 | `resolve_audio_storage_path()` | Résoudre un chemin exact, confiné à la racine et non symbolique |
 | `publish_audio()` | Publier un flux sans écrasement, avec mémoire bornée et durabilité disque |
 | `delete_audio()` | Supprimer exactement une clé puis synchroniser le répertoire |
-| `parse_audio_filename()` | Valider le nom canonique attendu par l'adaptateur Transcribe AI |
+| `parse_audio_filename()` | Valider un nom audio canonique reçu à la frontière d'un provider |
 
 `glpi_ticketing_common.audio_purge` expose une suppression spécialisée pour le
 worker de rétention. `purge_audio()` valide une clé canonique exacte, publie le
@@ -83,14 +83,22 @@ du heartbeat, codes d'erreur expurgés et vérification du mode d'accès au volu
 audio. Chaque worker fournit son propre adaptateur PostgreSQL et choisit le
 contrat attendu : lecture seule pour l'automatisation, lecture-écriture pour le
 publisher et la rétention. Le seuil `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS`
-vaut `45` secondes
-par défaut et doit rester strictement supérieur à
+vaut `45` secondes par défaut et doit rester strictement supérieur à
 `WORKER_HEARTBEAT_INTERVAL_SECONDS`.
 
+`glpi_ticketing_common.release_identity` expose `DeploymentEnvironment` et
+`ReleaseIdentity`. Cette identité non sensible relie un processus à son
+environnement, sa release et son SHA Git complet. Elle accepte le mode local
+`development/unknown`, impose un SHA complet en staging et exige un tag stable
+`vX.Y.Z` en production. La propriété `short_commit_sha` fournit les douze
+premiers caractères destinés aux interfaces humaines.
+
 Le volume Docker canonique est monté en lecture-écriture par le publisher et le
-worker de rétention, et en lecture seule par le web et le worker d'automatisation. Le
-[déploiement Dokploy](../../README.md#déploiement-dokploy) décrit son
-volume persistant et sa configuration.
+worker de rétention, et en lecture seule par le web et le worker
+d'automatisation. Les procédures de
+[staging](../../docs/procedures/staging.md) et de
+[production](../../docs/procedures/production.md) décrivent son volume
+persistant et sa configuration.
 
 `parse_audio_filename()` accepte une extension en majuscules à la frontière du
 provider et retourne une représentation normalisée. En revanche,
@@ -162,12 +170,14 @@ packages/common/
 │   ├── audio_purge.py
 │   ├── backoff.py
 │   ├── cooperative_wait.py
+│   ├── release_identity.py
 │   └── runtime_healthcheck.py
 └── tests/unit/
     ├── test_audio_storage.py
     ├── test_audio_purge.py
     ├── test_backoff.py
     ├── test_cooperative_wait.py
+    ├── test_release_identity.py
     └── test_runtime_healthcheck.py
 ```
 

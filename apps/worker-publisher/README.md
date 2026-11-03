@@ -13,9 +13,12 @@ les heartbeats, mais ne crée aucun job.
 
 ```mermaid
 flowchart LR
-    P[Worker publisher] -->|client_credentials| E[Entra ID]
+    P[Worker publisher] --> Auth{Mode Graph}
+    Auth -->|entra_certificate| E[Entra ID]
     E -->|jeton applicatif| P
-    P -->|HTTPS Graph v1.0| I[Inbox dédiée]
+    Auth -->|synthetic| S[Jeton fixe du simulateur]
+    S --> P
+    P -->|Graph v1.0| I[Inbox dédiée ou simulateur]
     I --> V{Un WAV ou OGG valide<br/>de 1 à 25 Mio ?}
     V -->|oui| A[Publication audio atomique]
     A --> D[(Job et événements PostgreSQL)]
@@ -81,11 +84,12 @@ Le worker publie un heartbeat PostgreSQL avec son état et, pendant un
 traitement, `current_ingestion_uuid`. Une seconde instance échoue à acquérir le
 verrou advisory et termine avec le code `3`.
 
-## Authentification Entra ID
+## Authentification Graph
 
-L'application utilise OAuth 2.0 `client_credentials` via MSAL et le scope
-`https://graph.microsoft.com/.default`. Deux fichiers PEM distincts sont
-nécessaires :
+Le mode `entra_certificate`, utilisé avec Microsoft Graph, applique OAuth 2.0
+`client_credentials` via MSAL et le scope
+`https://graph.microsoft.com/.default`. Il exige l'URL officielle Graph et
+deux fichiers PEM distincts :
 
 - la clé privée associée à l'application Entra ID ;
 - le certificat public X.509 associé, au format `BEGIN CERTIFICATE`.
@@ -113,6 +117,11 @@ attribuer `Application Mail.ReadWrite`, puis contrôler la portée effective ave
 l'Object ID demandé lors de l'enregistrement est celui de l'**Enterprise
 Application**, pas celui de l'App Registration.
 
+Le mode `synthetic` est réservé au simulateur de staging. Il exige une URL
+Graph v1.0 non Microsoft, n'utilise ni MSAL ni fichiers PEM et refuse toute
+variable d'identification Entra. Il ne doit jamais être dirigé vers
+`graph.microsoft.com`.
+
 ## Configuration
 
 Les variables sont lues depuis l'environnement ou le fichier `.env` de la
@@ -120,13 +129,19 @@ racine lorsqu'une commande est lancée depuis celle-ci.
 
 | Variable | Défaut | Rôle |
 | --- | --- | --- |
-| `PUBLISHER_ENTRA_TENANT_ID` | obligatoire | UUID du tenant Entra ID. |
-| `PUBLISHER_ENTRA_CLIENT_ID` | obligatoire | UUID de l'application Entra ID. |
-| `PUBLISHER_MAILBOX_ID` | obligatoire | Object ID Entra de l'utilisateur boîte dédié, pas son Exchange GUID. |
-| `PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH` | obligatoire | Chemin lisible de la clé privée PEM. |
-| `PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH` | obligatoire | Chemin lisible du certificat public X.509 PEM. |
-| `PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE` | vide | Passphrase facultative de la clé privée. |
+| `APP_ENVIRONMENT` | `development` | Environnement `development`, `staging` ou `production`. |
+| `APP_RELEASE` | `development` | Branche `main` en staging ou tag stable `vX.Y.Z` en production. |
+| `APP_COMMIT_SHA` | `unknown` | SHA Git complet obligatoire hors développement local. |
+| `PUBLISHER_GRAPH_AUTH_MODE` | `entra_certificate` | `entra_certificate` pour Microsoft Graph ou `synthetic` pour le simulateur. |
+| `PUBLISHER_GRAPH_BASE_URL` | `https://graph.microsoft.com/v1.0` | Racine Graph v1.0 officielle ou URL non Microsoft du simulateur. |
+| `PUBLISHER_ENTRA_TENANT_ID` | conditionnel | UUID du tenant, obligatoire uniquement avec `entra_certificate`. |
+| `PUBLISHER_ENTRA_CLIENT_ID` | conditionnel | UUID de l'application, obligatoire uniquement avec `entra_certificate`. |
+| `PUBLISHER_MAILBOX_ID` | obligatoire | UUID de la boîte ; en production, Object ID Entra de l'utilisateur dédié, pas son Exchange GUID. |
+| `PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH` | conditionnel | Chemin lisible de la clé privée PEM pour `entra_certificate`. |
+| `PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH` | conditionnel | Chemin lisible du certificat public X.509 PEM pour `entra_certificate`. |
+| `PUBLISHER_ENTRA_PRIVATE_KEY_PASSPHRASE` | vide | Passphrase facultative de la clé privée en mode Entra. |
 | `DATABASE_URL` | obligatoire | URL SQLAlchemy `postgresql+psycopg`. |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Timeout d'établissement PostgreSQL. |
 | `AUDIO_ROOT` | `/data/audios` | Racine du stockage partagé. |
 | `PUBLISHER_LOG_LEVEL` | `INFO` | Niveau applicatif `INFO` ou `DEBUG`. |
 | `PUBLISHER_GRAPH_PAGE_SIZE` | `50` | Taille des pages Graph, de 1 à 1 000. |
@@ -137,10 +152,12 @@ racine lorsqu'une commande est lancée depuis celle-ci.
 | `PUBLISHER_RETRY_INITIAL_SECONDS` | `5` | Premier délai du backoff. |
 | `PUBLISHER_RETRY_MAX_SECONDS` | `300` | Plafond du backoff. |
 | `PUBLISHER_SYSTEM_PROBE_INTERVAL_SECONDS` | `60` | Cadence des checkpoints d'arrêt pendant un blocage système verrouillé. |
+| `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS` | `45` | Âge maximal du heartbeat accepté par la sonde du conteneur. |
 
 `PUBLISHER_RETRY_INITIAL_SECONDS` ne peut pas dépasser
-`PUBLISHER_RETRY_MAX_SECONDS`. Les chemins de clé privée et de certificat
-doivent viser deux fichiers lisibles et distincts.
+`PUBLISHER_RETRY_MAX_SECONDS`. En mode Entra, les chemins de clé privée et de
+certificat doivent viser deux fichiers lisibles et distincts. En mode
+`synthetic`, ces chemins et les identifiants Entra doivent être absents.
 
 Un blocage système terminal suspend les appels Graph. L'intervalle de probe ne
 relance donc pas automatiquement le service externe : il permet seulement au

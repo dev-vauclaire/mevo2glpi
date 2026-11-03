@@ -1,4 +1,4 @@
-"""Validate the standalone, staging-only simulators Compose contract."""
+"""Validate the standalone, staging-only provider Compose contract."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ import pytest
 pytestmark = pytest.mark.deployment
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-SIMULATORS_DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker" / "simulators"
-SIMULATORS_COMPOSE_FILE = SIMULATORS_DOCKER_ROOT / "docker-compose.simulators.yml"
-SIMULATORS_ENV_FILE = SIMULATORS_DOCKER_ROOT / "simulators.env.example"
+SIMULATORS_DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker" / "providers"
+SIMULATORS_COMPOSE_FILE = SIMULATORS_DOCKER_ROOT / "docker-compose.staging.yml"
+SIMULATORS_ENV_FILE = SIMULATORS_DOCKER_ROOT / "staging.env.example"
 
 SIMULATOR_SERVICES = {
     "microsoft-graph-simulator",
@@ -193,37 +193,6 @@ def test_simulators_manifest_uses_only_the_shared_simulator_network(
     assert simulators_compose_config.get("volumes", {}) == {}
 
 
-def test_optional_glpi_simulation_remains_versioned_but_disabled() -> None:
-    compose_source = SIMULATORS_COMPOSE_FILE.read_text(encoding="utf-8")
-    dockerfile = (SIMULATORS_DOCKER_ROOT / "glpi-staging" / "Dockerfile").read_text(
-        encoding="utf-8"
-    )
-    bootstrap = (
-        SIMULATORS_DOCKER_ROOT / "glpi-staging" / "bootstrap_oauth.php"
-    ).read_text(encoding="utf-8")
-
-    assert (
-        "glpi/glpi:11.0.7@sha256:"
-        "7e100562afe13cce132fe46c0a21ddb94f7ed2c06950da9c4b34ce734a1ad4ac"
-    ) in dockerfile
-    for disabled_resource in (
-        "glpi-db",
-        "glpi-staging",
-        "glpi-bootstrap",
-        "glpi-database",
-        "dokploy-network",
-        "glpi-data",
-        "glpi-database-data",
-    ):
-        assert re.search(
-            rf"(?m)^\s*#\s+{re.escape(disabled_resource)}:", compose_source
-        )
-    assert "INSERT " not in bootstrap
-    assert "UPDATE " not in bootstrap
-    assert "DELETE " not in bootstrap
-    assert "str_contains(strtoupper($value), 'CHANGE_ME')" in bootstrap
-
-
 def test_simulator_build_context_contains_only_required_workspace_sources() -> None:
     dockerignore = (REPOSITORY_ROOT / ".dockerignore").read_text(encoding="utf-8")
     workspace = tomllib.loads(
@@ -236,6 +205,8 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
         "!uv.lock",
         "!providers/simulators/microsoft-graph-simulator/pyproject.toml",
         "!providers/simulators/microsoft-graph-simulator/src/**",
+        "!providers/simulators/openai-transcription-simulator/pyproject.toml",
+        "!providers/simulators/openai-transcription-simulator/src/**",
         "!providers/simulators/transcribe-ai-simulator/pyproject.toml",
         "!providers/simulators/transcribe-ai-simulator/src/**",
     ):
@@ -243,6 +214,7 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
 
     for simulator_name in (
         "microsoft-graph-simulator",
+        "openai-transcription-simulator",
         "transcribe-ai-simulator",
     ):
         dockerfile = (SIMULATORS_DOCKER_ROOT / simulator_name / "Dockerfile").read_text(

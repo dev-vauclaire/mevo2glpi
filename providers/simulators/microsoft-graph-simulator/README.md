@@ -1,7 +1,7 @@
 # Microsoft Graph simulator
 
-Simulateur stateful réservé au staging. Il expose le sous-ensemble Graph utilisé
-par le publisher et une administration locale permettant d'injecter des
+Simulateur stateful réservé au développement, au staging et aux tests. Il expose
+le sous-ensemble Graph utilisé par le publisher et une administration permettant d'injecter des
 scénarios déterministes ou un fichier WAV/OGG choisi par l'opérateur.
 
 Il ne simule pas Microsoft Entra ID. Les fichiers choisis doivent être des
@@ -11,13 +11,14 @@ enregistrements de test fictifs, sans donnée patient ni donnée métier réelle
 MICROSOFT_GRAPH_SIMULATOR_HOST=0.0.0.0
 MICROSOFT_GRAPH_SIMULATOR_PORT=8080
 MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID=<UUID fictif>
-MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN=<secret staging>
+MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN=<clé synthétique>
 MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH=/srv/gta-staging/audio-fixtures
 ```
 
-Le Compose monte le dernier répertoire en lecture seule dans `/fixtures/audio`.
-Il doit exister sur la VM avant le déploiement et rester lisible par l'UID/GID
-`10001` du conteneur.
+Le Compose de staging monte le dernier répertoire en lecture seule dans
+`/fixtures/audio`. Il doit exister sur la VM avant le déploiement et rester
+lisible par l'UID/GID `10001` du conteneur. En développement, utiliser les
+scénarios intégrés décrits dans la procédure locale.
 
 Depuis le conteneur :
 

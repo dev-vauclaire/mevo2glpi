@@ -1,7 +1,7 @@
 [project]
 name = "glpi-ticketing-automation-workspace"
 version = "0.1.0"
-description = "Workspace du POC d'automatisation de tickets GLPI"
+description = "Workspace d'automatisation des messages vocaux en tickets GLPI"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
@@ -21,6 +21,7 @@ members = [
     "packages/database",
     "packages/glpi-client",
     "providers/simulators/microsoft-graph-simulator",
+    "providers/simulators/openai-transcription-simulator",
     "providers/simulators/transcribe-ai-simulator",
 ]
 
@@ -69,6 +70,7 @@ src = [
     "packages/database/src",
     "packages/glpi-client/src",
     "providers/simulators/microsoft-graph-simulator/src",
+    "providers/simulators/openai-transcription-simulator/src",
     "providers/simulators/transcribe-ai-simulator/src",
 ]
 

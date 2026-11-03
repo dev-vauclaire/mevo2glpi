@@ -195,6 +195,9 @@ repository. `application.py` reste une frontière de processus testable.
 
 | Variable | Défaut | Rôle |
 | --- | --- | --- |
+| `APP_ENVIRONMENT` | `development` | Environnement `development`, `staging` ou `production`. |
+| `APP_RELEASE` | `development` | Branche `main` en staging ou tag stable `vX.Y.Z` en production. |
+| `APP_COMMIT_SHA` | `unknown` | SHA Git complet obligatoire hors développement local. |
 | `DATABASE_URL` | obligatoire | URL SQLAlchemy `postgresql+psycopg`, conservée comme secret. |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Timeout d'établissement PostgreSQL. |
 | `AUDIO_ROOT` | `/data/audios` | Répertoire canonique existant et non symbolique. |
@@ -236,9 +239,10 @@ Le [Dockerfile du worker](../../infra/docker/apps/worker-retention/Dockerfile)
 installe l'application sans dépendances de développement et l'exécute en
 non-root. Dans Compose, `/data/audios` est monté en lecture-écriture car ce
 worker est l'unique application chargée de la quarantaine et de la suppression
-des octets après ingestion. Le
-[déploiement Dokploy](../../README.md#déploiement-dokploy) centralise sa
-configuration et monte le bundle de confiance interne en lecture seule.
+des octets après ingestion. Les procédures de
+[staging](../../docs/procedures/staging.md) et de
+[production](../../docs/procedures/production.md) décrivent sa configuration
+Dokploy et le montage en lecture seule du bundle de confiance interne.
 
 ## Tests
 

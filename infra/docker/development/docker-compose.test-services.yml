@@ -1,0 +1,215 @@
+name: gta-development-test-services
+
+x-simulator-runtime: &simulator-runtime
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  microsoft-graph-simulator:
+    <<: *simulator-runtime
+    image: gta-development-microsoft-graph-simulator:0.1.0
+    build:
+      context: ../../..
+      dockerfile: infra/docker/providers/microsoft-graph-simulator/Dockerfile
+    environment:
+      MICROSOFT_GRAPH_SIMULATOR_HOST: 0.0.0.0
+      MICROSOFT_GRAPH_SIMULATOR_PORT: "8080"
+      MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID: ${PUBLISHER_MAILBOX_ID:?Set PUBLISHER_MAILBOX_ID}
+      MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN: ${MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN:?Set MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN}
+    ports:
+      - target: 8080
+        published: "${GTA_DEV_MICROSOFT_GRAPH_PORT:-18080}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      - test-services
+
+  transcribe-ai-simulator:
+    <<: *simulator-runtime
+    image: gta-development-transcribe-ai-simulator:0.1.0
+    build:
+      context: ../../..
+      dockerfile: infra/docker/providers/transcribe-ai-simulator/Dockerfile
+    environment:
+      TRANSCRIBE_AI_SIMULATOR_HOST: 0.0.0.0
+      TRANSCRIBE_AI_SIMULATOR_PORT: "8080"
+      TRANSCRIBE_AI_SIMULATOR_API_KEY: ${LEGACY_TRANSCRIPTION_API_KEY:?Set LEGACY_TRANSCRIPTION_API_KEY}
+    ports:
+      - target: 8080
+        published: "${GTA_DEV_TRANSCRIBE_AI_PORT:-18081}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      - test-services
+
+  openai-transcription-simulator:
+    <<: *simulator-runtime
+    image: gta-development-openai-transcription-simulator:0.1.0
+    build:
+      context: ../../..
+      dockerfile: infra/docker/providers/openai-transcription-simulator/Dockerfile
+    environment:
+      OPENAI_TRANSCRIPTION_SIMULATOR_HOST: 0.0.0.0
+      OPENAI_TRANSCRIPTION_SIMULATOR_PORT: "8080"
+      OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY: ${OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY:?Set OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY}
+      OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES: ${OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES:-26214400}
+    ports:
+      - target: 8080
+        published: "${GTA_DEV_OPENAI_TRANSCRIPTION_PORT:-18082}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      - test-services
+
+  glpi-db:
+    image: mysql:8.4.11@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+    environment:
+      MYSQL_DATABASE: ${GLPI_TEST_DB_NAME:?Set GLPI_TEST_DB_NAME}
+      MYSQL_USER: ${GLPI_TEST_DB_USER:?Set GLPI_TEST_DB_USER}
+      MYSQL_PASSWORD: ${GLPI_TEST_DB_PASSWORD:?Set GLPI_TEST_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${GLPI_TEST_DB_ROOT_PASSWORD:?Set GLPI_TEST_DB_ROOT_PASSWORD}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          MYSQL_PWD=$$MYSQL_ROOT_PASSWORD
+          mysqladmin ping --host=127.0.0.1 --user=root --silent
+      interval: 2s
+      timeout: 5s
+      retries: 90
+      start_period: 10s
+    volumes:
+      - glpi-database-data:/var/lib/mysql
+    networks:
+      - glpi-database
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  glpi-test:
+    image: gta-development-glpi-test:11.0.7
+    build:
+      context: ../providers/glpi-test
+      dockerfile: Dockerfile
+    depends_on:
+      glpi-db:
+        condition: service_healthy
+    environment:
+      TZ: ${GLPI_TEST_TIMEZONE:-Europe/Paris}
+      GLPI_CRONTAB_ENABLED: "0"
+      GLPI_DB_HOST: glpi-db
+      GLPI_DB_PORT: "3306"
+      GLPI_DB_NAME: ${GLPI_TEST_DB_NAME:?Set GLPI_TEST_DB_NAME}
+      GLPI_DB_USER: ${GLPI_TEST_DB_USER:?Set GLPI_TEST_DB_USER}
+      GLPI_DB_PASSWORD: ${GLPI_TEST_DB_PASSWORD:?Set GLPI_TEST_DB_PASSWORD}
+      GLPI_TEST_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+      GLPI_TEST_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+      GLPI_TEST_OAUTH_CLIENT_NAME: ${GLPI_TEST_OAUTH_CLIENT_NAME:-glpi-test-development-oauth}
+      GLPI_TEST_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+      GLPI_TEST_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+      GLPI_TEST_REQUEST_SOURCE_NAME: ${GLPI_TEST_REQUEST_SOURCE_NAME:-MEVO}
+      GLPI_TEST_TIMEZONE: ${GLPI_TEST_TIMEZONE:-Europe/Paris}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test -f /var/glpi/config/config_db.php &&
+          php -r '$$socket = @fsockopen("127.0.0.1", 80, $$errno, $$error, 2); exit($$socket === false ? 1 : 0);'
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    ports:
+      - target: 80
+        published: "${GTA_DEV_GLPI_PORT:-18083}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    volumes:
+      - glpi-data:/var/glpi
+    networks:
+      - glpi-database
+      - test-services
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  glpi-bootstrap:
+    image: gta-development-glpi-test:11.0.7
+    depends_on:
+      glpi-db:
+        condition: service_healthy
+      glpi-test:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        php /opt/glpi-test/bootstrap_oauth.php >/dev/null
+        php /opt/glpi-test/bootstrap_request_source.php >/dev/null
+    environment:
+      GLPI_DB_HOST: glpi-db
+      GLPI_DB_PORT: "3306"
+      GLPI_DB_NAME: ${GLPI_TEST_DB_NAME:?Set GLPI_TEST_DB_NAME}
+      GLPI_DB_USER: ${GLPI_TEST_DB_USER:?Set GLPI_TEST_DB_USER}
+      GLPI_DB_PASSWORD: ${GLPI_TEST_DB_PASSWORD:?Set GLPI_TEST_DB_PASSWORD}
+      GLPI_TEST_USERNAME: ${GLPI_USERNAME:?Set GLPI_USERNAME}
+      GLPI_TEST_PASSWORD: ${GLPI_PASSWORD:?Set GLPI_PASSWORD}
+      GLPI_TEST_OAUTH_CLIENT_NAME: ${GLPI_TEST_OAUTH_CLIENT_NAME:-glpi-test-development-oauth}
+      GLPI_TEST_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
+      GLPI_TEST_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
+      GLPI_TEST_REQUEST_SOURCE_NAME: ${GLPI_TEST_REQUEST_SOURCE_NAME:-MEVO}
+      GLPI_TEST_TIMEZONE: ${GLPI_TEST_TIMEZONE:-Europe/Paris}
+    volumes:
+      - glpi-data:/var/glpi
+    networks:
+      - glpi-database
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  test-services:
+    name: gta-development-test-services-network
+  glpi-database:
+    name: gta-development-glpi-database-network
+    internal: true
+
+volumes:
+  glpi-data:
+    name: gta-development-glpi-data
+  glpi-database-data:
+    name: gta-development-glpi-database-data

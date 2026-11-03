@@ -1,4 +1,4 @@
-# Recette E2E racine du MVP
+# Recette E2E du pipeline aval
 
 Cette suite constitue la frontière de validation du déploiement complet. Elle
 ne remplace ni les tests unitaires, ni les contrats GLPI et Transcribe AI, ni le
@@ -27,8 +27,9 @@ flowchart LR
 ```
 
 La stack démarre la migration, le web, le worker d'automatisation et le worker
-de rétention du Compose MVP, puis lui ajoute un PostgreSQL exclusivement réservé
-aux tests. Le vrai publisher n'est volontairement pas démarré : cette recette
+de rétention du Compose applicatif, puis lui ajoute un PostgreSQL exclusivement
+réservé aux tests. Le vrai publisher n'est volontairement pas démarré : cette
+recette
 aval ne possède ni application Entra ID ni boîte Exchange. Un helper test-only
 exécuté dans le conteneur de rétention reproduit uniquement sa frontière
 durable : publication atomique de l'audio, création du job et évènement
@@ -70,9 +71,9 @@ Le sous-jalon 8B complète ce socle avec neuf scénarios :
 - `test_stack.py` : disponibilité et topologie du socle aval, avec publisher
   explicitement absent et signalé par le dashboard.
 
-Le runbook de recette, les preuves attendues et les limites résiduelles sont
-documentés dans
-[`docs/mvp-demo-runbook.md`](../../docs/mvp-demo-runbook.md).
+La stratégie de validation, les commandes communes et les limites de cette
+frontière sont documentées dans la
+[référence des tests](../../docs/reference/tests.md).
 
 ## Exécution obligatoire sur CPU
 

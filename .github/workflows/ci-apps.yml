@@ -12,6 +12,7 @@ on:
       - conftest.py
       - infra/docker/apps/**
       - infra/docker/development/**
+      - infra/docker/providers/glpi-test/**
       - infra/docker/transcription/**
       - packages/**
       - pyproject.toml
@@ -28,6 +29,7 @@ on:
       - conftest.py
       - infra/docker/apps/**
       - infra/docker/development/**
+      - infra/docker/providers/glpi-test/**
       - infra/docker/transcription/**
       - packages/**
       - pyproject.toml
@@ -113,6 +115,12 @@ jobs:
         run: >-
           uv run pytest
           tests/deployment/test_development_postgres_compose.py
+          --maxfail=1
+
+      - name: Valider l'image GLPI de test canonique
+        run: >-
+          uv run pytest
+          packages/glpi-client/tests/integration/glpi/test_compose.py::test_glpi_compose_uses_the_canonical_test_image
           --maxfail=1
 
       - name: Valider la stack privée de transcription
