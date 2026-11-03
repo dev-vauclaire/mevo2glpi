@@ -33,6 +33,9 @@ services:
       GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
       GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
       SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
+    networks:
+      - database
+      - transcription
 
   worker-publisher:
     extends:
@@ -79,6 +82,9 @@ networks:
     external: true
   dokploy-network:
     name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
+    external: true
+  transcription:
+    name: ${TRANSCRIPTION_NETWORK_NAME:-gta-prod-transcription-network}
     external: true
 
 volumes:

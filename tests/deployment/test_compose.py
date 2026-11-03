@@ -144,6 +144,9 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     assert documented_values["APP_ENVIRONMENT"] == "production"
     assert documented_values["APP_RELEASE"] == "CHANGE_ME"
     assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
+    assert documented_values["TRANSCRIPTION_NETWORK_NAME"] == (
+        "gta-prod-transcription-network"
+    )
     assert documented_values["GLPI_TICKET_TYPE"] == "1"
     assert documented_values["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
         "CHANGE_ME_WITH_THE_PRODUCTION_MEVO_REQUEST_SOURCE_ID"
@@ -250,36 +253,45 @@ def test_application_dockerfiles_embed_the_release_identity() -> None:
         assert "APP_COMMIT_SHA=${VCS_REF}" in dockerfile
 
 
-def test_production_manifest_separates_proxy_and_database_networks(
+def test_production_manifest_separates_application_networks(
     render_compose: Callable[[], dict[str, object]],
 ) -> None:
     config = render_compose()
-    assert set(config["networks"]) == {"database", "dokploy-network"}
+    assert set(config["networks"]) == {
+        "database",
+        "dokploy-network",
+        "transcription",
+    }
     assert config["networks"]["database"]["name"] == "gta-contract-database"
     assert config["networks"]["database"]["external"] is True
     assert config["networks"]["dokploy-network"]["name"] == "gta-contract-dokploy"
     assert config["networks"]["dokploy-network"]["external"] is True
+    assert config["networks"]["transcription"]["name"] == "gta-contract-transcription"
+    assert config["networks"]["transcription"]["external"] is True
     assert config["volumes"] == {"audio-data": {"name": "gta-contract-audio"}}
     services = _services(config)
     assert set(services["web"]["networks"]) == {"database", "dokploy-network"}
+    assert set(services["worker-automation"]["networks"]) == {
+        "database",
+        "transcription",
+    }
     for service_name in (
         "database-migrations",
-        "worker-automation",
         "worker-publisher",
         "worker-retention",
     ):
         assert set(services[service_name]["networks"]) == {"database"}
 
 
-def test_production_keeps_the_legacy_provider_without_a_transcription_network(
+def test_production_keeps_legacy_provider_as_rollback_default(
     render_compose: Callable[[], dict[str, object]],
 ) -> None:
     config = render_compose()
     automation = _services(config)["worker-automation"]
 
     assert automation["environment"]["TRANSCRIPTION_PROVIDER"] == "legacy_polling"
-    assert set(automation["networks"]) == {"database"}
-    assert "transcription" not in config["networks"]
+    assert set(automation["networks"]) == {"database", "transcription"}
+    assert config["networks"]["transcription"]["external"] is True
 
 
 def test_migration_gates_all_long_lived_applications(

@@ -46,6 +46,7 @@ def render_compose() -> Callable[[], dict[str, object]]:
             "APP_COMMIT_SHA": SYNTHETIC_APP_COMMIT_SHA,
             "DOKPLOY_NETWORK_NAME": "gta-contract-dokploy",
             "DATABASE_NETWORK_NAME": "gta-contract-database",
+            "TRANSCRIPTION_NETWORK_NAME": "gta-contract-transcription",
             "AUDIO_VOLUME_NAME": "gta-contract-audio",
             "DATABASE_URL": (
                 "postgresql+psycopg://gta:synthetic@postgres:5432/"
