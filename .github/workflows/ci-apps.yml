@@ -5,11 +5,13 @@ on:
     branches:
       - main
     paths:
+      - .env.example
       - .dockerignore
       - .github/workflows/ci-apps.yml
       - apps/**
       - conftest.py
       - infra/docker/apps/**
+      - infra/docker/development/**
       - infra/docker/transcription/**
       - packages/**
       - pyproject.toml
@@ -19,11 +21,13 @@ on:
     branches:
       - main
     paths:
+      - .env.example
       - .dockerignore
       - .github/workflows/ci-apps.yml
       - apps/**
       - conftest.py
       - infra/docker/apps/**
+      - infra/docker/development/**
       - infra/docker/transcription/**
       - packages/**
       - pyproject.toml
@@ -104,6 +108,12 @@ jobs:
           --env-file ./infra/docker/apps/staging.env.example
           --file infra/docker/apps/docker-compose.staging.yml
           config --quiet
+
+      - name: Valider PostgreSQL de développement
+        run: >-
+          uv run pytest
+          tests/deployment/test_development_postgres_compose.py
+          --maxfail=1
 
       - name: Valider la stack privée de transcription
         run: >-
