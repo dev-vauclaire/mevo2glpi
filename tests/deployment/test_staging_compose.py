@@ -89,6 +89,9 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     )
     assert documented_values["AUDIO_VOLUME_NAME"].startswith("gta-staging-")
     assert documented_values["DATABASE_NETWORK_NAME"].startswith("gta-staging-")
+    assert "@postgres-staging:5432/" in documented_values["DATABASE_URL"]
+    assert "sslmode=disable" in documented_values["DATABASE_URL"]
+    assert "sslmode=verify-full" not in documented_values["DATABASE_URL"]
     assert documented_values["SIMULATORS_NETWORK_NAME"] == (
         "gta-staging-simulators-network"
     )

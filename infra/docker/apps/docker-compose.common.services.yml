@@ -27,7 +27,7 @@ x-release-build-args: &release-build-args
 
 x-shared-environment: &shared-environment
   APP_ENVIRONMENT: ${APP_ENVIRONMENT:?Set APP_ENVIRONMENT}
-  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the external PostgreSQL database}
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the Dokploy PostgreSQL database}
   PGSSLROOTCERT: /etc/ssl/certs/gta-ca-bundle.pem
 
 services:
