@@ -202,7 +202,7 @@ docker compose --env-file .env.example --file infra/docker/development/docker-co
 docker compose --env-file ./infra/docker/apps/.env.example --file infra/docker/apps/docker-compose.prod.yml config --quiet
 docker compose --env-file ./infra/docker/apps/staging.env.example --file infra/docker/apps/docker-compose.staging.yml config --quiet
 docker compose --env-file ./infra/docker/providers/staging.env.example --file infra/docker/providers/docker-compose.staging.yml config --quiet
-docker compose --env-file ./infra/docker/transcription/transcription.env.example --file infra/docker/transcription/docker-compose.transcription.yml config --quiet
+docker compose --env-file ./infra/docker/transcription/staging.env.example --file infra/docker/transcription/docker-compose.transcription.yml config --quiet
 ```
 
 Les tests marqués `database` et `glpi` utilisent leurs propres environnements

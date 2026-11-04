@@ -25,8 +25,11 @@ de modèle arbitraire n'est jamais acceptée au démarrage et
 
 ## Contrat de la stack
 
-Le point d'entrée est `docker-compose.transcription.yml` et son modèle de
-configuration est `transcription.env.example`.
+Le point d'entrée est `docker-compose.transcription.yml`. Deux modèles de
+configuration explicites évitent de mélanger les réseaux et identités :
+
+- `staging.env.example` pour le staging ;
+- `production.env.example` pour la production.
 
 La stack exige :
 
@@ -61,6 +64,9 @@ interrogée sans afficher de clé ni de transcription :
 ```bash
 python -c 'import httpx; print(httpx.get("http://gta-staging-transcription:5092/health/ready", timeout=5).json())'
 ```
+
+En production, utiliser l'alias `gta-prod-transcription` à la place de l'alias
+de staging.
 
 Le résultat attendu indique que le modèle est prêt. Les erreurs de décodage
 sont terminales pour la tentative de transcription et ne doivent jamais

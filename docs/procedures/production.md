@@ -526,7 +526,7 @@ Créer les projets dans cet ordre :
 
 | Ordre | Projet | Fichier Compose | Modèle d'environnement |
 | ---: | --- | --- | --- |
-| 1 | Transcription | `infra/docker/transcription/docker-compose.transcription.yml` | `infra/docker/transcription/transcription.env.example` |
+| 1 | Transcription | `infra/docker/transcription/docker-compose.transcription.yml` | `infra/docker/transcription/production.env.example` |
 | 2 | Applications | `infra/docker/apps/docker-compose.prod.yml` | `infra/docker/apps/.env.example` |
 
 Pour les deux projets :

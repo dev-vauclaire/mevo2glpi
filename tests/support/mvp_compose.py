@@ -27,7 +27,7 @@ TRANSCRIPTION_DOCKER_ROOT = DOCKER_ROOT / "transcription"
 TRANSCRIPTION_COMPOSE_FILE = (
     TRANSCRIPTION_DOCKER_ROOT / "docker-compose.transcription.yml"
 )
-TRANSCRIPTION_ENV_FILE = TRANSCRIPTION_DOCKER_ROOT / "transcription.env.example"
+TRANSCRIPTION_ENV_FILE = TRANSCRIPTION_DOCKER_ROOT / "staging.env.example"
 CUSTOM_SERVICES = (
     "database-migrations",
     "web",

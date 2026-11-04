@@ -409,7 +409,7 @@ Créer les projets dans cet ordre :
 | Ordre | Projet | Fichier Compose | Modèle d'environnement |
 | ---: | --- | --- | --- |
 | 1 | Providers mocks | `infra/docker/providers/docker-compose.staging.yml` | `infra/docker/providers/staging.env.example` |
-| 2 | Transcription | `infra/docker/transcription/docker-compose.transcription.yml` | `infra/docker/transcription/transcription.env.example` |
+| 2 | Transcription | `infra/docker/transcription/docker-compose.transcription.yml` | `infra/docker/transcription/staging.env.example` |
 | 3 | Applications | `infra/docker/apps/docker-compose.staging.yml` | `infra/docker/apps/staging.env.example` |
 
 Pour les trois projets :

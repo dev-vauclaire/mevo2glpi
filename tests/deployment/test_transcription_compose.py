@@ -18,7 +18,8 @@ TRANSCRIPTION_DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker" / "transcriptio
 TRANSCRIPTION_COMPOSE_FILE = (
     TRANSCRIPTION_DOCKER_ROOT / "docker-compose.transcription.yml"
 )
-TRANSCRIPTION_ENV_FILE = TRANSCRIPTION_DOCKER_ROOT / "transcription.env.example"
+STAGING_TRANSCRIPTION_ENV_FILE = TRANSCRIPTION_DOCKER_ROOT / "staging.env.example"
+PRODUCTION_TRANSCRIPTION_ENV_FILE = TRANSCRIPTION_DOCKER_ROOT / "production.env.example"
 TRANSCRIPTION_APP_ROOT = REPOSITORY_ROOT / "apps" / "transcription-api"
 TRANSCRIPTION_DOCKERFILE = TRANSCRIPTION_APP_ROOT / "Dockerfile"
 TRANSCRIPTION_IMAGE = "glpi-ticketing-transcription-api:parakeet-ultra-q8"
@@ -34,8 +35,10 @@ PARAKEET_ULTRA_MODEL_SHA256 = (
 DOCUMENTED_SECRET_NAMES = {"TRANSCRIPTION_API_KEY"}
 
 
-def _example_environment() -> dict[str, str]:
-    source = TRANSCRIPTION_ENV_FILE.read_text(encoding="utf-8")
+def _example_environment(
+    path: Path = STAGING_TRANSCRIPTION_ENV_FILE,
+) -> dict[str, str]:
+    source = path.read_text(encoding="utf-8")
     return dict(re.findall(r"^([A-Z][A-Z0-9_]*)=(.*)$", source, re.MULTILINE))
 
 
@@ -53,13 +56,17 @@ def _clean_environment(documented_names: set[str]) -> dict[str, str]:
 @pytest.fixture(scope="module")
 def transcription_compose_config() -> dict[str, object]:
     """Render the transcription manifest once without building its image."""
-    documented_names = set(_example_environment())
+    return _render_compose(STAGING_TRANSCRIPTION_ENV_FILE)
+
+
+def _render_compose(environment_file: Path) -> dict[str, object]:
+    documented_names = set(_example_environment(environment_file))
     result = subprocess.run(
         [
             "docker",
             "compose",
             "--env-file",
-            str(TRANSCRIPTION_ENV_FILE),
+            str(environment_file),
             "--file",
             str(TRANSCRIPTION_COMPOSE_FILE),
             "config",
@@ -91,7 +98,7 @@ def _services(config: dict[str, object]) -> dict[str, dict[str, Any]]:
 
 def test_transcription_environment_documents_every_interpolated_variable() -> None:
     compose_source = TRANSCRIPTION_COMPOSE_FILE.read_text(encoding="utf-8")
-    example_source = TRANSCRIPTION_ENV_FILE.read_text(encoding="utf-8")
+    example_source = STAGING_TRANSCRIPTION_ENV_FILE.read_text(encoding="utf-8")
     interpolated_names = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose_source))
     documented_values = _example_environment()
 
@@ -127,6 +134,60 @@ def test_transcription_environment_documents_every_interpolated_variable() -> No
         r"(?i)(?:api[_-]?key|secret|password|token)=[0-9a-f]{32,}",
         example_source,
     )
+
+
+def test_production_environment_uses_the_production_identity_and_network() -> None:
+    compose_source = TRANSCRIPTION_COMPOSE_FILE.read_text(encoding="utf-8")
+    example_source = PRODUCTION_TRANSCRIPTION_ENV_FILE.read_text(encoding="utf-8")
+    interpolated_names = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose_source))
+    staging_values = _example_environment(STAGING_TRANSCRIPTION_ENV_FILE)
+    production_values = _example_environment(PRODUCTION_TRANSCRIPTION_ENV_FILE)
+
+    assert set(production_values) == interpolated_names
+    assert production_values["COMPOSE_PROJECT_NAME"] == "gta-prod-transcription"
+    assert production_values["APP_RELEASE"] == "CHANGE_ME"
+    assert production_values["APP_COMMIT_SHA"] == "CHANGE_ME"
+    assert production_values["TRANSCRIPTION_NETWORK_NAME"] == (
+        "gta-prod-transcription-network"
+    )
+    assert production_values["TRANSCRIPTION_NETWORK_ALIAS"] == (
+        "gta-prod-transcription"
+    )
+    assert production_values["TRANSCRIPTION_API_KEY"] == "CHANGE_ME"
+
+    environment_specific_names = {
+        "APP_COMMIT_SHA",
+        "APP_RELEASE",
+        "COMPOSE_PROJECT_NAME",
+        "TRANSCRIPTION_NETWORK_ALIAS",
+        "TRANSCRIPTION_NETWORK_NAME",
+    }
+    assert {
+        name: value
+        for name, value in production_values.items()
+        if name not in environment_specific_names
+    } == {
+        name: value
+        for name, value in staging_values.items()
+        if name not in environment_specific_names
+    }
+    assert not re.search(
+        r"(?i)(?:api[_-]?key|secret|password|token)=[0-9a-f]{32,}",
+        example_source,
+    )
+
+
+def test_production_environment_renders_the_private_production_network() -> None:
+    config = _render_compose(PRODUCTION_TRANSCRIPTION_ENV_FILE)
+    service = _services(config)["transcription-api"]
+
+    assert config["name"] == "gta-prod-transcription"
+    assert service["networks"]["transcription"]["aliases"] == ["gta-prod-transcription"]
+    assert config["networks"]["transcription"] == {
+        "name": "gta-prod-transcription-network",
+        "ipam": {},
+        "external": True,
+    }
 
 
 def test_transcription_manifest_contains_only_the_api(
