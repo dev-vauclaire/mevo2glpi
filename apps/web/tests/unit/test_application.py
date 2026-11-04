@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from glpi_ticketing_web.application import (
     WebExitCode,
@@ -39,6 +40,55 @@ def test_build_application_wires_settings_into_fastapi(tmp_path: Path) -> None:
     assert config.audio_root == settings.audio_root.resolve()
     assert config.release_identity == settings.release_identity
     assert not hasattr(config, "max_upload_bytes")
+
+
+def test_production_disables_documentation_without_removing_application_routes(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(
+        tmp_path,
+        app_environment="production",
+        app_release="v0.5.0",
+        app_commit_sha="a" * 40,
+    )
+    application = build_application(settings)
+
+    with TestClient(application) as client:
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            assert client.get(path).status_code == 404
+        for path in ("/", "/health", "/api/version"):
+            assert client.get(path).status_code == 200
+
+    registered_paths = set(application.openapi()["paths"])
+    assert "/api/jobs" in registered_paths
+    assert "/api/jobs/{audio_uuid}" in registered_paths
+    assert "/audios/{audio_uuid}" in registered_paths
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        pytest.param({}, id="development"),
+        pytest.param(
+            {
+                "app_environment": "staging",
+                "app_release": "main",
+                "app_commit_sha": "b" * 40,
+            },
+            id="staging",
+        ),
+    ],
+)
+def test_non_production_environments_expose_documentation(
+    tmp_path: Path,
+    identity: dict[str, object],
+) -> None:
+    application = build_application(_settings(tmp_path, **identity))
+
+    with TestClient(application) as client:
+        assert client.get("/docs").status_code == 200
+        assert client.get("/redoc").status_code == 200
+        assert client.get("/openapi.json").status_code == 200
 
 
 def test_build_server_uses_configured_bind_address(tmp_path: Path) -> None:

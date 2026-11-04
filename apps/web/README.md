@@ -29,6 +29,11 @@ retourne `405 Method Not Allowed`. La pagination utilise un curseur opaque fond�
 sur `(updated_at, uuid)` ; le client ne doit ni l'interpréter ni le fabriquer.
 
 Le dashboard lit séparément l'état des jobs et l'instantané d'observabilité.
+
+La documentation interactive FastAPI (`/docs`, `/redoc` et
+`/openapi.json`) reste disponible en développement et en staging. Elle est
+désactivée automatiquement lorsque `APP_ENVIRONMENT=production`, sans option
+de réactivation indépendante de l'environnement.
 Son header affiche l'environnement, la release et les 12 premiers caractères
 du SHA Git. L'endpoint `/api/version` expose le SHA complet avec
 `Cache-Control: no-store` pour permettre une vérification opérateur fiable ;

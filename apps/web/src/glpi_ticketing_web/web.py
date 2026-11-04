@@ -11,7 +11,10 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from glpi_ticketing_common.release_identity import ReleaseIdentity
+from glpi_ticketing_common.release_identity import (
+    DeploymentEnvironment,
+    ReleaseIdentity,
+)
 from glpi_ticketing_web import __version__
 from glpi_ticketing_web.controllers import (
     HealthController,
@@ -73,10 +76,16 @@ def create_app(
             if shutdown_callback is not None:
                 shutdown_callback()
 
+    documentation_enabled = (
+        release_identity.environment is not DeploymentEnvironment.PRODUCTION
+    )
     app = FastAPI(
         title="GLPI ticketing automation",
         version=__version__,
         lifespan=lifespan,
+        docs_url="/docs" if documentation_enabled else None,
+        redoc_url="/redoc" if documentation_enabled else None,
+        openapi_url="/openapi.json" if documentation_enabled else None,
     )
     app.state.web_config = config
     app.mount("/static", StaticFiles(directory=_STATIC_DIRECTORY), name="static")
