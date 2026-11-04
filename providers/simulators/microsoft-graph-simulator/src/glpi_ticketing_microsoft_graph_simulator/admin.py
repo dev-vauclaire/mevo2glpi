@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -56,6 +56,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
             print(json.dumps(result, separators=(",", ":"), sort_keys=True))
             return 0
+        if arguments.command == "seed-suite":
+            _seed_suite(token)
+            return 0
         _post_json(
             f"{DEFAULT_ADMIN_BASE_URL}/__admin/reset",
             token=token,
@@ -93,6 +96,10 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional timezone-aware ISO-8601 reception timestamp",
     )
     subcommands.add_parser(
+        "seed-suite",
+        help="Create one synthetic Inbox message for every deterministic scenario",
+    )
+    subcommands.add_parser(
         "list-scenarios",
         help="List deterministic message scenarios",
     )
@@ -106,6 +113,84 @@ def _print_scenarios() -> None:
         for scenario in SeedScenario
     ]
     print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _seed_suite(token: str) -> None:
+    """Seed every scenario in catalogue order and print a sanitized manifest."""
+    scenarios = tuple(SeedScenario)
+    first_received_at = datetime.now(UTC) - timedelta(seconds=len(scenarios))
+    messages: list[dict[str, object]] = []
+    complete = False
+    try:
+        for index, scenario in enumerate(scenarios):
+            received_at = first_received_at + timedelta(seconds=index)
+            result = _post_json(
+                f"{DEFAULT_ADMIN_BASE_URL}/__admin/messages",
+                token=token,
+                payload={
+                    "scenario": scenario.value,
+                    "received_at": _format_utc(received_at),
+                },
+            )
+            messages.append(_suite_message(result, expected_scenario=scenario))
+        complete = True
+    finally:
+        print(
+            json.dumps(
+                {
+                    "complete": complete,
+                    "messages": messages,
+                    "scenario_count": len(scenarios),
+                    "seeded_count": len(messages),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+
+
+def _suite_message(
+    result: object,
+    *,
+    expected_scenario: SeedScenario,
+) -> dict[str, object]:
+    """Select the bounded public fields expected from one seed response."""
+    if not isinstance(result, dict):
+        raise ValueError("seed-suite response must be an object")
+    message_id = result.get("message_id")
+    scenario = result.get("scenario")
+    attachment_names = result.get("attachment_names")
+    attachment_count = result.get("attachment_count")
+    received_at = result.get("received_at")
+    if not isinstance(message_id, str) or not message_id:
+        raise ValueError("seed-suite response has an invalid message_id")
+    if scenario != expected_scenario.value:
+        raise ValueError("seed-suite response has an unexpected scenario")
+    if not isinstance(attachment_names, list) or not all(
+        isinstance(name, str) for name in attachment_names
+    ):
+        raise ValueError("seed-suite response has invalid attachment names")
+    if (
+        isinstance(attachment_count, bool)
+        or not isinstance(attachment_count, int)
+        or attachment_count < 0
+        or attachment_count != len(attachment_names)
+    ):
+        raise ValueError("seed-suite response has an invalid attachment count")
+    if not isinstance(received_at, str) or not received_at:
+        raise ValueError("seed-suite response has an invalid reception timestamp")
+    return {
+        "attachment_count": attachment_count,
+        "attachment_names": attachment_names,
+        "message_id": message_id,
+        "received_at": received_at,
+        "scenario": scenario,
+    }
+
+
+def _format_utc(value: datetime) -> str:
+    """Return one explicit UTC timestamp accepted by the admin endpoint."""
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _read_audio_path(raw_path: str) -> tuple[SyntheticAudioExtension, bytes]:

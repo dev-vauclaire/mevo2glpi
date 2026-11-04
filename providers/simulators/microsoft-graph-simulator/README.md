@@ -24,12 +24,19 @@ Depuis le conteneur :
 
 ```bash
 glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
+glpi-ticketing-microsoft-graph-simulator-admin seed-suite
 glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
 glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
 glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav-mulaw
 glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
 glpi-ticketing-microsoft-graph-simulator-admin reset
 ```
+
+`seed-suite` injecte une fois chaque scénario dans l'ordre du catalogue et
+affiche un manifeste JSON contenant les identifiants des messages créés. La
+commande n'attend pas leur traitement et ne réinitialise pas la boîte. Une
+nouvelle exécution crée donc une nouvelle série de messages et, pour les cas
+acceptés, de nouveaux jobs et tickets.
 
 | Scénario | Résultat publisher attendu |
 |---|---|

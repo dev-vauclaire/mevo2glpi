@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from glpi_ticketing_microsoft_graph_simulator import admin
 from glpi_ticketing_microsoft_graph_simulator.audio import SyntheticAudioExtension
+from glpi_ticketing_microsoft_graph_simulator.scenarios import SeedScenario
 
 ADMIN_TOKEN = "synthetic-admin-token"
 
@@ -133,6 +135,99 @@ def test_list_scenarios_requires_no_admin_token(
         "valid-wav-alaw",
         "valid-wav-mulaw",
     ]
+
+
+def test_seed_suite_injects_every_scenario_once_and_prints_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    observed: list[tuple[str, str, dict[str, str]]] = []
+    monkeypatch.setenv("MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN", ADMIN_TOKEN)
+
+    def post_json(
+        url: str,
+        *,
+        token: str,
+        payload: dict[str, str],
+    ) -> object:
+        observed.append((url, token, payload))
+        scenario = payload["scenario"]
+        return {
+            "message_id": f"message-{scenario}",
+            "scenario": scenario,
+            "attachment_names": [f"{scenario}.synthetic"],
+            "attachment_count": 1,
+            "received_at": payload["received_at"],
+        }
+
+    monkeypatch.setattr(admin, "_post_json", post_json)
+
+    exit_code = admin.main(["seed-suite"])
+
+    assert exit_code == 0
+    expected_scenarios = [scenario.value for scenario in SeedScenario]
+    assert [item[2]["scenario"] for item in observed] == expected_scenarios
+    assert all(
+        item[0] == "http://127.0.0.1:8080/__admin/messages" and item[1] == ADMIN_TOKEN
+        for item in observed
+    )
+    received_at = [
+        datetime.fromisoformat(item[2]["received_at"].replace("Z", "+00:00"))
+        for item in observed
+    ]
+    assert received_at == sorted(received_at)
+    assert len(set(received_at)) == len(expected_scenarios)
+
+    captured = capsys.readouterr()
+    manifest = json.loads(captured.out)
+    assert manifest["complete"] is True
+    assert manifest["scenario_count"] == len(expected_scenarios)
+    assert manifest["seeded_count"] == len(expected_scenarios)
+    assert [item["scenario"] for item in manifest["messages"]] == (expected_scenarios)
+    assert ADMIN_TOKEN not in captured.out
+    assert ADMIN_TOKEN not in captured.err
+
+
+def test_seed_suite_prints_partial_manifest_without_secret_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN", ADMIN_TOKEN)
+    successful_scenario = next(iter(SeedScenario))
+    call_count = 0
+
+    def post_json(
+        _url: str,
+        *,
+        token: str,
+        payload: dict[str, str],
+    ) -> object:
+        nonlocal call_count
+        call_count += 1
+        if call_count > 1:
+            raise OSError(token)
+        return {
+            "message_id": "message-first",
+            "scenario": successful_scenario.value,
+            "attachment_names": ["audio.wav"],
+            "attachment_count": 1,
+            "received_at": payload["received_at"],
+        }
+
+    monkeypatch.setattr(admin, "_post_json", post_json)
+
+    exit_code = admin.main(["seed-suite"])
+
+    captured = capsys.readouterr()
+    manifest = json.loads(captured.out)
+    assert exit_code == 1
+    assert manifest["complete"] is False
+    assert manifest["scenario_count"] == len(SeedScenario)
+    assert manifest["seeded_count"] == 1
+    assert manifest["messages"][0]["scenario"] == successful_scenario.value
+    assert "error_type=OSError" in captured.err
+    assert ADMIN_TOKEN not in captured.out
+    assert ADMIN_TOKEN not in captured.err
 
 
 @pytest.mark.parametrize(

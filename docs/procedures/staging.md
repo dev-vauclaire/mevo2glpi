@@ -615,6 +615,24 @@ Au minimum, vérifier qu'un message sans audio, avec plusieurs audios, avec un
 audio vide ou avec un format non pris en charge est classé dans `Rejected`, que
 son motif expurgé est persisté et que le publisher poursuit le traitement.
 
+### Catalogue complet
+
+Pour injecter une fois chacun des scénarios déterministes :
+
+```bash
+glpi-ticketing-microsoft-graph-simulator-admin seed-suite
+```
+
+La commande affiche un manifeste JSON avec le scénario, le `message_id`, les
+pièces jointes et la date de réception de chaque message créé. Elle n'attend pas
+la fin des traitements et ne lance aucun `reset` automatique.
+
+Les cas acceptés créent des jobs consultables dans le dashboard. Les rejets ne
+sont pas encore affichés individuellement par le web : contrôler également le
+dossier mocké `Rejected` et les logs expurgés du publisher. Une nouvelle
+exécution de la commande produit de nouveaux messages et de nouveaux tickets
+pour les scénarios acceptés.
+
 ### Audio fictif fourni par l'opérateur
 
 Installer uniquement un WAV ou un OGG fictif de moins de 25 Mio :
