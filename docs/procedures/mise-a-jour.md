@@ -2,171 +2,262 @@
 
 ## Objectif et périmètre
 
-Cette procédure encadre la promotion d'une version déjà validée par la CI vers
-staging puis production. Elle couvre l'identité Git, les sauvegardes, la
-migration one-shot, la remise en service, la validation et le rollback.
+Cette procédure commence lorsqu'une révision a déjà été validée et doit être
+déployée sur une installation Dokploy existante :
 
-Elle ne remplace pas la procédure de première installation de chaque
-environnement. Une commande de maintenance ou de rattrapage en mode `apply`
-nécessite une procédure et une validation distinctes.
+- un SHA précis de `main` en staging ;
+- un tag annoté immuable `vX.Y.Z` en production.
 
-## Prérequis
+La création de cette révision, la CI, la recette staging et la création du tag
+sont décrites dans la [référence CI/CD](../reference/ci-cd.md). Le présent
+document décrit uniquement :
 
-- la Pull Request a été relue et tous ses contrôles CI sont verts ;
-- `main` contient uniquement les commits attendus ;
-- la compatibilité de la migration avec la version précédente est documentée ;
-- le staging dispose de données synthétiques et de services de test isolés ;
-- la restauration PostgreSQL et audio a déjà été testée ;
-- la fenêtre de maintenance et le responsable de la décision sont identifiés.
+1. l'arrêt contrôlé des services ;
+2. l'action **Deploy** dans Dokploy ;
+3. les contrôles après déploiement ;
+4. le retour immédiat à la version précédente en cas d'échec.
 
-Les migrations doivent rester additives et compatibles avec la version
-précédente. Une migration destructive exige une procédure spécifique et ne doit
-pas suivre automatiquement ce flux.
+Une migration destructive, une restauration de données, une rotation de
+certificat ou une commande de rattrapage en mode `apply` nécessite un runbook
+spécifique.
 
-## Identifier la révision
+## Informations à relever
 
-Pour staging, relever le SHA complet de `origin/main`. Pour production, utiliser
-un tag annoté immuable `vX.Y.Z` créé sur le SHA validé en staging.
+Avant la fenêtre de maintenance, consigner :
+
+| Information | Staging | Production |
+| --- | --- | --- |
+| environnement | `staging` | `production` |
+| référence cible | `main` au SHA validé | tag immuable `vX.Y.Z` |
+| `APP_RELEASE` cible | `main` | `vX.Y.Z` |
+| `APP_COMMIT_SHA` cible | SHA complet validé | SHA complet du tag |
+| référence précédente | SHA précédemment déployé | tag précédent |
+
+Pour un tag de production, vérifier son SHA avant toute action :
 
 ```bash
 git fetch origin --tags
-git rev-parse origin/main^{commit}
-git rev-list -n 1 vX.Y.Z
+git rev-parse vX.Y.Z^{commit}
 ```
 
-Avant le déploiement, renseigner :
+Relever également la version actuellement affichée par le dashboard ou
+`GET /api/version`. Les valeurs `APP_RELEASE` et `APP_COMMIT_SHA` sont
+déclaratives : elles doivent correspondre à la référence réellement
+sélectionnée dans Dokploy.
 
-- `APP_ENVIRONMENT` avec l'environnement cible ;
-- `APP_RELEASE` avec `main` en staging ou le tag en production ;
-- `APP_COMMIT_SHA` avec le SHA complet réellement sélectionné.
+## 1. Effectuer les précontrôles
 
-Dokploy reconstruit actuellement les images depuis le dépôt. Le tag fournit une
-référence d'audit, mais l'opérateur doit encore comparer le SHA cloné par
-Dokploy avec `APP_COMMIT_SHA`.
+Avant d'arrêter un service :
 
-## Préparer une mise à jour
+- [ ] PostgreSQL est disponible ;
+- [ ] le provider de transcription est sain ;
+- [ ] GLPI est joignable ;
+- [ ] Microsoft Graph ou son mock est joignable par le publisher ;
+- [ ] aucun worker n'est dans une boucle de redémarrage ;
+- [ ] les jobs `failed` ou `blocked` connus sont consignés ;
+- [ ] la référence cible et son SHA sont relevés ;
+- [ ] la référence précédente et son SHA sont relevés.
 
-1. Consigner la release, le SHA et la révision Alembic actuellement déployés.
-2. Vérifier dans le dashboard qu'aucun traitement n'est dans une situation
-   ambiguë nécessitant une décision opérateur.
-3. Arrêter les trois workers afin de figer les mutations PostgreSQL, audio,
-   Exchange et GLPI. Le web peut rester en lecture seule pendant la sauvegarde.
-4. Sauvegarder PostgreSQL et le volume audio dans cet état cohérent.
-5. Identifier les sauvegardes avec l'environnement, la date UTC, le tag et le
-   SHA de la version encore en place.
-6. Vérifier que les sauvegardes sont terminées et restaurables avant toute
-   migration.
+Un job `failed` ou `blocked` n'empêche pas à lui seul la mise à jour. En
+revanche, une dépendance indisponible ou un worker système bloqué doit être
+résolu avant le déploiement.
 
-PostgreSQL et le volume audio forment un même point de reprise. Ils ne doivent
-pas être restaurés depuis deux instants différents.
+## 2. Arrêter les services
 
-## Déployer en staging
+Conserver le web actif pendant l'arrêt des workers afin de suivre leur état
+dans le dashboard. Utiliser l'action d'arrêt du service dans Dokploy, qui envoie
+un signal coopératif au processus.
 
-1. Déployer le SHA de `main` retenu dans le projet Dokploy staging.
-2. Laisser Compose exécuter `database-migrations`. Le web et les trois workers
-   démarrent automatiquement uniquement si ce service termine avec le code
-   `0`.
-3. Vérifier la révision Alembic atteinte et l'absence d'erreur PostgreSQL.
-4. Vérifier sur le dashboard `environment`, `release` et le SHA court.
-5. Contrôler `/health`, les heartbeats et l'absence de retry anormal.
-6. Exécuter la recette synthétique de la
-   [procédure staging](staging.md).
-7. Consigner le résultat et le SHA effectivement testé.
+### Ordre d'arrêt
 
-Une modification après cette recette invalide la promotion : le nouveau SHA
-doit repasser par la CI et le staging.
+| Ordre | Service | Objectif | Preuve d'arrêt |
+| ---: | --- | --- | --- |
+| 1 | `worker-publisher` | empêcher toute nouvelle ingestion Exchange | conteneur `stopped` ou `exited` dans Dokploy ; heartbeat `stopped` si l'arrêt coopératif a abouti ; aucun `current_ingestion_uuid` |
+| 2 | `worker-retention` | empêcher une purge audio pendant la maintenance | conteneur `stopped` ou `exited` ; heartbeat `stopped` si disponible |
+| 3 | `worker-automation` | figer transcription et création GLPI | conteneur `stopped` ou `exited` ; heartbeat `stopped` ; aucun `current_job_uuid` |
+| 4 | `web` | éviter de servir une version incohérente pendant le déploiement | conteneur `stopped` ou `exited` ; endpoint `/health` indisponible |
 
-## Créer la release
+### Vider la file avant l'arrêt de l'automatisation
 
-Après validation du staging, geler temporairement les fusions dans `main`, puis
-créer le tag sur le SHA exactement recetté :
+Après l'arrêt du publisher, laisser `worker-automation` terminer les jobs
+restants. Attendre si possible :
 
-```bash
-git switch main
-git pull --ff-only
-git status --short
-GTA_RELEASE_SHA=remplacer_par_le_sha_valide_en_staging
-git tag -a vX.Y.Z -m "release: vX.Y.Z" "$GTA_RELEASE_SHA"
-git push origin vX.Y.Z
-git rev-list -n 1 vX.Y.Z
+- zéro job `pending` ;
+- zéro job `processing` ;
+- zéro job `retry_scheduled`.
+
+Le worker ne possède pas de mode drain : tant qu'il tourne, il peut réclamer le
+job suivant. Comme le publisher est arrêté, la file est néanmoins finie et peut
+être vidée. Si elle ne peut pas l'être pendant la fenêtre prévue, reporter la
+mise à jour ou consigner explicitement les jobs qui devront reprendre.
+
+Un arrêt coopératif pendant une transcription peut laisser le job en
+`processing`. Ce comportement est prévu pour une reprise prioritaire au
+redémarrage, mais doit être évité pendant une maintenance planifiée.
+
+### Vérifier l'arrêt
+
+L'état du conteneur dans Dokploy constitue la preuve principale. Un heartbeat
+`stale` signifie seulement qu'aucun checkpoint récent n'a été écrit : il ne
+prouve pas que le processus est arrêté. Si le heartbeat n'est pas passé à
+`stopped`, contrôler le statut du conteneur et les derniers logs avant de
+poursuivre.
+
+Ne pas arrêter :
+
+- la Database PostgreSQL Dokploy ;
+- le moteur de transcription, sauf s'il est lui-même mis à jour ;
+- `database-migrations`, qui est un service one-shot normalement déjà en état
+  `exited (0)`.
+
+### Point de reprise
+
+Une fois les services mutateurs arrêtés, réaliser le point de reprise
+PostgreSQL et volume audio prévu par la politique d'exploitation. Les deux
+sauvegardes doivent représenter le même état logique.
+
+Le dépôt ne contient pas encore de méthode de sauvegarde et de restauration
+qualifiée pour le stockage choisi. En l'absence d'un runbook externe testé,
+seul un rollback applicatif sans restauration de données peut être garanti.
+
+## 3. Préparer Dokploy
+
+Dans chaque projet concerné :
+
+1. sélectionner la référence Git cible ;
+2. vérifier le SHA extrait par Dokploy ;
+3. ne modifier aucun secret ni aucune autre variable sans nécessité ;
+4. enregistrer la configuration avant de lancer le déploiement.
+
+Dans **Transcription** et **Applications (GTA)**, renseigner également :
+
+- `APP_RELEASE` avec `main` ou le tag ;
+- `APP_COMMIT_SHA` avec le SHA complet.
+
+`APP_ENVIRONMENT` appartient uniquement au projet **Applications (GTA)**. Le
+projet staging **Providers mocks** ne consomme aucune de ces trois variables :
+contrôler sa révision directement dans Dokploy.
+
+En production, ne jamais sélectionner `main`, une branche de fonctionnalité ou
+un alias mutable comme `latest`.
+
+## 4. Déployer la transcription si elle est concernée
+
+Cette étape est nécessaire uniquement si la release modifie l'API, le runtime,
+le modèle ou l'image de transcription.
+
+Dans le projet Dokploy **Transcription** :
+
+1. sélectionner la même référence et le même SHA que la release applicative ;
+2. mettre à jour `APP_RELEASE` et `APP_COMMIT_SHA` ;
+3. cliquer sur **Deploy** ;
+4. attendre la fin du build et le démarrage du service ;
+5. vérifier que le conteneur est `running` et `healthy` ;
+6. vérifier que `GET /health/ready` répond avec succès.
+
+La readiness confirme que le modèle est chargé. Ne pas déployer les
+applications si cette étape échoue.
+
+## 5. Déployer les applications
+
+Dans le projet Dokploy **Applications (GTA)** :
+
+1. vérifier une dernière fois la référence, `APP_RELEASE` et
+   `APP_COMMIT_SHA` ;
+2. cliquer une seule fois sur **Deploy** ;
+3. suivre les logs du build et de `database-migrations` ;
+4. attendre que Dokploy termine le déploiement.
+
+Le Compose exécute automatiquement la séquence suivante :
+
+```text
+database-migrations -> web + worker-publisher + worker-automation + worker-retention
 ```
 
-Le tag ne doit jamais être déplacé ni réutilisé. Vérifier que son SHA correspond
-toujours à celui relevé sur staging avant de poursuivre.
+`database-migrations` doit terminer avec le code `0`. Les quatre services
+persistants ne démarrent qu'après cette réussite. Il n'existe aucune pause
+d'approbation entre la migration et leur démarrage : il ne faut pas relancer
+manuellement les workers après avoir cliqué sur **Deploy**.
 
-## Déployer en production
+## 6. Vérifier la mise à jour
 
-1. Appliquer la préparation et les sauvegardes décrites ci-dessus.
-2. Configurer Dokploy sur le tag immuable et son SHA complet.
-3. Déployer le projet applicatif. Compose exécute d'abord
-   `database-migrations` et empêche le démarrage des runtimes en cas d'échec.
-4. Vérifier le code `0` de la migration et la révision Alembic atteinte.
-5. Contrôler l'endpoint `/health` du web et les heartbeats des workers démarrés
-   après la migration.
-6. Contrôler les accès de chaque worker sans afficher de secret : Graph pour le
-   publisher, transcription et GLPI pour l'automatisation, GLPI pour la
-   rétention.
-7. Observer au moins un traitement représentatif autorisé par la fenêtre de
-   recette, puis décider du maintien de la version.
+### Dans Dokploy
 
-La production n'est jamais déclenchée automatiquement à la suite d'un push ou
-de la création d'un tag. Le manifeste actuel ne prévoit pas de validation
-humaine entre la réussite de la migration et le démarrage des runtimes ; ajouter
-ce point de contrôle nécessiterait de séparer la migration dans un projet
-Dokploy distinct.
+- [ ] le déploiement est terminé sans erreur ;
+- [ ] `database-migrations` est en état `exited (0)` ;
+- [ ] `web` est `running` et `healthy` ;
+- [ ] les trois workers sont `running` et `healthy` ;
+- [ ] aucun conteneur ne redémarre en boucle ;
+- [ ] Transcription est `running` et `healthy` si elle a été redéployée.
 
-## Contrôles après déploiement
+L'état `exited (0)` de `database-migrations` est nominal : ce service ne doit
+pas rester `running`.
 
-- la migration one-shot est terminée avec le code `0` ;
-- le dashboard affiche l'environnement, le tag et le SHA attendus ;
-- le web et les trois workers sont sains et leurs heartbeats sont récents ;
-- les journaux ne montrent ni boucle de retry, ni erreur TLS, ni erreur
-  d'authentification ;
-- aucun secret, contenu audio ou transcription n'est journalisé ;
-- le flux testé ne crée qu'un seul ticket et conserve l'audio selon la politique
-  attendue.
+### Dans l'application
 
-## Décider un rollback
+- [ ] `GET /health` répond avec le code `200` ;
+- [ ] le dashboard ou `GET /api/version` affiche l'environnement, la release et
+      le SHA attendus ;
+- [ ] les trois heartbeats sont récents ;
+- [ ] les trois runtimes sont revenus à l'état `running` ;
+- [ ] aucun worker ne conserve un UUID courant inattendu ;
+- [ ] aucun job ne reste anormalement bloqué par la mise à jour.
 
-Arrêter immédiatement les workers avant l'analyse si :
+Un conteneur worker peut être `healthy` avec un runtime `degraded` ou `blocked`.
+Le statut Docker ne suffit donc pas : vérifier également le dashboard et les
+logs.
 
-- la migration échoue ;
-- l'identité de version ne correspond pas au SHA attendu ;
-- un worker produit une boucle ou des effets distants inattendus ;
-- les healthchecks ou dépendances essentielles restent indisponibles ;
-- une incohérence PostgreSQL ou audio est détectée.
+### Dépendances externes
 
-### Aucun effet métier depuis la sauvegarde
+Les healthchecks des workers valident PostgreSQL, les heartbeats et l'accès au
+volume audio. Ils ne prouvent pas le fonctionnement de Microsoft Graph, GLPI ou
+du provider de transcription.
 
-Si aucun message Exchange, ticket GLPI ni audio n'a été modifié, restaurer le
-couple PostgreSQL/volume audio si nécessaire, puis redéployer le tag précédent
-compatible avec la révision restaurée.
+Contrôler les logs expurgés :
 
-### Des effets métier ont déjà eu lieu
+- [ ] le publisher effectue une découverte Graph sans erreur `401`, `403` ou
+      `transport_error` ;
+- [ ] l'automatisation ne signale aucune erreur TLS, transcription ou GLPI ;
+- [ ] la rétention ne signale aucune erreur TLS ou GLPI ;
+- [ ] aucun secret, contenu audio ou transcription n'est journalisé.
 
-Une restauration locale n'annule ni un déplacement Exchange ni la création
-d'un ticket GLPI. Dans ce cas :
+Terminer par un traitement synthétique autorisé de bout en bout. En staging,
+utiliser les fixtures WAV et OGG. En production, n'utiliser aucune donnée réelle
+de patient et respecter la fenêtre de recette validée par les opérateurs GLPI.
 
-1. maintenir les workers arrêtés ;
-2. consigner les UUID, tickets et messages concernés sans copier de donnée
-   sensible dans les logs ou le rapport ;
-3. comparer PostgreSQL, le volume audio, Exchange et GLPI ;
-4. décider explicitement des effets distants à conserver ou réconcilier ;
-5. restaurer PostgreSQL et l'audio au même point uniquement après cette
-   décision ;
-6. redéployer le tag précédent compatible ;
-7. vérifier la réconciliation avant de relancer le publisher.
+La mise à jour est validée uniquement lorsque l'identité de version, les états
+runtime et le traitement synthétique sont tous conformes.
 
-Ne jamais relancer aveuglément les workers après une restauration : un état
-distant déjà produit pourrait être dupliqué.
+## 7. Échec et rollback immédiat
 
-## Traçabilité attendue
+En cas d'échec, arrêter de nouveau les services dans l'ordre suivant :
 
-Conserver pour chaque mise à jour :
+```text
+worker-publisher -> worker-retention -> worker-automation -> web
+```
 
-- l'environnement, le tag et le SHA ;
-- les identifiants des sauvegardes PostgreSQL et audio ;
-- les révisions Alembic avant et après migration ;
-- l'heure UTC du début et de la fin ;
-- le résultat de la recette et la décision de maintien ou de rollback ;
-- l'identité de l'opérateur, sans secret ni donnée sensible.
+### Échec avant le clic sur Deploy
+
+Si aucune migration ni nouvelle image n'a été lancée, restaurer la référence et
+les variables précédentes, puis redéployer la version précédente.
+
+### Rollback applicatif
+
+Si le schéma reste compatible avec la version précédente :
+
+1. sélectionner la référence précédente ;
+2. restaurer son `APP_RELEASE` et son `APP_COMMIT_SHA` ;
+3. redéployer d'abord Transcription si elle doit également revenir en arrière ;
+4. cliquer sur **Deploy** dans Applications (GTA) ;
+5. répéter intégralement les contrôles de cette procédure.
+
+Ne jamais exécuter automatiquement un `alembic downgrade`. Après la réussite de
+la migration, le Compose redémarre automatiquement le web et les workers ; le
+rollback doit donc être préparé avant le clic sur **Deploy**.
+
+### Restauration de données
+
+Si PostgreSQL ou le volume audio doit être restauré, ne pas utiliser ce rollback
+court. Maintenir les services arrêtés et suivre un runbook de restauration et de
+réconciliation dédié. Une restauration locale n'annule ni un message déplacé
+dans Exchange, ni un ticket déjà créé dans GLPI.

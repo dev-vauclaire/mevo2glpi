@@ -748,8 +748,8 @@ antérieur de PostgreSQL ou du volume audio. Un redéploiement applicatif ne
 répare pas automatiquement les effets déjà produits dans Exchange ou GLPI.
 
 Dès qu'une première version est opérationnelle, toute nouvelle version doit
-suivre la [procédure de mise à jour](mise-a-jour.md), qui sera alignée
-séparément avec la politique de sauvegarde et de retour arrière retenue.
+suivre la [procédure de mise à jour](mise-a-jour.md), notamment pour le point de
+reprise et la politique de retour arrière.
 
 ## Résultat attendu
 

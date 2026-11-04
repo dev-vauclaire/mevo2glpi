@@ -30,17 +30,17 @@ flowchart LR
         subgraph DOKPLOY["Dokploy"]
             direction TB
 
-            subgraph SIMULATORS_APP["Application Simulators"]
+            subgraph SIMULATORS_APP["Projet Dokploy<br/>Providers mocks"]
                 direction LR
                 GRAPH["microsoft-graph-simulator"]
                 TRANSCRIBE_AI["transcribe-ai-simulator"]
             end
 
-            subgraph TRANSCRIPTION_APP["Application Transcription"]
+            subgraph TRANSCRIPTION_APP["Projet Dokploy<br/>Transcription"]
                 TRANSCRIBER["transcription-api<br/>Parakeet Ultra CPU"]
             end
 
-            subgraph GTA_APP["Application GTA"]
+            subgraph GTA_APP["Projet Dokploy<br/>Applications (GTA)"]
                 direction LR
                 WEB["web"]
                 MIGRATIONS["database-migrations<br/>one-shot"]
@@ -128,9 +128,10 @@ un service externe réel.
 
 Trois applications Docker Compose Dokploy sont déployées séparément :
 
-1. **Simulators**, avec les conteneurs Microsoft Graph et Transcribe AI ;
+1. **Providers mocks**, avec les conteneurs Microsoft Graph et Transcribe AI ;
 2. **Transcription**, avec le conteneur Parakeet ;
-3. **GTA**, avec le web, la migration one-shot et les trois workers.
+3. **Applications (GTA)**, avec le web, la migration one-shot et les trois
+   workers.
 
 PostgreSQL est créé séparément comme une application **Database** dans
 Dokploy ; il ne constitue pas un projet Docker Compose supplémentaire.
@@ -414,18 +415,23 @@ Créer les projets dans cet ordre :
 Pour les trois projets :
 
 - sélectionner le même dépôt et la branche `main` ;
-- relever le SHA complet de `main` avant le premier déploiement et utiliser
-  cette même valeur dans `APP_COMMIT_SHA` pour les trois projets ;
+- relever le SHA complet de `main` avant le premier déploiement et vérifier que
+  Dokploy extrait cette même révision pour les trois projets ;
 - désactiver toute exposition publique non demandée ;
 - conserver l'auto-déploiement désactivé et déclencher manuellement les
   déploiements dans l'ordre providers, transcription, puis applications ;
 - limiter les watch paths au périmètre du projet.
 
+Renseigner ce même SHA dans `APP_COMMIT_SHA` pour les projets **Transcription**
+et **Applications (GTA)**. Le projet **Providers mocks** ne consomme ni
+`APP_RELEASE` ni `APP_COMMIT_SHA` : sa révision est contrôlée directement dans
+Dokploy.
+
 Avant chaque déploiement manuel, vérifier que `main` pointe toujours vers le
 SHA relevé. `APP_COMMIT_SHA` assure la traçabilité affichée par l'application,
 mais ne verrouille pas à lui seul la révision extraite par Dokploy. Ne pas
-activer l'auto-déploiement tant que la
-[procédure de mise à jour](mise-a-jour.md) ne l'encadre pas explicitement.
+activer l'auto-déploiement : les promotions sont déclenchées manuellement selon
+la [procédure de mise à jour](mise-a-jour.md).
 
 Watch paths recommandés :
 
