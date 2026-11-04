@@ -2,211 +2,765 @@
 
 ## Objectif et périmètre
 
-Cette procédure décrit la création d'un nouvel environnement de production
-Dokploy pour GLPI Ticketing Automation. Elle ne couvre pas la promotion d'une
-nouvelle version sur une installation existante, décrite dans la
+Cette procédure décrit l'installation initiale de GLPI Ticketing Automation
+dans un environnement Dokploy de production. Elle suppose que les mêmes
+composants ont déjà été validés en staging sur le SHA destiné à la production.
+
+La production utilise des services réels :
+
+- une boîte Exchange Online exclusivement dédiée aux messages vocaux ;
+- une application Microsoft Entra ID authentifiée par certificat ;
+- Microsoft Graph v1.0 ;
+- l'instance GLPI de production ;
+- PostgreSQL créé comme une application Database dans Dokploy ;
+- Parakeet comme provider nominal de transcription dans Dokploy ;
+- un volume Docker persistant pour les audios.
+
+Le provider historique `legacy_polling` reste disponible pour une bascule
+manuelle explicitement décidée. Aucun simulateur n'est déployé en production.
+
+Cette procédure ne couvre pas la promotion d'une nouvelle version sur une
+installation existante, la rotation des certificats ou une migration
+destructive. Ces opérations relèveront de la
 [procédure de mise à jour](mise-a-jour.md).
 
-La production utilise :
+## Architecture cible
 
-- une base PostgreSQL externe et dédiée ;
-- un volume Docker persistant pour les audios ;
-- un GLPI et une boîte Exchange Online de production ;
-- soit le provider historique `legacy_polling`, soit la stack locale
-  `openai_compatible` ;
-- le Compose applicatif
-  `infra/docker/apps/docker-compose.prod.yml`.
+Le pipeline est identique à celui qualifié en staging, mais Microsoft Entra ID,
+Exchange Online et GLPI sont les services réels de production :
 
-Les secrets, certificats, audios et données métier réels ne doivent jamais être
-copiés dans Git, dans cette documentation ou dans une commande conservée dans
-l'historique du terminal.
+```mermaid
+flowchart LR
+    subgraph VM["VM de production"]
+        direction TB
+
+        subgraph DOKPLOY["Dokploy"]
+            direction TB
+
+            subgraph TRANSCRIPTION_APP["Application Transcription"]
+                TRANSCRIBER["transcription-api<br/>Parakeet Ultra CPU"]
+            end
+
+            subgraph GTA_APP["Application GTA"]
+                direction LR
+                WEB["web"]
+                MIGRATIONS["database-migrations<br/>one-shot"]
+                PUBLISHER["worker-publisher"]
+                AUTOMATION["worker-automation"]
+                RETENTION["worker-retention"]
+            end
+
+            subgraph POSTGRES_APP["Database PostgreSQL"]
+                POSTGRES["PostgreSQL<br/>production"]
+            end
+        end
+
+        AUDIO["Volume Docker nommé<br/>gta-prod-audio-data"]
+    end
+
+    ENTRA["Microsoft Entra ID<br/>Identité applicative réelle"]
+    EXCHANGE["Exchange Online<br/>Boîte vocale dédiée"]
+    GLPI["GLPI de production<br/>API V2.3.0"]
+    LEGACY["Transcribe AI historique<br/>Repli manuel optionnel"]
+    OPERATEUR["Poste opérateur<br/>Navigateur avec HTTPS"]
+
+    subgraph LEGEND["Légende"]
+        direction TB
+        L_VM["VM"]
+        L_DOKPLOY["Dokploy"]
+        L_APP["Application Dokploy"]
+        L_CONTAINER["Service"]
+        L_VOLUME["Volume"]
+        L_DATABASE["Base de données"]
+        L_EXTERNAL["Service externe"]
+        L_ACTOR["Acteur"]
+    end
+
+    PUBLISHER -->|"client_credentials<br/>certificat X.509"| ENTRA
+    ENTRA -->|"jeton app-only"| PUBLISHER
+    PUBLISHER -->|"Microsoft Graph v1.0"| EXCHANGE
+    EXCHANGE -->|"WAV ou OGG"| PUBLISHER
+    PUBLISHER --> POSTGRES
+    PUBLISHER --> AUDIO
+    MIGRATIONS --> POSTGRES
+    WEB --> POSTGRES
+    AUTOMATION --> POSTGRES
+    RETENTION --> POSTGRES
+    AUTOMATION --> TRANSCRIBER
+    AUTOMATION -. "repli legacy explicite" .-> LEGACY
+    AUTOMATION --> GLPI
+    RETENTION --> GLPI
+    AUTOMATION --> AUDIO
+    RETENTION --> AUDIO
+    WEB --> AUDIO
+    OPERATEUR -->|"dashboard et audio"| WEB
+
+    classDef vm fill:#f1f5f9,stroke:#334155,color:#111827,stroke-width:2px
+    classDef dokploy fill:#fffbeb,stroke:#b45309,color:#111827,stroke-width:2px
+    classDef application fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
+    classDef container fill:#eff6ff,stroke:#1d4ed8,color:#111827,stroke-width:2px
+    classDef volume fill:#fff7ed,stroke:#c2410c,color:#111827,stroke-width:2px
+    classDef database fill:#f0fdf4,stroke:#15803d,color:#111827,stroke-width:2px
+    classDef external fill:#fef2f2,stroke:#b91c1c,color:#111827,stroke-width:2px
+    classDef actor fill:#fdf2f8,stroke:#be185d,color:#111827,stroke-width:2px
+
+    class TRANSCRIBER,WEB,MIGRATIONS,PUBLISHER,AUTOMATION,RETENTION container
+    class POSTGRES database
+    class AUDIO volume
+    class ENTRA,EXCHANGE,GLPI,LEGACY external
+    class OPERATEUR actor
+    class L_VM vm
+    class L_DOKPLOY dokploy
+    class L_APP application
+    class L_CONTAINER container
+    class L_VOLUME volume
+    class L_DATABASE database
+    class L_EXTERNAL external
+    class L_ACTOR actor
+
+    style VM fill:#f1f5f9,stroke:#334155,color:#111827,stroke-width:2px
+    style DOKPLOY fill:#fffbeb,stroke:#b45309,color:#111827,stroke-width:2px
+    style TRANSCRIPTION_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
+    style GTA_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
+    style POSTGRES_APP fill:#f0fdf4,stroke:#15803d,color:#111827,stroke-width:2px
+    style LEGEND fill:#ffffff,stroke:#64748b,color:#111827,stroke-dasharray:4 4
+```
+
+Deux applications Docker Compose Dokploy sont déployées séparément :
+
+1. **Transcription**, avec le service Parakeet ;
+2. **GTA**, avec le web, la migration one-shot et les trois workers.
+
+PostgreSQL est créé séparément comme une application **Database** dans
+Dokploy. Le volume audio appartient au projet GTA et reste partagé par les
+services qui en ont besoin.
+
+Le rôle de Microsoft Entra ID est d'authentifier l'application. L'autorisation
+d'accéder à la seule boîte dédiée est portée par Exchange Online Application
+RBAC.
 
 ## Prérequis
 
-Avant toute création de service, disposer des éléments suivants :
+### Système et dimensionnement
 
-1. un tag immuable `vX.Y.Z` validé en staging et son SHA Git complet ;
-2. une VM dimensionnée, à jour et équipée de Docker et Dokploy ;
-3. une base, un rôle et une stratégie de sauvegarde PostgreSQL dédiés ;
-4. une URL GLPI V2.3.0 directe, un utilisateur de service, un client OAuth et
-   l'identifiant local de la source de demande `MEVO` ;
-5. une application Entra ID autorisée uniquement sur la boîte dédiée, avec sa
-   clé privée PEM et son certificat X.509 public PEM ;
-6. un bundle de CA validant PostgreSQL, GLPI, Microsoft et le provider externe
-   éventuel ;
-7. un nom DNS interne pour le dashboard, routé par Traefik vers le port `8000`
-   du service `web` ;
-8. le choix explicite du provider de transcription.
+Le système de référence qualifié est **Ubuntu Server 24.04 LTS**. La procédure
+peut fonctionner sur une autre distribution Linux prise en charge par Dokploy,
+mais cette variante doit être qualifiée séparément.
 
-L'accès web ne possède pas encore d'authentification applicative. Le domaine
-doit rester limité au réseau interne par le DNS, le pare-feu et la
-configuration Traefik.
+Le profil de référence exécute Parakeet et PostgreSQL sur la même VM. Prévoir au
+minimum :
 
-## Préparer les ressources persistantes
+- 4 vCPU ;
+- 12 Gio de RAM ;
+- 50 Gio d'espace disque.
 
-Créer les réseaux externes attendus par Compose avec les noms retenus dans
-l'environnement Dokploy. Les valeurs par défaut de production sont :
+Ce dimensionnement constitue un minimum de départ, pas une garantie de capacité.
+Surveiller l'espace disque, la mémoire, la charge CPU et la durée des
+transcriptions dès la mise en service.
+
+### GLPI de production
+
+La version actuellement qualifiée est **GLPI 11.0.7** avec l'API explicitement
+épinglée **V2.3.0**. Disposer :
+
+- d'une URL directe ne passant pas par un portail SSO interactif ;
+- de l'API V2 activée ;
+- d'un utilisateur technique réservé à l'application ;
+- d'un client OAuth Password avec le scope `api` ;
+- des droits minimaux pour créer et consulter les tickets attendus ;
+- d'une source de demande `MEVO` et de son identifiant local ;
+- du fuseau `Europe/Paris` pour le compte ou le fuseau global hérité.
+
+Références :
+
+- [API REST V2 de GLPI](https://help.glpi-project.org/documentation/modules/configuration/general/api/restful-api-v2) ;
+- [clients OAuth GLPI](https://help.glpi-project.org/documentation/modules/configuration/oauth-clients).
+
+La documentation OpenAPI doit répondre sur :
+
+```text
+https://NOM_GLPI_PRODUCTION/api.php/v2.3.0/doc.json
+```
+
+### Microsoft Entra ID et Exchange Online
+
+Disposer des droits administratifs nécessaires pour :
+
+- créer une App Registration Entra ID single-tenant dédiée au publisher ;
+- charger un certificat public X.509 sur cette application ;
+- référencer son Enterprise Application dans Exchange Online ;
+- créer un scope limité à la boîte dédiée ;
+- attribuer le rôle `Application Mail.ReadWrite` à ce scope ;
+- tester l'autorisation sur une boîte incluse et une boîte exclue.
+
+La boîte Exchange Online doit être exclusivement consacrée à ce flux. Avant le
+premier démarrage, son Inbox doit contenir uniquement les messages que
+l'application est autorisée à traiter. Le publisher consomme tout le backlog
+présent, du message le plus ancien au plus récent.
+
+Les dossiers `Processed` et `Rejected` sont créés automatiquement et de manière
+idempotente par le publisher. Ils ne doivent pas être créés manuellement.
+
+Références officielles :
+
+- [authentification applicative Microsoft Graph](https://learn.microsoft.com/en-us/graph/auth-v2-service) ;
+- [Exchange Online RBAC for Applications](https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac) ;
+- [ajout d'un certificat à une application Entra](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials) ;
+- [déplacement d'un message avec Microsoft Graph](https://learn.microsoft.com/en-us/graph/api/message-move?view=graph-rest-1.0).
+
+### Git et Dokploy
+
+Disposer :
+
+- du droit d'installer une GitHub App sur le dépôt privé ;
+- d'un tag annoté immuable `vX.Y.Z` créé sur le SHA validé en staging ;
+- du SHA Git complet correspondant ;
+- de secrets, réseaux et volumes propres à la production.
+
+L'auto-déploiement doit rester désactivé. Une mise en production est une action
+manuelle et contrôlée.
+
+### DNS, réseau et accès
+
+Les noms symboliques doivent être remplacés par les valeurs validées par
+l'administrateur réseau. Les conteneurs utilisent la résolution DNS et la
+sortie réseau de la VM ; leurs flux peuvent donc apparaître avec l'adresse
+source de celle-ci.
+
+#### Matrice DNS
+
+| Nom | Cible attendue | Résolution requise depuis | Action |
+| --- | --- | --- | --- |
+| `NOM_VM_PRODUCTION` | adresse IP de la VM | postes opérateurs et administrateurs | créer un enregistrement interne `A` et, si utilisé, `AAAA` |
+| `NOM_GLPI_PRODUCTION` | adresse IP du GLPI | VM de production | rendre le nom résolvable par le DNS utilisé par Docker |
+| `login.microsoftonline.com` | adresses publiées par Microsoft | VM de production | autoriser la résolution pour l'obtention du jeton Entra |
+| `graph.microsoft.com` | adresses publiées par Microsoft | VM de production | autoriser la résolution pour Microsoft Graph |
+| `github.com`, `api.github.com` | adresses publiées par GitHub | VM de production | autoriser la résolution pour récupérer le dépôt privé |
+| `auth.docker.io`, `registry-1.docker.io`, `production.cloudfront.docker.com`, `ghcr.io`, `pkg-containers.githubusercontent.com` | adresses publiées par Docker Hub et GHCR | VM de production | autoriser la résolution pour télécharger les images de base |
+| suffixes `huggingface.co` et `hf.co`, avec leurs sous-domaines | adresses publiées par Hugging Face | VM de production | autoriser la résolution pour télécharger le modèle Parakeet épinglé |
+
+Si le repli `legacy_polling` doit être utilisable, ajouter également le nom du
+provider historique à cette matrice.
+
+#### Matrice des flux à autoriser au pare-feu
+
+| Source | Destination | Protocole | Port destination | Action | Usage |
+| --- | --- | --- | ---: | --- | --- |
+| réseau des opérateurs | `NOM_VM_PRODUCTION` / Traefik | TCP | 443 | autoriser | consulter le dashboard et télécharger les audios autorisés |
+| réseau des opérateurs | `NOM_VM_PRODUCTION` / Traefik | TCP | 80 | autoriser uniquement pour une redirection vers HTTPS ; sinon refuser | redirection sans contenu applicatif en clair |
+| réseau d'administration ou bastion | VM de production | TCP | 22 | autoriser de manière restreinte | administration SSH par clé |
+| réseau d'administration | VM de production / Dokploy | TCP | 3000 | autoriser de manière restreinte | administration de Dokploy en HTTPS |
+| VM de production | DNS de l'établissement | UDP et TCP | 53 | autoriser | résolution DNS de la VM et des conteneurs |
+| VM de production, service de synchronisation système | serveur NTP de l'établissement | UDP | 123 | autoriser si nécessaire | maintenir l'horloge système |
+| VM de production | domaines GitHub, registres et Hugging Face listés ci-dessus | TCP | 443 | autoriser en sortie | construire et déployer les applications |
+| VM de production | `login.microsoftonline.com` | TCP | 443 | autoriser en sortie | obtenir le jeton applicatif Entra |
+| VM de production | `graph.microsoft.com` | TCP | 443 | autoriser en sortie | lire et déplacer les messages Exchange |
+| VM de production | `NOM_GLPI_PRODUCTION` | TCP | 443 | autoriser en sortie | créer et consulter les tickets GLPI |
+| VM de production | `NOM_TRANSCRIBE_AI_PRODUCTION` | TCP | 443 | autoriser uniquement si le repli `legacy_polling` est maintenu | appeler le provider historique |
+
+Si le provider historique utilise une autorité interne, ajouter cette autorité
+au bundle système et valider sa chaîne TLS avant d'autoriser la bascule.
+
+La politique cible est de refuser tout autre flux. PostgreSQL, les workers et
+le moteur de transcription ne doivent jamais être publiés directement sur
+l'hôte ni exposés par Traefik.
+
+## Préparation de la VM
+
+### Installer et sécuriser Dokploy
+
+L'installation de référence utilise la version autohébergée Docker de Dokploy.
+La version qualifiée est **Dokploy v0.30.10**.
+
+```bash
+curl --fail --show-error --location https://github.com/Dokploy/dokploy/releases/download/v0.30.10/install.sh | sudo sh
+```
+
+Le script installe Docker si nécessaire, initialise Docker Swarm et déploie
+Dokploy. Les ports `80`, `443` et `3000` doivent être disponibles. Ne pas
+utiliser le script générique visant automatiquement la dernière version.
+
+Après installation :
+
+- appliquer les mises à jour de sécurité du système ;
+- vérifier Docker et Docker Compose ;
+- configurer le fuseau `Europe/Paris` et NTP ;
+- protéger l'accès Dokploy par HTTPS ;
+- limiter SSH et Dokploy aux réseaux d'administration ;
+- surveiller le disque, la mémoire, le CPU et l'expiration des certificats.
+
+### Installer la confiance envers GLPI
+
+Installer uniquement les autorités nécessaires à la validation du certificat
+serveur GLPI. Le bundle système doit conserver les autorités publiques requises
+pour Microsoft, GitHub, les registres et Hugging Face.
+
+```bash
+sudo install -m 0644 /chemin/ca-interne.pem /usr/local/share/ca-certificates/gta-internal-ca.crt
+sudo update-ca-certificates
+```
+
+Le chemin fourni à Dokploy sera :
+
+```dotenv
+CA_BUNDLE_HOST_PATH=/etc/ssl/certs/ca-certificates.crt
+```
+
+Valider GLPI sans désactiver TLS :
+
+```bash
+openssl s_client -connect NOM_GLPI_PRODUCTION:443 -servername NOM_GLPI_PRODUCTION -CAfile /etc/ssl/certs/ca-certificates.crt -verify_return_error </dev/null
+curl --fail --silent --show-error https://NOM_GLPI_PRODUCTION/api.php/v2.3.0/doc.json >/dev/null
+```
+
+Le résultat OpenSSL attendu est `Verify return code: 0 (ok)`.
+
+### Préparer le certificat HTTPS du dashboard
+
+Demander à l'administrateur système :
+
+- un nom DNS interne pointant vers la VM ;
+- un certificat serveur couvrant exactement ce nom dans son SAN ;
+- la chaîne complète et la clé privée correspondante ;
+- le responsable et la date de renouvellement.
+
+Importer le certificat dans l'interface **Certificates** de Dokploy et le
+sélectionner pour le domaine du web. Sa clé privée reste dans Dokploy/Traefik et
+ne doit jamais être montée dans les applications.
+
+### Installer les fichiers PEM Entra du publisher
+
+La clé privée et le certificat public X.509 doivent être deux fichiers PEM
+distincts. Seul le certificat public est chargé dans Entra ID ; la clé privée
+reste sur la VM.
+
+Créer un répertoire non accessible aux utilisateurs ordinaires, puis installer
+les fichiers fournis par le responsable de l'application Entra :
+
+```bash
+sudo install -d -o root -g 10001 -m 0750 /etc/gta/secrets
+sudo install -o root -g 10001 -m 0640 /chemin/publisher-private-key.pem /etc/gta/secrets/publisher-private-key.pem
+sudo install -o root -g 10001 -m 0640 /chemin/publisher-certificate.pem /etc/gta/secrets/publisher-certificate.pem
+```
+
+Vérifier les métadonnées et la validité sans afficher les clés :
+
+```bash
+sudo stat -c '%n uid=%u gid=%g mode=%a' /etc/gta/secrets/publisher-private-key.pem /etc/gta/secrets/publisher-certificate.pem
+sudo openssl pkey -in /etc/gta/secrets/publisher-private-key.pem -check -noout
+sudo openssl x509 -in /etc/gta/secrets/publisher-certificate.pem -noout -subject -issuer -dates -fingerprint -sha256
+sudo openssl pkey -in /etc/gta/secrets/publisher-private-key.pem -pubout -outform DER | sha256sum
+sudo openssl x509 -in /etc/gta/secrets/publisher-certificate.pem -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum
+```
+
+Le certificat doit contenir `BEGIN CERTIFICATE`, et non uniquement
+`BEGIN PUBLIC KEY`. Les deux dernières commandes doivent produire le même
+SHA-256, ce qui confirme que le certificat correspond à la clé privée.
+Consigner l'empreinte du certificat, son expiration et son responsable, sans
+enregistrer la clé privée ni sa passphrase.
+
+### Créer les réseaux
+
+Créer les réseaux partagés une seule fois, depuis Dokploy ou sur la VM :
 
 ```bash
 sudo docker network create --driver bridge gta-database-network
 sudo docker network create --driver bridge --internal gta-prod-transcription-network
 ```
 
-Le réseau de base doit permettre aux workers d'atteindre leurs dépendances
-HTTPS. Le réseau de transcription peut rester `internal` et ne doit pas être
-relié à Traefik. `dokploy-network` est normalement créé par Dokploy.
+`dokploy-network` est créé et géré par Dokploy. Le réseau database est partagé
+entre PostgreSQL et les services applicatifs concernés, sans port PostgreSQL
+publié. Le réseau transcription reste interne à Docker.
 
-Raccorder PostgreSQL à `gta-database-network` lorsqu'il est déployé sur le même
-hôte. Pour une base distante, conserver malgré tout le réseau externe déclaré
-par Compose et utiliser dans `DATABASE_URL` un nom DNS résolu depuis les
-conteneurs.
+## Configurer Microsoft Entra ID et Exchange Online
 
-Le volume audio nommé est créé par Compose à partir de `AUDIO_VOLUME_NAME`.
-Choisir un nom propre à la production et l'inclure dans la politique de
-sauvegarde. Ne jamais exécuter `docker compose down -v` sur cette stack.
+### Créer l'identité applicative
 
-## Installer les certificats sur l'hôte
+Créer une App Registration **single-tenant** réservée au publisher. Relever :
 
-Installer sur la VM :
+- le Tenant ID ;
+- l'Application (client) ID ;
+- l'Object ID de l'Enterprise Application, aussi appelé service principal ;
+- l'Object ID Entra de l'utilisateur représentant la boîte dédiée.
 
-- un bundle CA combinant les autorités internes nécessaires et les autorités
-  publiques utilisées par les dépendances ;
-- la clé privée PEM Entra ;
-- le certificat public X.509 PEM associé.
+Charger le certificat public X.509 dans **App registrations > Certificates &
+secrets > Certificates**. Ne jamais charger ni transmettre la clé privée.
 
-Les trois fichiers sont montés en lecture seule. La clé privée doit être
-accessible uniquement aux administrateurs et à l'UID/GID `10001` utilisé dans
-le conteneur publisher. Vérifier les métadonnées sans afficher leur contenu :
+Ne pas accorder en parallèle une permission applicative Microsoft Graph
+`Mail.ReadWrite` à l'échelle du tenant. Les permissions Entra et Exchange RBAC
+sont additives : une permission Entra non bornée annulerait le cloisonnement à
+la boîte.
 
-```bash
-sudo stat -c '%n uid=%u gid=%g mode=%a' /chemin/ca-bundle.pem
-sudo stat -c '%n uid=%u gid=%g mode=%a' /chemin/publisher-private-key.pem
-sudo stat -c '%n uid=%u gid=%g mode=%a' /chemin/publisher-certificate.pem
+### Limiter l'application à la boîte dédiée
+
+La méthode de référence est **Exchange Online RBAC for Applications**, qui
+remplace les anciennes Application Access Policies pour une nouvelle
+configuration.
+
+L'exemple ci-dessous utilise `CustomAttribute15`. L'administrateur Exchange doit
+d'abord confirmer que cet attribut est libre et approuver sa valeur. Sinon, il
+doit choisir un autre attribut ou un autre scope supporté.
+
+Depuis un poste d'administration approuvé disposant du module
+`ExchangeOnlineManagement`, contrôler d'abord que l'attribut retenu n'est ni
+déjà utilisé par la boîte, ni porté par une autre boîte :
+
+```powershell
+Connect-ExchangeOnline
+
+Get-Mailbox -Identity "BOITE_DEDIEE_UPN" |
+  Format-List PrimarySmtpAddress,CustomAttribute15
+
+Get-Recipient `
+  -RecipientPreviewFilter "CustomAttribute15 -eq 'GTA-PUBLISHER'"
 ```
 
-Valider séparément la chaîne TLS des services internes avec
-`openssl s_client`, sans désactiver la vérification. Une CA cliente mTLS ne peut pas être
-remplacée par `CA_BUNDLE_HOST_PATH` : cette variable établit uniquement la
-confiance envers le certificat présenté par le serveur.
+Après validation de ces contrôles par l'administrateur Exchange, appliquer la
+configuration :
 
-## Déployer la transcription locale, si elle est sélectionnée
+```powershell
 
-Pour `TRANSCRIPTION_PROVIDER=openai_compatible`, créer d'abord un projet
-Dokploy basé sur :
+Set-Mailbox -Identity "BOITE_DEDIEE_UPN" -CustomAttribute15 "GTA-PUBLISHER"
 
-```text
-./infra/docker/transcription/docker-compose.transcription.yml
+New-ManagementScope `
+  -Name "GTA Publisher Mailbox" `
+  -RecipientRestrictionFilter "CustomAttribute15 -eq 'GTA-PUBLISHER'"
+
+New-ServicePrincipal `
+  -AppId "APPLICATION_CLIENT_ID" `
+  -ObjectId "ENTERPRISE_APPLICATION_OBJECT_ID" `
+  -DisplayName "GLPI Ticketing Publisher"
+
+New-ManagementRoleAssignment `
+  -Name "GTA Publisher Mail.ReadWrite" `
+  -Role "Application Mail.ReadWrite" `
+  -App "ENTERPRISE_APPLICATION_OBJECT_ID" `
+  -CustomResourceScope "GTA Publisher Mailbox"
 ```
 
-Reprendre `infra/docker/transcription/transcription.env.example` et adapter au
-minimum :
+Pour `New-ServicePrincipal`, utiliser l'Object ID de l'**Enterprise
+Application**, pas l'Object ID affiché sur la page App Registration.
 
-- `COMPOSE_PROJECT_NAME=gta-prod-transcription` ;
-- `APP_RELEASE=vX.Y.Z` ;
-- `APP_COMMIT_SHA` avec le SHA complet du tag ;
-- `TRANSCRIPTION_NETWORK_NAME=gta-prod-transcription-network` ;
-- `TRANSCRIPTION_NETWORK_ALIAS=gta-prod-transcription` ;
-- une nouvelle `TRANSCRIPTION_API_KEY` propre à la production ;
-- les limites CPU et mémoire validées en staging.
+Avant de créer les objets, vérifier qu'un scope, un service principal ou une
+affectation portant ces noms n'existe pas déjà. Ne pas dupliquer aveuglément la
+configuration lors d'une reprise de procédure.
 
-Déployer puis attendre l'état `healthy`. Ne créer ni domaine Dokploy, ni port
-publié pour ce service.
+Répéter ensuite `Get-Recipient -RecipientPreviewFilter` et vérifier que le
+filtre sélectionne exactement la boîte dédiée. Dans un environnement hybride,
+l'attribut peut être maîtrisé par l'annuaire source ; l'administrateur doit
+alors effectuer la modification au bon endroit ou choisir un autre scope.
 
-Avec `legacy_polling`, ne pas déployer cette stack. Le réseau de transcription
-déclaré par le Compose applicatif doit néanmoins exister.
+Tester ensuite les deux sens du cloisonnement :
 
-## Configurer le projet applicatif
+```powershell
+Test-ServicePrincipalAuthorization `
+  -Identity "ENTERPRISE_APPLICATION_OBJECT_ID" `
+  -Resource "BOITE_DEDIEE_UPN"
 
-Créer un projet Docker Compose Dokploy utilisant :
-
-```text
-./infra/docker/apps/docker-compose.prod.yml
+Test-ServicePrincipalAuthorization `
+  -Identity "ENTERPRISE_APPLICATION_OBJECT_ID" `
+  -Resource "BOITE_HORS_PERIMETRE_UPN"
 ```
 
-Copier les variables de `infra/docker/apps/.env.example` dans l'onglet
-Environment, puis remplacer tous les placeholders. Contrôler en particulier :
+Le rôle `Application Mail.ReadWrite` doit retourner `InScope=True` uniquement
+pour la boîte dédiée et `InScope=False` pour la boîte de contrôle. La commande
+de test ne tient pas compte d'éventuelles permissions organisationnelles
+accordées directement dans Entra : celles-ci doivent être contrôlées et
+retirées séparément.
+
+Une modification d'autorisation peut nécessiter de 30 minutes à 2 heures avant
+d'être reflétée par les appels réels, même si la commande de test est déjà
+positive.
+
+## Porte de validation 1 — Socle et dépendances
+
+Ne pas créer les projets applicatifs tant que les contrôles suivants ne sont
+pas validés :
+
+- [ ] la VM respecte le dimensionnement retenu ;
+- [ ] Ubuntu, Docker, Docker Compose et Dokploy sont opérationnels ;
+- [ ] la date, le fuseau et NTP sont corrects ;
+- [ ] les noms du dashboard et de GLPI sont résolus ;
+- [ ] la chaîne TLS de GLPI est valide ;
+- [ ] l'API GLPI V2.3.0 délivre un token OAuth sans exposer celui-ci ;
+- [ ] les réseaux database et transcription existent ;
+- [ ] le certificat Entra public chargé correspond à la clé privée conservée
+      sur la VM et n'est pas expiré ;
+- [ ] les deux fichiers PEM sont lisibles par le GID `10001` ;
+- [ ] l'autorisation Exchange est `InScope=True` sur la boîte dédiée et
+      `InScope=False` sur une boîte hors périmètre ;
+- [ ] le scope Exchange sélectionne exactement la boîte dédiée ;
+- [ ] aucune permission Entra `Mail.ReadWrite` tenant-wide ne contourne ce
+      scope ;
+- [ ] le contenu initial de l'Inbox a été contrôlé et son traitement approuvé ;
+- [ ] les flux réseau respectent la matrice du pare-feu ;
+- [ ] le certificat HTTPS du dashboard est valide et non expiré.
+
+Consigner la date, l'opérateur, les versions, les empreintes publiques et le
+résultat des contrôles sans enregistrer de secret.
+
+## Configuration de GitHub et Dokploy
+
+### Créer la GitHub App
+
+Dans Dokploy, ouvrir **Git**, choisir GitHub, puis utiliser **Create GitHub
+App**. Installer l'application uniquement sur le dépôt
+`glpi-ticketing-automation`.
+
+Vérifier que Dokploy peut lister le dépôt privé, le tag retenu et son SHA sans
+utiliser de Personal Access Token dans le Compose ou l'environnement.
+
+### Créer le service PostgreSQL
+
+Créer PostgreSQL comme une application **Database** dans Dokploy, puis
+rattacher son service à `gta-database-network`. Aucun domaine ni port public ne
+doit lui être associé.
+
+Reporter les paramètres de connexion internes fournis par Dokploy dans
+`DATABASE_URL`. Le hostname dépend du nom interne réellement attribué au
+service ; ne pas supposer qu'il s'agit de `localhost`.
+
+### Créer les deux projets Compose
+
+Créer les projets dans cet ordre :
+
+| Ordre | Projet | Fichier Compose | Modèle d'environnement |
+| ---: | --- | --- | --- |
+| 1 | Transcription | `infra/docker/transcription/docker-compose.transcription.yml` | `infra/docker/transcription/transcription.env.example` |
+| 2 | Applications | `infra/docker/apps/docker-compose.prod.yml` | `infra/docker/apps/.env.example` |
+
+Pour les deux projets :
+
+- sélectionner le même dépôt et le même tag immuable `vX.Y.Z` ;
+- relever le SHA complet du tag et l'utiliser dans `APP_COMMIT_SHA` ;
+- conserver l'auto-déploiement désactivé ;
+- désactiver toute exposition publique non demandée ;
+- déployer manuellement la transcription avant les applications.
+
+`APP_COMMIT_SHA` fournit une identité affichée par l'application, mais ne
+verrouille pas à lui seul le checkout Git. Vérifier dans Dokploy que le tag et
+le SHA réellement extraits correspondent avant chaque build.
+
+### Renseigner l'environnement de transcription
+
+Reprendre le modèle de transcription et adapter au minimum :
+
+```dotenv
+COMPOSE_PROJECT_NAME=gta-prod-transcription
+APP_RELEASE=vX.Y.Z
+APP_COMMIT_SHA=SHA_COMPLET_DU_TAG
+TRANSCRIPTION_NETWORK_NAME=gta-prod-transcription-network
+TRANSCRIPTION_NETWORK_ALIAS=gta-prod-transcription
+TRANSCRIPTION_API_KEY=SECRET_PROPRE_A_LA_PRODUCTION
+```
+
+Conserver l'URL immuable du modèle et son SHA-256. Utiliser les limites CPU et
+mémoire qualifiées en staging.
+
+### Renseigner l'environnement applicatif
+
+Copier le contenu de `infra/docker/apps/.env.example` dans l'onglet
+**Environment** du projet Applications et remplacer tous les placeholders.
+Ce modèle supporte les deux providers et conserve des valeurs génériques : pour
+la cible nominale de cette procédure, les valeurs Parakeet ci-dessous
+prévalent. Contrôler notamment :
 
 - `APP_ENVIRONMENT=production` ;
-- `APP_RELEASE` contient le tag exact et `APP_COMMIT_SHA` son SHA complet ;
-- `DATABASE_URL` cible la base dédiée et utilise `sslmode=verify-full` lorsque
-  la connexion PostgreSQL passe par TLS ;
-- les noms des réseaux et du volume sont propres à la production ;
-- `CA_BUNDLE_HOST_PATH` et les deux chemins PEM désignent les fichiers préparés
-  sur la VM ;
-- `PUBLIC_BASE_URL` correspond au domaine interne du dashboard ;
-- les identifiants Entra ciblent uniquement la boîte dédiée ;
-- les identifiants GLPI et `GLPI_TICKET_REQUEST_SOURCE_ID` appartiennent à
-  l'instance de production ;
-- les secrets de staging ne sont jamais réutilisés.
+- `APP_RELEASE=vX.Y.Z` et `APP_COMMIT_SHA` contient le SHA complet du tag ;
+- `DATABASE_NETWORK_NAME=gta-database-network` ;
+- `TRANSCRIPTION_NETWORK_NAME=gta-prod-transcription-network` ;
+- `AUDIO_VOLUME_NAME=gta-prod-audio-data` ;
+- `DATABASE_URL` cible exclusivement la Database de production ;
+- `CA_BUNDLE_HOST_PATH=/etc/ssl/certs/ca-certificates.crt` ;
+- `PUBLIC_BASE_URL` contient le domaine HTTPS interne du dashboard ;
+- `TRANSCRIPTION_PROVIDER=openai_compatible` ;
+- `OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL=http://gta-prod-transcription:5092/v1` ;
+- `OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY` est identique à
+  `TRANSCRIPTION_API_KEY` dans le projet Transcription ;
+- `OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL=parakeet-ultra` ;
+- `OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE=fr` ;
+- `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS=120` pour l'inférence CPU ;
+- `PUBLISHER_ENTRA_TENANT_ID` contient le Tenant ID ;
+- `PUBLISHER_ENTRA_CLIENT_ID` contient l'Application (client) ID ;
+- `PUBLISHER_MAILBOX_ID` contient l'Object ID Entra de l'utilisateur de la
+  boîte, pas son Exchange GUID ;
+- les deux chemins hôte PEM pointent vers `/etc/gta/secrets` ;
+- `GLPI_BASE_URL` et les identifiants ciblent exclusivement la production ;
+- `GLPI_TICKET_REQUEST_SOURCE_ID` correspond à la source `MEVO` de cette
+  instance.
 
-Pour `legacy_polling`, renseigner son URL et sa clé. Pour
-`openai_compatible`, utiliser la base
-`http://gta-prod-transcription:5092/v1`, sélectionner le modèle attendu et
-recopier exactement la clé de la stack locale. Ne renseigner dans les logs ou
-la documentation aucune de ces valeurs.
+Le Compose impose `PUBLISHER_GRAPH_AUTH_MODE=entra_certificate` et
+`PUBLISHER_GRAPH_BASE_URL=https://graph.microsoft.com/v1.0`. La passphrase de
+la clé privée reste vide uniquement si la clé n'est pas chiffrée.
 
-Avant le déploiement, vérifier le rendu Compose avec un fichier temporaire
-contenant uniquement les valeurs de l'environnement concerné :
+Les variables `legacy_polling` peuvent rester renseignées pour une bascule
+manuelle ultérieure, mais aucun basculement automatique n'est réalisé. Un
+changement de provider constitue une opération contrôlée.
+
+Ne jamais créer ou committer un fichier `.env` réel. Les valeurs doivent être
+enregistrées directement dans le gestionnaire d'environnement Dokploy.
+
+### Configurer le domaine du web
+
+Dans le projet Applications, associer uniquement le service `web` :
+
+- au nom DNS interne de production ;
+- au port interne `8000` ;
+- au chemin `/` ;
+- à HTTPS avec le certificat importé dans Dokploy.
+
+Ne publier directement aucun port du web, des workers, de PostgreSQL ou du
+moteur de transcription. Le domaine doit passer par Traefik et
+`dokploy-network`.
+
+## Déploiement et validations techniques
+
+### 1. Déployer la transcription
+
+Déployer le projet Transcription et attendre que `transcription-api` soit
+`healthy`. Le service ne reçoit ni domaine Dokploy ni publication Traefik.
+
+Depuis son terminal :
 
 ```bash
-docker compose --env-file /chemin/securise/production.env --file infra/docker/apps/docker-compose.prod.yml config --quiet
+python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:5092/health/ready", timeout=5).read().decode())'
 ```
 
-Ne jamais publier la sortie complète de `docker compose config`, car elle peut
-contenir des valeurs résolues sensibles.
+Ne pas poursuivre tant que le modèle n'est pas chargé.
 
-## Déployer les applications
+### 2. Déployer les applications
 
-Déclencher le déploiement du projet applicatif. L'ordre interne attendu est :
+Confirmer une dernière fois que le backlog Inbox est autorisé au traitement,
+puis déployer le projet Applications. Le publisher peut commencer à consommer
+la boîte dès son démarrage.
 
-1. `database-migrations` attend PostgreSQL et exécute `alembic upgrade head` ;
-2. la migration se termine avec le code `0` ;
-3. le web et les trois workers démarrent après ce succès.
+Vérifier dans cet ordre :
 
-Si la migration échoue, ne démarrer manuellement aucun worker. Corriger la
-cause, contrôler l'état de la base et relancer uniquement après une décision
-explicite.
+1. `database-migrations` termine avec le code `0` ;
+2. `web`, `worker-publisher`, `worker-automation` et `worker-retention`
+   démarrent ;
+3. le dashboard affiche les trois heartbeats ;
+4. l'environnement, le tag et le SHA correspondent au déploiement ;
+5. le publisher obtient un jeton et accède à la boîte sans erreur `401` ou
+   `403` ;
+6. automation et retention joignent GLPI sans erreur TLS ;
+7. aucun journal ne contient de secret, de jeton, d'identifiant de message,
+   d'audio, de transcription ou de réponse HTTP brute.
 
-Dans Dokploy, associer le domaine interne uniquement au service `web` sur son
-port conteneur `8000`.
+Le healthcheck du publisher valide PostgreSQL, le volume et son heartbeat, mais
+pas l'accès Entra/Graph. La vérification des journaux et la recette fonctionnelle
+sont donc obligatoires pour qualifier cette frontière.
 
-## Vérifications
+## Porte de validation 2 — Déploiement
 
-Contrôler successivement :
+La recette fonctionnelle peut commencer uniquement lorsque :
 
-1. le code de sortie `0` de `database-migrations` ;
-2. l'état démarré des quatre services persistants ;
-3. `GET /health` sur le domaine interne ;
-4. l'environnement, le tag et le SHA affichés par le dashboard ou
-   `GET /api/version` ;
-5. la présence d'un heartbeat frais pour chacun des trois workers ;
-6. l'absence de secret, transcription, audio ou réponse HTTP brute dans les
-   journaux ;
-7. l'absence d'exposition Traefik de PostgreSQL et de la transcription locale.
+- [ ] la transcription est `healthy` ;
+- [ ] la migration est terminée avec le code `0` ;
+- [ ] le web et les trois workers sont en cours d'exécution ;
+- [ ] les trois heartbeats sont frais ;
+- [ ] PostgreSQL ne possède ni domaine ni port public ;
+- [ ] `production`, le tag et le SHA attendus sont affichés ;
+- [ ] seul le web est accessible via Traefik ;
+- [ ] le certificat HTTPS est accepté depuis un poste opérateur ;
+- [ ] GLPI est joignable avec vérification TLS ;
+- [ ] le publisher accède à la seule boîte autorisée sans erreur Entra/Graph ;
+- [ ] aucun traitement antérieur inattendu n'a été déclenché.
 
-Effectuer ensuite un test fonctionnel autorisé avec un message et un audio
-entièrement fictifs. Vérifier le déplacement Exchange vers `Processed`, la
-transcription, la création d'un unique ticket GLPI, la corrélation de son UUID
-et l'accès contrôlé à l'audio depuis le dashboard.
+## Recette fonctionnelle
+
+La recette utilise les services réels, mais uniquement des données fictives et
+non sensibles. Prévenir les opérateurs GLPI afin que le ticket de recette soit
+identifiable et traité comme tel.
+
+1. envoyer dans la boîte dédiée un message contenant exactement un WAV ou un
+   OGG fictif de moins de 25 Mio ;
+2. vérifier que le publisher découvre le message et crée un job `pending` ;
+3. vérifier le déplacement du message dans `Processed` ;
+4. suivre les transitions `pending`, `processing`, puis `completed` ;
+5. vérifier la transcription sans journaliser son contenu ;
+6. vérifier la création d'un unique ticket dans GLPI ;
+7. vérifier la correspondance entre l'UUID du job et `external_id` ;
+8. vérifier l'identifiant GLPI et les événements expurgés dans le dashboard ;
+9. télécharger l'audio fictif via HTTPS depuis un poste autorisé ;
+10. clôturer le ticket de recette selon la procédure fonctionnelle retenue.
+
+Ne jamais utiliser une donnée patient, un enregistrement réel ou une boîte
+utilisateur pour cette recette.
+
+## Diagnostic
+
+Identifier d'abord la frontière défaillante :
+
+1. authentification par certificat auprès de Microsoft Entra ID ;
+2. autorisation Exchange RBAC et accès Graph à la boîte ;
+3. persistance PostgreSQL et publication sur le volume audio ;
+4. transcription Parakeet ou provider historique ;
+5. création ou consultation GLPI ;
+6. rétention ;
+7. dashboard, Traefik et certificat opérateur.
+
+Interprétations principales :
+
+- `401` Entra/Graph : vérifier tenant, client ID, certificat, clé associée,
+  passphrase et expiration ;
+- `403` Graph : vérifier le rôle Exchange, son scope, le mailbox Object ID et
+  l'absence de délai de propagation ;
+- erreur TLS : vérifier le nom DNS et la chaîne de confiance sans désactiver la
+  validation ;
+- heartbeat publisher dégradé : vérifier les événements expurgés et l'état
+  courant avant tout redémarrage ;
+- absence de nouveau message : contrôler l'Inbox, le scope RBAC et la
+  pagination avant de modifier PostgreSQL.
+
+Les logs ne doivent fournir que les UUID applicatifs, étapes, catégories et
+codes techniques expurgés. Ne pas publier `docker compose config`, qui peut
+résoudre des valeurs sensibles. Ne jamais lancer de nettoyage Docker global
+pour diagnostiquer la production.
+
+## Limites et points de vigilance
+
+- le dashboard ne possède pas encore d'authentification applicative et doit
+  rester limité au réseau interne ;
+- le healthcheck publisher ne teste pas Entra ID ou Microsoft Graph ;
+- toute l'Inbox existante est éligible au premier démarrage ;
+- les changements Exchange RBAC peuvent demander jusqu'à deux heures de
+  propagation ;
+- MP3 et M4A ne sont pas encore acceptés par le publisher ;
+- l'installation actuelle ne configure aucune sauvegarde PostgreSQL ou audio ;
+- une perte de la VM, de la Database ou du volume peut donc être irréversible ;
+- un rollback applicatif ne rétrograde pas automatiquement PostgreSQL et
+  n'annule ni un déplacement Exchange ni un ticket déjà créé dans GLPI.
 
 ## Échec initial et retour arrière
 
-En cas d'échec avant le premier traitement métier :
+En cas d'échec :
 
-1. arrêter les trois workers ;
-2. conserver les journaux nécessaires au diagnostic sans les diffuser ;
-3. ne supprimer ni le volume audio, ni la base PostgreSQL ;
-4. corriger la configuration ou redéployer le même tag ;
-5. restaurer uniquement une sauvegarde cohérente de PostgreSQL et du volume si
-   une corruption est démontrée.
+1. arrêter immédiatement les trois workers pour figer les nouvelles mutations ;
+2. conserver les journaux expurgés nécessaires au diagnostic ;
+3. ne supprimer ni la Database PostgreSQL ni le volume audio ;
+4. vérifier si des messages ont été déplacés ou des tickets créés ;
+5. corriger la configuration ou redéployer le même tag ;
+6. ne jamais rétrograder Alembic sans procédure explicitement validée.
 
-Dès que l'environnement a traité des messages, utiliser la
-[procédure de mise à jour](mise-a-jour.md). Un retour arrière applicatif ne
-réalise jamais automatiquement le downgrade du schéma Alembic.
+En l'absence de sauvegarde, cette procédure ne permet pas de restaurer un état
+antérieur de PostgreSQL ou du volume audio. Un redéploiement applicatif ne
+répare pas automatiquement les effets déjà produits dans Exchange ou GLPI.
+
+Dès qu'une première version est opérationnelle, toute nouvelle version doit
+suivre la [procédure de mise à jour](mise-a-jour.md), qui sera alignée
+séparément avec la politique de sauvegarde et de retour arrière retenue.
 
 ## Résultat attendu
 
-L'environnement affiche le tag et le SHA prévus, les migrations sont à jour,
-les trois workers ont un heartbeat frais, le dashboard est accessible
-uniquement depuis le réseau interne et un message synthétique traverse le flux
-sans créer de doublon ni exposer de donnée sensible.
+La production est valide lorsque :
+
+- les deux portes de validation sont signées ;
+- la transcription et les applications sont saines ;
+- les migrations sont à jour ;
+- les trois workers ont un heartbeat frais ;
+- l'application Entra est limitée à la boîte dédiée ;
+- un message fictif traverse Exchange, Parakeet et GLPI sans doublon ;
+- le tag et le SHA validés en staging sont affichés ;
+- seul le dashboard est exposé aux opérateurs autorisés ;
+- aucun secret, jeton ou contenu sensible n'est présent dans les journaux.
