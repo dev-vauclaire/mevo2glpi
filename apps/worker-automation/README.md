@@ -469,7 +469,7 @@ Principaux réglages optionnels :
 | `BLOCKED_RETENTION_DAYS` | `90` | Deadline absolue d'un job bloqué. |
 | `RETENTION_CHECK_INTERVAL_HOURS` | `6` | Intervalle entre les contrôles d'un ticket terminé, également utilisé avant le premier contrôle. |
 | `OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE` | `fr` | Langue envoyée au provider synchrone. |
-| `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une requête de transcription ; le staging CPU utilise `120`. |
+| `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une requête de transcription ; le staging CPU utilise `120` et la production CPU `180`. |
 | `TRANSCRIPTION_POLL_INTERVAL_SECONDS` | `2` | Intervalle de polling du provider legacy uniquement. |
 | `TRANSCRIPTION_JOB_TIMEOUT_SECONDS` | `900` | Durée maximale du polling legacy uniquement. |
 | `GLPI_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une opération GLPI. |

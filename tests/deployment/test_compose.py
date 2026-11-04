@@ -147,6 +147,8 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     assert documented_values["TRANSCRIPTION_NETWORK_NAME"] == (
         "gta-prod-transcription-network"
     )
+    assert documented_values["FAILED_RETENTION_DAYS"] == "10"
+    assert documented_values["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "180"
     assert documented_values["GLPI_TICKET_TYPE"] == "1"
     assert documented_values["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
         "CHANGE_ME_WITH_THE_PRODUCTION_MEVO_REQUEST_SOURCE_ID"

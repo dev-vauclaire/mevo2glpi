@@ -579,7 +579,8 @@ prévalent. Contrôler notamment :
   `TRANSCRIPTION_API_KEY` dans le projet Transcription ;
 - `OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL=parakeet-ultra` ;
 - `OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE=fr` ;
-- `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS=120` pour l'inférence CPU ;
+- `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS=180` pour l'inférence CPU ;
+- `FAILED_RETENTION_DAYS=10` pour la rétention absolue des jobs en échec ;
 - `PUBLISHER_ENTRA_TENANT_ID` contient le Tenant ID ;
 - `PUBLISHER_ENTRA_CLIENT_ID` contient l'Application (client) ID ;
 - `PUBLISHER_MAILBOX_ID` contient l'Object ID Entra de l'utilisateur de la
