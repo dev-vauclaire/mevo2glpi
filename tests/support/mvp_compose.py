@@ -576,6 +576,7 @@ def create_mvp_compose_environment(
     project_name = f"{project_prefix}{secrets.token_hex(5)}"
     proxy_network_name = f"{project_name}-dokploy"
     database_network_name = f"{project_name}-database"
+    transcription_network_name = f"{project_name}-transcription"
     audio_volume_name = f"{project_name}-audio-data"
     port_reservations = _reserve_loopback_ports(2)
     web_port = int(port_reservations[0].getsockname()[1])
@@ -595,6 +596,7 @@ def create_mvp_compose_environment(
         "APP_COMMIT_SHA": SYNTHETIC_APP_COMMIT_SHA,
         "DOKPLOY_NETWORK_NAME": proxy_network_name,
         "DATABASE_NETWORK_NAME": database_network_name,
+        "TRANSCRIPTION_NETWORK_NAME": transcription_network_name,
         "AUDIO_VOLUME_NAME": audio_volume_name,
         "DATABASE_URL": database_url,
         "DATABASE_CONNECT_TIMEOUT_SECONDS": "2",
@@ -687,7 +689,11 @@ def create_mvp_compose_environment(
         _runtime_secrets=runtime_secrets,
         _images=tuple(f"{project_name}-{service}" for service in CUSTOM_SERVICES),
         _port_reservations=port_reservations,
-        _external_network_names=(proxy_network_name, database_network_name),
+        _external_network_names=(
+            proxy_network_name,
+            database_network_name,
+            transcription_network_name,
+        ),
     )
 
 
