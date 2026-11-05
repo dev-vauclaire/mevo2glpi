@@ -228,7 +228,7 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
         assert "COPY --from=builder /app/.venv /app/.venv" in dockerfile
         assert (
             "COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE "
-            "/usr/share/licenses/glpi-ticketing-automation/"
+            "/usr/share/licenses/mevo2glpi/"
         ) in dockerfile
         assert 'org.opencontainers.image.licenses="EUPL-1.2"' in dockerfile
         assert "/app/providers/.venv" not in dockerfile

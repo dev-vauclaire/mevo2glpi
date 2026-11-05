@@ -129,12 +129,17 @@ Dans chaque projet concerné :
 3. ne modifier aucun secret ni aucune autre variable sans nécessité ;
 4. enregistrer la configuration avant de lancer le déploiement.
 
-Dans **Transcription** et **Applications (GTA)**, renseigner également :
+Sur une installation existante, **Applications (mevo2glpi)** peut encore
+porter le libellé historique **Applications (GTA)** dans Dokploy. Ce nom
+d'affichage n'a pas besoin d'être modifié et ne change ni
+`COMPOSE_PROJECT_NAME` ni les ressources Docker existantes.
+
+Dans **Transcription** et **Applications (mevo2glpi)**, renseigner également :
 
 - `APP_RELEASE` avec `main` ou le tag ;
 - `APP_COMMIT_SHA` avec le SHA complet.
 
-`APP_ENVIRONMENT` appartient uniquement au projet **Applications (GTA)**. Le
+`APP_ENVIRONMENT` appartient uniquement au projet **Applications (mevo2glpi)**. Le
 projet staging **Providers mocks** ne consomme aucune de ces trois variables :
 contrôler sa révision directement dans Dokploy.
 
@@ -160,7 +165,7 @@ applications si cette étape échoue.
 
 ## 5. Déployer les applications
 
-Dans le projet Dokploy **Applications (GTA)** :
+Dans le projet Dokploy **Applications (mevo2glpi)** :
 
 1. vérifier une dernière fois la référence, `APP_RELEASE` et
    `APP_COMMIT_SHA` ;
@@ -248,7 +253,7 @@ Si le schéma reste compatible avec la version précédente :
 1. sélectionner la référence précédente ;
 2. restaurer son `APP_RELEASE` et son `APP_COMMIT_SHA` ;
 3. redéployer d'abord Transcription si elle doit également revenir en arrière ;
-4. cliquer sur **Deploy** dans Applications (GTA) ;
+4. cliquer sur **Deploy** dans Applications (mevo2glpi) ;
 5. répéter intégralement les contrôles de cette procédure.
 
 Ne jamais exécuter automatiquement un `alembic downgrade`. Après la réussite de

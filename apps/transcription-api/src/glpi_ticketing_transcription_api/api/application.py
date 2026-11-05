@@ -75,7 +75,7 @@ def create_app(
             await asyncio.to_thread(engine.close)
 
     app = FastAPI(
-        title="GLPI ticketing transcription API",
+        title="mevo2glpi transcription API",
         version=__version__,
         lifespan=lifespan,
     )

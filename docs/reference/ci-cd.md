@@ -181,7 +181,7 @@ git rev-parse origin/main^{commit}
 ```
 
 L'auto-déploiement Dokploy reste désactivé. Dans le projet staging
-**Applications (GTA)**, utiliser :
+**Applications (mevo2glpi)**, utiliser :
 
 ```text
 APP_ENVIRONMENT=staging
@@ -263,7 +263,7 @@ explicitement.
 
 ## 6. Promouvoir la release en production
 
-Dans le projet production **Applications (GTA)**, utiliser exclusivement le tag
+Dans le projet production **Applications (mevo2glpi)**, utiliser exclusivement le tag
 immuable et son SHA complet :
 
 ```text

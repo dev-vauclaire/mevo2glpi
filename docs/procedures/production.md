@@ -2,8 +2,8 @@
 
 ## Objectif et périmètre
 
-Cette procédure décrit l'installation initiale de GLPI Ticketing Automation
-dans un environnement Dokploy de production. Elle suppose que les mêmes
+Cette procédure décrit l'installation initiale de mevo2glpi dans un
+environnement Dokploy de production. Elle suppose que les mêmes
 composants ont déjà été validés en staging sur le SHA destiné à la production.
 
 La production utilise des services réels :
@@ -41,7 +41,7 @@ flowchart LR
                 TRANSCRIBER["transcription-api<br/>Parakeet Ultra CPU"]
             end
 
-            subgraph GTA_APP["Application GTA"]
+            subgraph GTA_APP["Application mevo2glpi"]
                 direction LR
                 WEB["web"]
                 MIGRATIONS["database-migrations<br/>one-shot"]
@@ -129,10 +129,10 @@ flowchart LR
 Deux applications Docker Compose Dokploy sont déployées séparément :
 
 1. **Transcription**, avec le service Parakeet ;
-2. **GTA**, avec le web, la migration one-shot et les trois workers.
+2. **mevo2glpi**, avec le web, la migration one-shot et les trois workers.
 
 PostgreSQL est créé séparément comme une application **Database** dans
-Dokploy. Le volume audio appartient au projet GTA et reste partagé par les
+Dokploy. Le volume audio appartient au projet mevo2glpi et reste partagé par les
 services qui en ont besoin.
 
 Le rôle de Microsoft Entra ID est d'authentifier l'application. L'autorisation
@@ -445,7 +445,7 @@ New-ManagementScope `
 New-ServicePrincipal `
   -AppId "APPLICATION_CLIENT_ID" `
   -ObjectId "ENTERPRISE_APPLICATION_OBJECT_ID" `
-  -DisplayName "GLPI Ticketing Publisher"
+  -DisplayName "mevo2glpi Publisher"
 
 New-ManagementRoleAssignment `
   -Name "GTA Publisher Mail.ReadWrite" `

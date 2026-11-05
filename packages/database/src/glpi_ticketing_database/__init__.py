@@ -1,4 +1,4 @@
-"""Shared persistence contracts for the GLPI ticketing MVP."""
+"""Shared persistence contracts for mevo2glpi."""
 
 from .advisory_locks import (
     AdvisoryLock,

@@ -188,7 +188,7 @@ def test_production_manifest_builds_the_five_expected_images(
     }
     for service_name, dockerfile in expected_dockerfiles.items():
         build = services[service_name]["build"]
-        assert build["context"].endswith("glpi-ticketing-automation")
+        assert Path(build["context"]).resolve() == DOCKER_ROOT.parent.parent.resolve()
         assert build["dockerfile"] == dockerfile
         assert build["args"] == {
             "IMAGE_VERSION": SYNTHETIC_APP_RELEASE,
@@ -240,7 +240,7 @@ def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
         assert "COPY pyproject.toml uv.lock README.md ./" in dockerfile
         assert (
             "COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE "
-            "/usr/share/licenses/glpi-ticketing-automation/"
+            "/usr/share/licenses/mevo2glpi/"
         ) in dockerfile
         for member in members:
             manifest = f"{member}/pyproject.toml"
@@ -269,6 +269,7 @@ def test_application_dockerfiles_embed_the_release_identity() -> None:
         assert "ARG VCS_REF=" not in dockerfile
         assert 'org.opencontainers.image.version="${IMAGE_VERSION}"' in dockerfile
         assert 'org.opencontainers.image.revision="${VCS_REF}"' in dockerfile
+        assert 'org.opencontainers.image.title="mevo2glpi ' in dockerfile
         assert 'org.opencontainers.image.licenses="EUPL-1.2' in dockerfile
         assert "ENV APP_RELEASE=${IMAGE_VERSION}" in dockerfile
         assert "APP_COMMIT_SHA=${VCS_REF}" in dockerfile

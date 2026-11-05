@@ -64,7 +64,7 @@ ENV HOME=/nonexistent \
 
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
-COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE /usr/share/licenses/glpi-ticketing-automation/
+COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE /usr/share/licenses/mevo2glpi/
 
 USER 10001:10001
 

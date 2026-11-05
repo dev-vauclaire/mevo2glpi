@@ -1,7 +1,7 @@
 [project]
-name = "glpi-ticketing-automation-workspace"
+name = "mevo2glpi-workspace"
 version = "0.1.0"
-description = "Workspace d'automatisation des messages vocaux en tickets GLPI"
+description = "Workspace mevo2glpi pour transformer les messages vocaux en tickets GLPI"
 readme = "README.md"
 license = "EUPL-1.2"
 requires-python = ">=3.12"

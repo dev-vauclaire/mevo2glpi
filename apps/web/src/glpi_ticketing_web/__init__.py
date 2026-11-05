@@ -1,4 +1,4 @@
-"""GLPI ticketing web application."""
+"""mevo2glpi web application."""
 
 from importlib.metadata import version
 

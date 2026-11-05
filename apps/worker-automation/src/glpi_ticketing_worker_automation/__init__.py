@@ -1,1 +1,1 @@
-"""GLPI ticketing automation worker application."""
+"""mevo2glpi automation worker application."""

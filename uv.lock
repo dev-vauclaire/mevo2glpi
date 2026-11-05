@@ -4,7 +4,7 @@ requires-python = ">=3.12"
 
 [manifest]
 members = [
-    "glpi-ticketing-automation-workspace",
+    "mevo2glpi-workspace",
     "glpi-ticketing-common",
     "glpi-ticketing-database",
     "glpi-ticketing-database-migrations",
@@ -391,7 +391,7 @@ wheels = [
 ]
 
 [[package]]
-name = "glpi-ticketing-automation-workspace"
+name = "mevo2glpi-workspace"
 version = "0.1.0"
 source = { virtual = "." }
 

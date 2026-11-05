@@ -68,7 +68,7 @@ ARG VCS_REF
 ARG TRANSCRIBE_CPP_VERSION
 
 LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-ticketing-automation" \
-      org.opencontainers.image.title="GLPI ticketing transcription API" \
+      org.opencontainers.image.title="mevo2glpi transcription API" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.licenses="EUPL-1.2 AND MIT AND CC-BY-4.0" \
@@ -101,7 +101,7 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=model-fetcher --chown=10001:10001 /models /models
 COPY --chown=10001:10001 apps/transcription-api/THIRD_PARTY_NOTICES.md /app/THIRD_PARTY_NOTICES.md
-COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE /usr/share/licenses/glpi-ticketing-automation/
+COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE /usr/share/licenses/mevo2glpi/
 
 USER 10001:10001
 

@@ -117,6 +117,12 @@ def _request(client: TestClient, **overrides: object):
     return client.post("/v1/audio/transcriptions", **kwargs)  # type: ignore[arg-type]
 
 
+def test_api_uses_the_project_identity() -> None:
+    client, _engine, _normalizer = _client()
+
+    assert client.app.title == "mevo2glpi transcription API"
+
+
 def test_health_distinguishes_liveness_and_readiness() -> None:
     client, engine, _normalizer = _client()
 

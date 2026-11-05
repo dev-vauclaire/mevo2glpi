@@ -2,8 +2,8 @@
 
 ## Objectif et périmètre
 
-Cette procédure décrit l'installation initiale et la recette de GLPI Ticketing
-Automation dans un environnement Dokploy de staging. Elle suppose qu'une
+Cette procédure décrit l'installation initiale et la recette de mevo2glpi dans
+un environnement Dokploy de staging. Elle suppose qu'une
 instance GLPI de test existe déjà et qu'elle est accessible directement en
 HTTPS depuis la VM de staging.
 
@@ -40,7 +40,7 @@ flowchart LR
                 TRANSCRIBER["transcription-api<br/>Parakeet Ultra CPU"]
             end
 
-            subgraph GTA_APP["Projet Dokploy<br/>Applications (GTA)"]
+            subgraph GTA_APP["Projet Dokploy<br/>Applications (mevo2glpi)"]
                 direction LR
                 WEB["web"]
                 MIGRATIONS["database-migrations<br/>one-shot"]
@@ -123,14 +123,14 @@ flowchart LR
 Microsoft Graph et le contrat Transcribe AI historique sont mockés dans une
 application Dokploy dédiée. Le simulateur Graph ne teste donc pas
 l'authentification Microsoft Entra ID. La transcription Parakeet, les services
-GTA et PostgreSQL sont déployés dans Dokploy, tandis que le GLPI de test reste
+mevo2glpi et PostgreSQL sont déployés dans Dokploy, tandis que le GLPI de test reste
 un service externe réel.
 
 Trois applications Docker Compose Dokploy sont déployées séparément :
 
 1. **Providers mocks**, avec les conteneurs Microsoft Graph et Transcribe AI ;
 2. **Transcription**, avec le conteneur Parakeet ;
-3. **Applications (GTA)**, avec le web, la migration one-shot et les trois
+3. **Applications (mevo2glpi)**, avec le web, la migration one-shot et les trois
    workers.
 
 PostgreSQL est créé séparément comme une application **Database** dans
@@ -423,7 +423,7 @@ Pour les trois projets :
 - limiter les watch paths au périmètre du projet.
 
 Renseigner ce même SHA dans `APP_COMMIT_SHA` pour les projets **Transcription**
-et **Applications (GTA)**. Le projet **Providers mocks** ne consomme ni
+et **Applications (mevo2glpi)**. Le projet **Providers mocks** ne consomme ni
 `APP_RELEASE` ni `APP_COMMIT_SHA` : sa révision est contrôlée directement dans
 Dokploy.
 

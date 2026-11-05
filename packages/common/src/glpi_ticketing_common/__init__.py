@@ -1,4 +1,4 @@
-"""Shared primitives for GLPI ticketing applications."""
+"""Shared primitives for mevo2glpi applications."""
 
 from .originating_phone_number import (
     OriginatingPhoneNumberCipher,

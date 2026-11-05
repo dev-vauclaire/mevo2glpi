@@ -46,3 +46,19 @@ Le dossier `infra/docker/` est organisé par périmètre de déploiement :
   staging ;
 - `transcription/` déploie indépendamment le service local de transcription
   CPU.
+
+## Identifiants techniques historiques
+
+Le nom visible du projet est `mevo2glpi`. Les namespaces et commandes Python
+`glpi_ticketing_*` et `glpi-ticketing-*` restent toutefois inchangés pour
+préserver la compatibilité avec les images et les scripts existants.
+
+La même règle s'applique aux variables `GTA_*`, aux ressources Docker et
+PostgreSQL existantes, aux chemins de secrets, aux identifiants Entra, aux
+verrous PostgreSQL et au contexte cryptographique des données déjà chiffrées.
+Ils ne doivent pas faire l'objet d'un remplacement textuel global. Leur
+renommage nécessiterait une migration dédiée avec une procédure de retour
+arrière.
+
+L'URL du dépôt GitHub reste également inchangée tant que le dépôt distant n'a
+pas été renommé.
