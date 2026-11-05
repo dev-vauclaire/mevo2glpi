@@ -46,7 +46,8 @@ ARG VCS_REF
 LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-ticketing-automation" \
       org.opencontainers.image.title="GLPI ticketing publisher worker" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
-      org.opencontainers.image.revision="${VCS_REF}"
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.licenses="EUPL-1.2"
 
 RUN groupadd --gid 10001 gta \
     && useradd --uid 10001 --gid 10001 \
@@ -65,6 +66,7 @@ ENV APP_RELEASE=${IMAGE_VERSION} \
     WORKER_HEALTHCHECK_STALE_AFTER_SECONDS=45
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
+COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE /usr/share/licenses/glpi-ticketing-automation/
 
 USER 10001:10001
 STOPSIGNAL SIGTERM

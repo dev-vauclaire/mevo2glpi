@@ -2,6 +2,7 @@
 name = "glpi-ticketing-glpi"
 version = "0.1.0"
 description = "Client HTTP partagé pour le contrat GLPI API V2"
+license = "EUPL-1.2"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28,<1",

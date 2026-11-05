@@ -71,7 +71,7 @@ LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-tic
       org.opencontainers.image.title="GLPI ticketing transcription API" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.licenses="MIT AND CC-BY-4.0" \
+      org.opencontainers.image.licenses="EUPL-1.2 AND MIT AND CC-BY-4.0" \
       org.opencontainers.image.transcribe-cpp.version="${TRANSCRIBE_CPP_VERSION}"
 
 RUN apt-get update \
@@ -101,6 +101,7 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=model-fetcher --chown=10001:10001 /models /models
 COPY --chown=10001:10001 apps/transcription-api/THIRD_PARTY_NOTICES.md /app/THIRD_PARTY_NOTICES.md
+COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE /usr/share/licenses/glpi-ticketing-automation/
 
 USER 10001:10001
 

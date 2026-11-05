@@ -203,6 +203,8 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
     for required_path in (
         "!pyproject.toml",
         "!uv.lock",
+        "!LICENSE",
+        "!NOTICE",
         "!providers/simulators/microsoft-graph-simulator/pyproject.toml",
         "!providers/simulators/microsoft-graph-simulator/src/**",
         "!providers/simulators/openai-transcription-simulator/pyproject.toml",
@@ -224,6 +226,11 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
         assert "ghcr.io/astral-sh/uv:0.10.11@sha256:" in dockerfile
         assert "UV_PROJECT_ENVIRONMENT=/app/.venv" in dockerfile
         assert "COPY --from=builder /app/.venv /app/.venv" in dockerfile
+        assert (
+            "COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE "
+            "/usr/share/licenses/glpi-ticketing-automation/"
+        ) in dockerfile
+        assert 'org.opencontainers.image.licenses="EUPL-1.2"' in dockerfile
         assert "/app/providers/.venv" not in dockerfile
         assert "providers/uv.lock" not in dockerfile
         assert "providers/pyproject.toml" not in dockerfile

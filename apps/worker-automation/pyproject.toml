@@ -2,6 +2,7 @@
 name = "glpi-ticketing-worker-automation"
 version = "0.1.0"
 description = "Application worker d'automatisation des tickets GLPI"
+license = "EUPL-1.2"
 requires-python = ">=3.12"
 dependencies = [
     "glpi-ticketing-common>=0.1,<0.2",

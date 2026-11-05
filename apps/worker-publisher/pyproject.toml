@@ -2,6 +2,7 @@
 name = "glpi-ticketing-worker-publisher"
 version = "0.1.0"
 description = "Application d'ingestion des messages vocaux Microsoft 365"
+license = "EUPL-1.2"
 requires-python = ">=3.12"
 dependencies = [
     "glpi-ticketing-common>=0.1,<0.2",

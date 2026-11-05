@@ -207,10 +207,21 @@ def test_production_services_share_the_release_environment(
 
 def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
     repository_root = DOCKER_ROOT.parent.parent
+    dockerignore = (repository_root / ".dockerignore").read_text(encoding="utf-8")
     workspace = tomllib.loads(
         (repository_root / "pyproject.toml").read_text(encoding="utf-8")
     )
     members = workspace["tool"]["uv"]["workspace"]["members"]
+
+    assert workspace["project"]["license"] == "EUPL-1.2"
+    assert "!LICENSE" in dockerignore
+    assert "!NOTICE" in dockerignore
+    assert (repository_root / "LICENSE").is_file()
+    assert (repository_root / "NOTICE").is_file()
+    for member in members:
+        manifest = repository_root / member / "pyproject.toml"
+        member_metadata = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        assert member_metadata["project"]["license"] == "EUPL-1.2"
 
     dockerfiles = [
         APPS_DOCKER_ROOT / application_name / "Dockerfile"
@@ -227,6 +238,10 @@ def test_application_dockerfiles_copy_every_workspace_member_manifest() -> None:
     for dockerfile_path in dockerfiles:
         dockerfile = dockerfile_path.read_text(encoding="utf-8")
         assert "COPY pyproject.toml uv.lock README.md ./" in dockerfile
+        assert (
+            "COPY --chown=10001:10001 --chmod=0444 LICENSE NOTICE "
+            "/usr/share/licenses/glpi-ticketing-automation/"
+        ) in dockerfile
         for member in members:
             manifest = f"{member}/pyproject.toml"
             assert f"COPY {manifest} {manifest}" in dockerfile
@@ -254,6 +269,7 @@ def test_application_dockerfiles_embed_the_release_identity() -> None:
         assert "ARG VCS_REF=" not in dockerfile
         assert 'org.opencontainers.image.version="${IMAGE_VERSION}"' in dockerfile
         assert 'org.opencontainers.image.revision="${VCS_REF}"' in dockerfile
+        assert 'org.opencontainers.image.licenses="EUPL-1.2' in dockerfile
         assert "ENV APP_RELEASE=${IMAGE_VERSION}" in dockerfile
         assert "APP_COMMIT_SHA=${VCS_REF}" in dockerfile
 

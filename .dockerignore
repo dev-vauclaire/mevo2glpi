@@ -3,6 +3,8 @@
 !pyproject.toml
 !uv.lock
 !README.md
+!LICENSE
+!NOTICE
 
 !apps/
 !apps/database-migrations/

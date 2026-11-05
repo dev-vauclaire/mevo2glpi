@@ -234,12 +234,6 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
 
 ### Évolutions prioritaires
 
-- [ ] Exécuter le serveur FastAPI web avec une configuration explicitement
-  destinée à la production et désactiver les routes Swagger/OpenAPI dans les
-  environnements exposés.
-- [ ] Extraire le numéro d'origine depuis l'objet du message et l'afficher comme
-  métadonnée distincte dans le corps du ticket, sans l'assimiler au numéro de
-  rappel demandé.
 - [ ] Générer l'UUID d'ingestion de manière déterministe à partir de l'identité
   immuable du message Exchange afin de renforcer l'idempotence et les reprises
   après rollback.
@@ -273,3 +267,14 @@ pare-feu et la configuration Traefik de Dokploy.
   absent, indisponible ou produit une réponse invalide.
 - [ ] Valider les règles de confidentialité avant d'envoyer une transcription
   à un modèle supplémentaire.
+
+## Licence
+
+Copyright © 2026 CTRE HOSPITALIER SPECIALISE VAUCLAIRE.
+
+Ce projet est distribué sous la Licence publique de l'Union européenne,
+version 1.2 (`EUPL-1.2`). Les versions ultérieures de l'EUPL restent
+autorisées conformément aux conditions de la licence.
+
+Le texte intégral est disponible dans [LICENSE](LICENSE) et l'avis de droits
+d'auteur dans [NOTICE](NOTICE).

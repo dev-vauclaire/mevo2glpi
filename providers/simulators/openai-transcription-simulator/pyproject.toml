@@ -2,6 +2,7 @@
 name = "glpi-ticketing-openai-transcription-simulator"
 version = "0.1.0"
 description = "Simulateur de transcription synchrone compatible OpenAI"
+license = "EUPL-1.2"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.116,<1",

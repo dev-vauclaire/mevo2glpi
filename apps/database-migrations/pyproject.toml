@@ -2,6 +2,7 @@
 name = "glpi-ticketing-database-migrations"
 version = "0.1.0"
 description = "Application one-shot de migration de la base du cycle de vie"
+license = "EUPL-1.2"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.16,<2",
