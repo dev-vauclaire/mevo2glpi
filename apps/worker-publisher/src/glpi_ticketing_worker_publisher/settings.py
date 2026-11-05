@@ -63,6 +63,7 @@ class PublisherSettings(BaseSettings):
     publisher_mailbox_id: UUID
     database_url: SecretStr = Field(repr=False)
     audio_root: Path = Path("/data/audios")
+    originating_phone_number_key_path: Path
     publisher_log_level: PublisherLogLevel = PublisherLogLevel.INFO
     database_connect_timeout_seconds: int = Field(default=5, gt=0)
     publisher_graph_page_size: int = Field(default=50, ge=1, le=1000)
@@ -130,6 +131,12 @@ class PublisherSettings(BaseSettings):
         if parsed_url.drivername != "postgresql+psycopg":
             raise ValueError("DATABASE_URL must use the postgresql+psycopg driver")
         return database_url
+
+    @field_validator("originating_phone_number_key_path")
+    @classmethod
+    def validate_originating_phone_number_key_path(cls, path: Path) -> Path:
+        """Require a readable secret file without inspecting or logging its value."""
+        return _validate_originating_phone_number_key_file(path)
 
     @field_validator("publisher_graph_auth_mode", "publisher_log_level", mode="before")
     @classmethod
@@ -263,6 +270,13 @@ def _validate_readable_file(path: Path, *, variable_name: str) -> Path:
     except OSError:
         raise ValueError(f"{variable_name} must be readable") from None
     return path
+
+
+def _validate_originating_phone_number_key_file(path: Path) -> Path:
+    return _validate_readable_file(
+        path,
+        variable_name="ORIGINATING_PHONE_NUMBER_KEY_PATH",
+    )
 
 
 def _is_official_graph_url(url: HttpUrl) -> bool:

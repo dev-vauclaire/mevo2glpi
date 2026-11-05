@@ -149,6 +149,9 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     )
     assert documented_values["FAILED_RETENTION_DAYS"] == "10"
     assert documented_values["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "180"
+    assert documented_values["ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH"] == (
+        "/etc/gta/secrets/originating-phone-number.key"
+    )
     assert documented_values["GLPI_TICKET_TYPE"] == "1"
     assert documented_values["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
         "CHANGE_ME_WITH_THE_PRODUCTION_MEVO_REQUEST_SOURCE_ID"
@@ -447,6 +450,26 @@ def test_publisher_pem_credentials_are_separate_read_only_bind_mounts(
         publisher["environment"]["PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH"]
         == (certificate["target"])
     )
+
+
+def test_originating_number_key_is_shared_only_by_its_two_consumers(
+    render_compose: Callable[[], dict[str, object]],
+) -> None:
+    services = _services(render_compose())
+    target = "/run/secrets/originating-phone-number.key"
+
+    for service_name in ("worker-publisher", "worker-automation"):
+        service = services[service_name]
+        key = _volume_for(service, target)
+        assert key is not None
+        assert key["type"] == "bind"
+        assert key["read_only"] is True
+        assert service["environment"]["ORIGINATING_PHONE_NUMBER_KEY_PATH"] == target
+
+    for service_name in ("database-migrations", "web", "worker-retention"):
+        service = services[service_name]
+        assert _volume_for(service, target) is None
+        assert "ORIGINATING_PHONE_NUMBER_KEY_PATH" not in service["environment"]
 
 
 def test_disposable_stack_reports_fresh_workers_over_direct_http(

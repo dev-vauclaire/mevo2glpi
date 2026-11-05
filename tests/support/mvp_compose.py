@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import secrets
@@ -563,6 +564,15 @@ def create_mvp_compose_environment(
     publisher_private_key, publisher_certificate = _write_synthetic_publisher_pem_files(
         runtime_root
     )
+    originating_phone_number_key_value = base64.b64encode(
+        secrets.token_bytes(32)
+    ).decode("ascii")
+    originating_phone_number_key = runtime_root / "originating-phone-number.key"
+    originating_phone_number_key.write_text(
+        f"{originating_phone_number_key_value}\n",
+        encoding="ascii",
+    )
+    originating_phone_number_key.chmod(0o644)
     project_name = f"{project_prefix}{secrets.token_hex(5)}"
     proxy_network_name = f"{project_name}-dokploy"
     database_network_name = f"{project_name}-database"
@@ -596,6 +606,9 @@ def create_mvp_compose_environment(
         "PUBLISHER_MAILBOX_ID": "00000000-0000-4000-8000-000000000003",
         "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH": str(publisher_private_key),
         "PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH": str(publisher_certificate),
+        "ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH": str(
+            originating_phone_number_key.resolve(strict=True)
+        ),
         "PUBLISHER_LOG_LEVEL": "INFO",
         "PUBLISHER_GRAPH_PAGE_SIZE": "50",
         "PUBLISHER_MAX_ATTACHMENT_BYTES": "26214400",
@@ -663,6 +676,7 @@ def create_mvp_compose_environment(
         raise
     runtime_secrets = (
         database_password,
+        originating_phone_number_key_value,
         *provider_configuration.secrets,
     )
     return MvpComposeEnvironment(

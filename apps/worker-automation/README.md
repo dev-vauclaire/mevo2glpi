@@ -429,6 +429,7 @@ Les variables obligatoires sont chargées depuis l'environnement ou `.env` :
 | --- | --- |
 | `DATABASE_URL` | URL `postgresql+psycopg` de la base migrée. |
 | `PUBLIC_BASE_URL` | Base des liens audio insérés dans GLPI. |
+| `ORIGINATING_PHONE_NUMBER_KEY_PATH` | Fichier Base64 contenant la clé AES-256 partagée avec publisher. |
 | `TRANSCRIPTION_PROVIDER` | `legacy_polling` ou `openai_compatible` ; `legacy_polling` par défaut. |
 | `LEGACY_TRANSCRIPTION_BASE_URL` | Base de l'API batch, obligatoire uniquement avec `legacy_polling`. |
 | `LEGACY_TRANSCRIPTION_API_KEY` | Clé de l'API batch, obligatoire uniquement avec `legacy_polling`. |

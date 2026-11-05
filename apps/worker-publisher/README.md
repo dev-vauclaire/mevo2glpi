@@ -143,6 +143,7 @@ racine lorsqu'une commande est lancée depuis celle-ci.
 | `DATABASE_URL` | obligatoire | URL SQLAlchemy `postgresql+psycopg`. |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Timeout d'établissement PostgreSQL. |
 | `AUDIO_ROOT` | `/data/audios` | Racine du stockage partagé. |
+| `ORIGINATING_PHONE_NUMBER_KEY_PATH` | obligatoire | Fichier Base64 contenant la clé AES-256 partagée avec automation. |
 | `PUBLISHER_LOG_LEVEL` | `INFO` | Niveau applicatif `INFO` ou `DEBUG`. |
 | `PUBLISHER_GRAPH_PAGE_SIZE` | `50` | Taille des pages Graph, de 1 à 1 000. |
 | `PUBLISHER_MAX_ATTACHMENT_BYTES` | `26214400` | Limite WAV/OGG, plafonnée à 25 Mio. |
@@ -169,6 +170,9 @@ Pour Dokploy, utilisez les variables hôte décrites dans
 `PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH` et
 `PUBLISHER_ENTRA_CERTIFICATE_PEM_HOST_PATH`. Le Compose les monte vers les
 chemins internes attendus par le processus.
+`ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH` désigne séparément la clé AES montée
+dans publisher et automation. Elle ne doit jamais être remplacée tant que des
+jobs contenant une métadonnée d'origine sont en cours.
 
 ## Architecture des fichiers
 

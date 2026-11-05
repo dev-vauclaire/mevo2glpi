@@ -237,8 +237,9 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
 - [ ] Exécuter le serveur FastAPI web avec une configuration explicitement
   destinée à la production et désactiver les routes Swagger/OpenAPI dans les
   environnements exposés.
-- [ ] Extraire le numéro de l'appelant depuis l'objet du message et l'ajouter au
-  titre du ticket après validation stricte du format et des données exposées.
+- [ ] Extraire le numéro d'origine depuis l'objet du message et l'afficher comme
+  métadonnée distincte dans le corps du ticket, sans l'assimiler au numéro de
+  rappel demandé.
 - [ ] Générer l'UUID d'ingestion de manière déterministe à partir de l'identité
   immuable du message Exchange afin de renforcer l'idempotence et les reprises
   après rollback.
@@ -266,6 +267,8 @@ pare-feu et la configuration Traefik de Dokploy.
 - [ ] Valider la sortie du modèle avec un contrat structuré avant tout envoi à
   GLPI. Les champs techniques et les valeurs imposées par la configuration
   restent déterministes.
+- [ ] Extraire uniquement un numéro de rappel explicitement demandé dans la
+  transcription et le distinguer du numéro d'origine fourni par Exchange.
 - [ ] Conserver un contenu de repli déterministe lorsque le générateur est
   absent, indisponible ou produit une réponse invalide.
 - [ ] Valider les règles de confidentialité avant d'envoyer une transcription

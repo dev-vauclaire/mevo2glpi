@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from glpi_ticketing_common import OriginatingPhoneNumberCipher
 from glpi_ticketing_database import (
     AudioExtension,
     DiscoveredMail,
@@ -30,6 +31,7 @@ from glpi_ticketing_database import (
 )
 
 from ..graph import GraphAttachment, GraphMessage
+from .originating_phone_number import extract_originating_phone_number
 from .outcomes import PublisherFailure
 
 _ResultT = TypeVar("_ResultT")
@@ -46,16 +48,26 @@ class PublisherLifecycleService:
         self,
         *,
         session_factory: Callable[[], Session],
+        originating_phone_number_cipher: OriginatingPhoneNumberCipher,
         ownership_guard: Callable[[], None] | None = None,
         uuid_factory: Callable[[], UUID] = uuid4,
     ) -> None:
         if not callable(session_factory):
             raise TypeError("session_factory must be callable")
+        if not isinstance(
+            originating_phone_number_cipher,
+            OriginatingPhoneNumberCipher,
+        ):
+            raise TypeError(
+                "originating_phone_number_cipher must be an "
+                "OriginatingPhoneNumberCipher"
+            )
         if ownership_guard is not None and not callable(ownership_guard):
             raise TypeError("ownership_guard must be callable")
         if not callable(uuid_factory):
             raise TypeError("uuid_factory must be callable")
         self._session_factory = session_factory
+        self._originating_phone_number_cipher = originating_phone_number_cipher
         self._ownership_guard = ownership_guard or _no_op
         self._uuid_factory = uuid_factory
 
@@ -90,12 +102,26 @@ class PublisherLifecycleService:
                 ingestion_uuid = self._uuid_factory()
                 if not isinstance(ingestion_uuid, UUID):
                     raise TypeError("uuid_factory must return a UUID")
+                originating_phone_number = extract_originating_phone_number(
+                    message.subject
+                )
+                originating_phone_number_ciphertext = (
+                    None
+                    if originating_phone_number is None
+                    else self._originating_phone_number_cipher.encrypt(
+                        originating_phone_number,
+                        ingestion_uuid,
+                    )
+                )
                 snapshot = ingestion_repository.add_discovered(
                     DiscoveredMail(
                         uuid=ingestion_uuid,
                         mailbox_id=mailbox_id,
                         message_id=str(message.message_id),
                         received_at=message.received_at,
+                        originating_phone_number_ciphertext=(
+                            originating_phone_number_ciphertext
+                        ),
                     ),
                     now=now,
                 )

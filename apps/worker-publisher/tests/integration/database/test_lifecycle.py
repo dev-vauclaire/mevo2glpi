@@ -8,6 +8,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy import Engine, select
 
+from glpi_ticketing_common import OriginatingPhoneNumberCipher
 from glpi_ticketing_database import (
     AudioExtension,
     JobEventActor,
@@ -41,12 +42,22 @@ NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
 MAILBOX_ID = UUID("94023353-3fb5-45fa-8336-a938e1dc914c")
 
 
-def _message(message_id: str, *, minutes_ago: int) -> GraphMessage:
+def _phone_number_cipher() -> OriginatingPhoneNumberCipher:
+    return OriginatingPhoneNumberCipher(b"x" * 32)
+
+
+def _message(
+    message_id: str,
+    *,
+    minutes_ago: int,
+    subject: str | None = None,
+) -> GraphMessage:
     return GraphMessage(
         message_id=MessageId(message_id),
         parent_folder_id=FolderId("inbox-folder"),
         received_at=NOW - timedelta(minutes=minutes_ago),
         has_attachments=True,
+        subject=subject,
     )
 
 
@@ -65,15 +76,26 @@ def test_accepted_message_creates_one_aligned_job_and_complete_audit(
 ) -> None:
     session_factory = create_session_factory(migrated_engine)
     ingestion_uuid = UUID("00000000-0000-4000-8000-000000000301")
+    phone_number_cipher = _phone_number_cipher()
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
+        originating_phone_number_cipher=phone_number_cipher,
         uuid_factory=lambda: ingestion_uuid,
     )
 
     assert (
         lifecycle.discover_messages(
             mailbox_id=MAILBOX_ID,
-            messages=(_message("immutable-message-a", minutes_ago=1),),
+            messages=(
+                _message(
+                    "immutable-message-a",
+                    minutes_ago=1,
+                    subject=(
+                        "Message vocale de la part de06 78 37 43 63"
+                        "pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+                    ),
+                ),
+            ),
             now=NOW,
         )
         == 1
@@ -117,6 +139,15 @@ def test_accepted_message_creates_one_aligned_job_and_complete_audit(
         )
 
     assert ingestion is not None
+    assert ingestion.originating_phone_number_ciphertext is not None
+    assert b"0678374363" not in ingestion.originating_phone_number_ciphertext
+    assert (
+        phone_number_cipher.decrypt(
+            ingestion.originating_phone_number_ciphertext,
+            ingestion_uuid,
+        )
+        == "0678374363"
+    )
     assert ingestion.status == MailIngestionStatus.COMPLETED.value
     assert job is not None
     assert job.uuid == ingestion.uuid
@@ -138,6 +169,7 @@ def test_ogg_attachment_creates_an_aligned_ogg_job(migrated_engine: Engine) -> N
     ingestion_uuid = UUID("00000000-0000-4000-8000-000000000302")
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
+        originating_phone_number_cipher=_phone_number_cipher(),
         uuid_factory=lambda: ingestion_uuid,
     )
     attachment = GraphAttachment(
@@ -185,6 +217,7 @@ def test_empty_download_can_be_rejected_after_nonempty_ogg_metadata(
     ingestion_uuid = UUID("00000000-0000-4000-8000-000000000303")
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
+        originating_phone_number_cipher=_phone_number_cipher(),
         uuid_factory=lambda: ingestion_uuid,
     )
     attachment = GraphAttachment(
@@ -236,6 +269,7 @@ def test_discovery_is_idempotent_and_equal_audio_messages_remain_distinct(
     )
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
+        originating_phone_number_cipher=_phone_number_cipher(),
         uuid_factory=lambda: next(generated),
     )
     first = _message("immutable-message-a", minutes_ago=2)

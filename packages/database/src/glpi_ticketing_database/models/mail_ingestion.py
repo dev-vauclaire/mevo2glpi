@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    LargeBinary,
     String,
     UniqueConstraint,
     Uuid,
@@ -29,6 +30,8 @@ from .enums import (
     sql_values,
 )
 
+ORIGINATING_PHONE_NUMBER_CIPHERTEXT_MAX_BYTES = 128
+
 
 class MailIngestion(Base):
     """Durable, content-free state for one Exchange message ingestion."""
@@ -40,6 +43,9 @@ class MailIngestion(Base):
     message_id: Mapped[str] = mapped_column(
         String(512, collation="C"),
         nullable=False,
+    )
+    originating_phone_number_ciphertext: Mapped[bytes | None] = mapped_column(
+        LargeBinary,
     )
     attachment_id: Mapped[str | None] = mapped_column(
         String(512, collation="C"),
@@ -108,6 +114,13 @@ class MailIngestion(Base):
         CheckConstraint(
             "attachment_id IS NULL OR length(btrim(attachment_id)) > 0",
             name="attachment_id_not_empty",
+        ),
+        CheckConstraint(
+            "originating_phone_number_ciphertext IS NULL OR "
+            "(octet_length(originating_phone_number_ciphertext) > 0 AND "
+            "octet_length(originating_phone_number_ciphertext) <= "
+            f"{ORIGINATING_PHONE_NUMBER_CIPHERTEXT_MAX_BYTES})",
+            name="originating_phone_number_ciphertext_size",
         ),
         CheckConstraint(
             f"status IN ({sql_values(MailIngestionStatus)})",
@@ -264,4 +277,7 @@ class MailIngestion(Base):
     )
 
 
-__all__ = ["MailIngestion"]
+__all__ = [
+    "MailIngestion",
+    "ORIGINATING_PHONE_NUMBER_CIPHERTEXT_MAX_BYTES",
+]

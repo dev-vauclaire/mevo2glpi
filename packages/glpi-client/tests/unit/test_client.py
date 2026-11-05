@@ -55,6 +55,7 @@ REQUEST_SOURCE_ID = 7
 TICKET_URGENCY = TicketLevel(2)
 TICKET_IMPACT = TicketLevel(3)
 OPENED_AT = datetime(2026, 8, 31, 9, 18, 53, tzinfo=UTC)
+ORIGINATING_PHONE_NUMBER = "0678374363"
 DEFAULTS = GlpiTicketDefaults(
     title=TICKET_TITLE,
     ticket_type=TICKET_TYPE,
@@ -94,6 +95,7 @@ def make_ticket_command(
     audio_url: object = AUDIO_URL,
     audio_uuid: object = AUDIO_UUID,
     opened_at: object = OPENED_AT,
+    originating_phone_number: object = None,
 ) -> GlpiTicketCreateCommand:
     return GlpiTicketCreateCommand(
         audio_uuid=audio_uuid,  # type: ignore[arg-type]
@@ -101,6 +103,7 @@ def make_ticket_command(
         audio_url=audio_url,  # type: ignore[arg-type]
         opened_at=opened_at,  # type: ignore[arg-type]
         defaults=DEFAULTS,
+        originating_phone_number=originating_phone_number,  # type: ignore[arg-type]
     )
 
 
@@ -755,6 +758,31 @@ def test_ensure_ticket_searches_then_creates_with_the_expected_payload() -> None
 
     assert ticket_id == 73
     assert [request.method for request in requests] == ["POST", "GET", "POST"]
+
+
+def test_ensure_ticket_labels_originating_phone_number_without_using_it_as_callback() -> (
+    None
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == TOKEN_PATH:
+            return token_response()
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+
+        content = json.loads(request.content)["content"]
+        assert "Numéro d’origine : 06 78 37 43 63" in content
+        assert "peut différer du numéro de rappel demandé" in content
+        return httpx.Response(201, json={"id": 73})
+
+    client, http_client = make_glpi_client(handler)
+    with http_client:
+        ticket_id = client.ensure_ticket(
+            make_ticket_command(
+                originating_phone_number=ORIGINATING_PHONE_NUMBER,
+            )
+        )
+
+    assert ticket_id == 73
 
 
 @pytest.mark.parametrize(
@@ -1447,6 +1475,11 @@ def test_get_ticket_rejects_invalid_identifiers_without_request(
             ),
         ),
         ("defaults", object()),
+        ("originating_phone_number", 6_783_743_663),
+        ("originating_phone_number", "06 78 37 43 63"),
+        ("originating_phone_number", "0078374363"),
+        ("originating_phone_number", "067837436"),
+        ("originating_phone_number", "０６７８３７４３６３"),
     ],
 )
 def test_ticket_create_command_rejects_invalid_values(
@@ -1459,6 +1492,7 @@ def test_ticket_create_command_rejects_invalid_values(
         "audio_url": AUDIO_URL,
         "opened_at": OPENED_AT,
         "defaults": DEFAULTS,
+        "originating_phone_number": None,
     }
     arguments[field] = invalid_value
 
@@ -1466,10 +1500,13 @@ def test_ticket_create_command_rejects_invalid_values(
         GlpiTicketCreateCommand(**arguments)  # type: ignore[arg-type]
 
 
-def test_ticket_create_command_repr_hides_the_transcription() -> None:
-    command = make_ticket_command()
+def test_ticket_create_command_repr_hides_sensitive_content() -> None:
+    command = make_ticket_command(
+        originating_phone_number=ORIGINATING_PHONE_NUMBER,
+    )
 
     assert TRANSCRIPTION not in repr(command)
+    assert ORIGINATING_PHONE_NUMBER not in repr(command)
 
 
 @pytest.mark.parametrize(

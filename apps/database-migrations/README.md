@@ -77,13 +77,15 @@ procédures de [staging](../../docs/procedures/staging.md) et de
   l'événement d'audit `operator_replay_requested` ;
 - `0007_transcription_failed_event` autorise l'événement d'audit expurgé
   `transcription_failed` lorsque la création du ticket continue malgré un
-  échec terminal de transcription.
+  échec terminal de transcription ;
+- `0008_originating_phone_cipher` ajoute le ciphertext temporaire et borné
+  du numéro d'origine, sans stocker l'objet Exchange ni le numéro en clair.
 
 L'historique est compatible avec les deux situations de déploiement attendues :
 
 - sur une base vide, `upgrade head` applique l'historique complet et crée les
   six tables du MVP ;
-- sur une base existante à la révision `0004`, `0005` ou `0006`, la montée
+- sur une base existante à partir de la révision `0004`, la montée
   conserve les jobs, événements, rétentions, heartbeats et ingestions déjà
   présents.
 

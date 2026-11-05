@@ -50,6 +50,98 @@ def test_add_discovered_adds_only_a_pending_mail_ingestion() -> None:
     session.flush.assert_called_once_with()
 
 
+def test_add_discovered_persists_only_bounded_protected_caller_metadata() -> None:
+    session = _session()
+    ciphertext = b"protected-originating-phone-number"
+
+    snapshot = MailIngestionRepository(session).add_discovered(
+        DiscoveredMail(
+            uuid=INGESTION_UUID,
+            mailbox_id=MAILBOX_UUID,
+            message_id="immutable-message-id",
+            received_at=NOW,
+            originating_phone_number_ciphertext=ciphertext,
+        ),
+        now=NOW,
+    )
+
+    added = session.add.call_args.args[0]
+    assert added.originating_phone_number_ciphertext == ciphertext
+    assert snapshot.originating_phone_number_ciphertext == ciphertext
+
+
+@pytest.mark.parametrize(
+    "ciphertext,expected_error",
+    [
+        (b"", ValueError),
+        (b"x" * 129, ValueError),
+        ("plaintext", TypeError),
+    ],
+)
+def test_add_discovered_rejects_invalid_protected_caller_metadata(
+    ciphertext: object,
+    expected_error: type[Exception],
+) -> None:
+    session = _session()
+
+    with pytest.raises(expected_error):
+        MailIngestionRepository(session).add_discovered(
+            DiscoveredMail(
+                uuid=INGESTION_UUID,
+                mailbox_id=MAILBOX_UUID,
+                message_id="immutable-message-id",
+                received_at=NOW,
+                originating_phone_number_ciphertext=ciphertext,  # type: ignore[arg-type]
+            ),
+            now=NOW,
+        )
+
+    session.add.assert_not_called()
+    session.flush.assert_not_called()
+
+
+def test_clear_originating_phone_number_ciphertext_is_idempotent() -> None:
+    session = _session()
+    ingestion = _ingestion(disposition=MailIngestionDisposition.ACCEPTED)
+    ingestion.job_uuid = INGESTION_UUID
+    ingestion.originating_phone_number_ciphertext = b"protected"
+    session.get.return_value = ingestion
+    repository = MailIngestionRepository(session)
+
+    cleared = repository.clear_originating_phone_number_ciphertext(
+        INGESTION_UUID,
+        now=NOW,
+    )
+
+    assert cleared is not None
+    assert cleared.originating_phone_number_ciphertext is None
+    assert cleared.updated_at == NOW
+    session.flush.assert_called_once_with()
+
+    session.flush.reset_mock()
+    cleared_again = repository.clear_originating_phone_number_ciphertext(
+        INGESTION_UUID,
+        now=NOW,
+    )
+
+    assert cleared_again is not None
+    assert cleared_again.originating_phone_number_ciphertext is None
+    session.flush.assert_not_called()
+
+
+def test_clear_originating_phone_number_ciphertext_rejects_missing_source() -> None:
+    session = _session()
+    session.get.return_value = None
+
+    with pytest.raises(LookupError, match="does not exist"):
+        MailIngestionRepository(session).clear_originating_phone_number_ciphertext(
+            INGESTION_UUID,
+            now=NOW,
+        )
+
+    session.flush.assert_not_called()
+
+
 def test_get_by_source_uses_the_case_sensitive_opaque_identity() -> None:
     session = _session()
     ingestion = _ingestion()
@@ -242,6 +334,7 @@ def test_accepted_lifecycle_links_but_never_creates_the_job() -> None:
 def test_rejected_lifecycle_accepts_empty_attachment_metadata() -> None:
     session = _session()
     ingestion = _ingestion()
+    ingestion.originating_phone_number_ciphertext = b"protected-caller-metadata"
     session.get.return_value = ingestion
     repository = MailIngestionRepository(session)
 
@@ -261,6 +354,7 @@ def test_rejected_lifecycle_accepts_empty_attachment_metadata() -> None:
     assert rejected.disposition is MailIngestionDisposition.REJECTED
     assert rejected.attachment_size_bytes == 0
     assert rejected.job_uuid is None
+    assert rejected.originating_phone_number_ciphertext is None
     assert failed.status is MailIngestionStatus.FAILED
     assert failed.last_error_scope is None
 

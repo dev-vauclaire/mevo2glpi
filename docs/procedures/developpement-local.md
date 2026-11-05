@@ -28,11 +28,18 @@ Depuis la racine du dépôt :
 uv sync --locked --all-packages --all-groups
 cp .env.example .env
 mkdir -p infra/docker/runtime/audios
+mkdir -p infra/docker/runtime/secrets
+umask 077
+openssl rand -base64 32 > infra/docker/runtime/secrets/originating-phone-number.key
 ```
 
 Le fichier `.env.example` est prérempli avec des identifiants exclusivement
 synthétiques et des URLs loopback. Le fichier `.env` reste local et ne doit
 jamais être commité.
+
+La clé locale protège temporairement le numéro d'origine extrait des objets
+Graph. Elle est synthétique, commune aux deux workers et reste dans le
+répertoire `runtime` ignoré par Git.
 
 ## Démarrer PostgreSQL
 

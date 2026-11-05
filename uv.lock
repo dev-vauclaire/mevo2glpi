@@ -425,6 +425,12 @@ dev = [
 name = "glpi-ticketing-common"
 version = "0.1.0"
 source = { editable = "packages/common" }
+dependencies = [
+    { name = "cryptography" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cryptography", specifier = ">=50,<51" }]
 
 [[package]]
 name = "glpi-ticketing-database"

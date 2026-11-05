@@ -79,6 +79,7 @@ class TicketCreationStage:
         *,
         transcription: str,
         opened_at: datetime,
+        originating_phone_number: str | None = None,
     ) -> TicketCreationStageResult:
         """Return a persisted ticket ID or an observable failure boundary."""
 
@@ -105,6 +106,7 @@ class TicketCreationStage:
                 audio_url=audio_url,
                 opened_at=opened_at,
                 defaults=replace(self._ticket_defaults, title=generated_title),
+                originating_phone_number=originating_phone_number,
             )
         except (TypeError, ValueError):
             return self._transitions.block(
@@ -176,6 +178,7 @@ class TicketCreationStage:
             audio_uuid,
             normalized_ticket_id,
             self._transitions.current_time(),
+            clear_originating_phone_number=(originating_phone_number is not None),
         )
         LOGGER.info(
             "ticket ensured audio_uuid=%s ticket_id=%s",

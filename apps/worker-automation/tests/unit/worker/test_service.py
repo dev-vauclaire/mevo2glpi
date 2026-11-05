@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 
+from glpi_ticketing_common import OriginatingPhoneNumberCipher
 from glpi_ticketing_database import ErrorScope, JobStage, JobStatus
 from glpi_ticketing_glpi import (
     GlpiOperation,
@@ -71,6 +72,63 @@ def test_success_persists_ticket_before_completion_and_keeps_audio(
             defaults=TICKET_DEFAULTS,
         )
     ]
+
+
+def test_success_adds_originating_number_and_erases_protected_metadata(
+    tmp_path: Path,
+) -> None:
+    phone_number = "0678374363"
+    cipher = OriginatingPhoneNumberCipher(b"k" * 32)
+    state = FakeState(
+        originating_phone_number_ciphertext=cipher.encrypt(
+            phone_number,
+            AUDIO_UUID,
+        )
+    )
+    audio_path = write_audio(tmp_path)
+    glpi_client = FakeGlpiClient(state, [42])
+    worker = build_worker(
+        tmp_path,
+        state,
+        FakeTranscriber(state, [transcription_result(audio_path)]),
+        glpi_client,
+        originating_phone_number_cipher=cipher,
+    )
+
+    outcome = worker.run_once()
+
+    assert outcome == CompletedOutcome(audio_uuid=AUDIO_UUID, ticket_id=42)
+    assert glpi_client.calls[0].originating_phone_number == phone_number
+    assert state.originating_phone_number_ciphertext is None
+    assert "clear_originating_phone_number_ciphertext" in repository_call_names(state)
+
+
+def test_untrusted_originating_number_blocks_before_external_calls(
+    tmp_path: Path,
+) -> None:
+    state = FakeState(originating_phone_number_ciphertext=b"untrusted")
+    audio_path = write_audio(tmp_path)
+    transcriber = FakeTranscriber(state, [])
+    glpi_client = FakeGlpiClient(state, [])
+    worker = build_worker(
+        tmp_path,
+        state,
+        transcriber,
+        glpi_client,
+        originating_phone_number_cipher=OriginatingPhoneNumberCipher(b"k" * 32),
+    )
+
+    outcome = worker.run_once()
+
+    assert isinstance(outcome, SystemBlockedOutcome)
+    assert outcome.automatic_probe is False
+    assert outcome.failure.category == "data_protection"
+    assert (
+        outcome.failure.technical_code == "originating_phone_number_decryption_failed"
+    )
+    assert transcriber.calls == []
+    assert glpi_client.calls == []
+    assert audio_path.read_bytes() == SYNTHETIC_AUDIO
 
 
 def test_job_started_hook_runs_after_acquisition_transaction(
@@ -236,13 +294,21 @@ def test_worker_logs_uuid_but_never_transcription(
     tmp_path: Path,
     caplog,
 ) -> None:
-    state = FakeState()
+    phone_number = "0678374363"
+    cipher = OriginatingPhoneNumberCipher(b"k" * 32)
+    state = FakeState(
+        originating_phone_number_ciphertext=cipher.encrypt(
+            phone_number,
+            AUDIO_UUID,
+        )
+    )
     audio_path = write_audio(tmp_path)
     worker = build_worker(
         tmp_path,
         state,
         FakeTranscriber(state, [transcription_result(audio_path)]),
         FakeGlpiClient(state, [42]),
+        originating_phone_number_cipher=cipher,
     )
 
     with caplog.at_level(logging.INFO):
@@ -250,6 +316,8 @@ def test_worker_logs_uuid_but_never_transcription(
 
     assert str(AUDIO_UUID) in caplog.text
     assert TRANSCRIPTION not in caplog.text
+    assert phone_number not in caplog.text
+    assert "06 78 37 43 63" not in caplog.text
 
 
 def test_worker_never_logs_caught_exception_message_or_secret(

@@ -42,6 +42,7 @@ class WorkerSettings(BaseSettings):
     public_base_url: HttpUrl
     database_url: SecretStr = Field(repr=False)
     audio_root: Path = Path("/data/audios")
+    originating_phone_number_key_path: Path
     worker_log_level: WorkerLogLevel = WorkerLogLevel.INFO
     database_connect_timeout_seconds: int = Field(default=5, gt=0)
     worker_idle_interval_seconds: float = Field(
@@ -129,6 +130,21 @@ class WorkerSettings(BaseSettings):
         if parsed_url.drivername != "postgresql+psycopg":
             raise ValueError("DATABASE_URL must use the postgresql+psycopg driver")
         return database_url
+
+    @field_validator("originating_phone_number_key_path")
+    @classmethod
+    def validate_originating_phone_number_key_path(cls, path: Path) -> Path:
+        """Require a readable file without inspecting or exposing its contents."""
+        if not path.is_file():
+            raise ValueError("ORIGINATING_PHONE_NUMBER_KEY_PATH must be a file")
+        try:
+            with path.open("rb"):
+                pass
+        except OSError:
+            raise ValueError(
+                "ORIGINATING_PHONE_NUMBER_KEY_PATH must be readable"
+            ) from None
+        return path
 
     @field_validator("worker_log_level", mode="before")
     @classmethod

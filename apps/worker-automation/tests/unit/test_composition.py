@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 import glpi_ticketing_worker_automation.composition as composition_module
+from glpi_ticketing_common import OriginatingPhoneNumberCipher
 from glpi_ticketing_worker_automation.composition import (
     WorkerConfigurationError,
     build_automation_worker,
@@ -151,6 +152,10 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     lifecycle_arguments = captured["lifecycle"]
     assert lifecycle_arguments["session_factory"] is session_factory
     assert callable(lifecycle_arguments["ownership_guard"])
+    assert isinstance(
+        lifecycle_arguments["originating_phone_number_cipher"],
+        OriginatingPhoneNumberCipher,
+    )
     transcription_arguments = captured["transcription_client"]["kwargs"]
     assert transcription_arguments == {
         "base_url": "https://transcribe.example.test/prefix",
@@ -275,6 +280,27 @@ def test_build_automation_worker_rejects_missing_audio_root(
 
     with httpx.Client() as http_client:
         with pytest.raises(WorkerConfigurationError, match="audio root"):
+            build_automation_worker(
+                settings,
+                http_client=http_client,
+                session_factory=cast(Any, lambda: object()),
+            )
+
+
+def test_build_automation_worker_rejects_invalid_phone_number_key(
+    worker_settings_factory: Callable[..., WorkerSettings],
+) -> None:
+    settings = worker_settings_factory()
+    settings.originating_phone_number_key_path.write_text(
+        "not-a-valid-key\n",
+        encoding="ascii",
+    )
+
+    with httpx.Client() as http_client:
+        with pytest.raises(
+            WorkerConfigurationError,
+            match="originating phone number key configuration is invalid",
+        ):
             build_automation_worker(
                 settings,
                 http_client=http_client,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 from pathlib import Path
 
@@ -19,12 +20,15 @@ def worker_settings_factory(
     def build(**overrides: object) -> WorkerSettings:
         audio_root = tmp_path / "audios"
         audio_root.mkdir(parents=True, exist_ok=True)
+        phone_number_key = tmp_path / "originating-phone-number.key"
+        phone_number_key.write_bytes(base64.b64encode(b"k" * 32) + b"\n")
         values: dict[str, object] = {
             "public_base_url": "https://web.example.test/base/",
             "database_url": (
                 "postgresql+psycopg://worker:synthetic-password@postgres/automation"
             ),
             "audio_root": audio_root,
+            "originating_phone_number_key_path": phone_number_key,
             "database_connect_timeout_seconds": 7,
             "worker_idle_interval_seconds": 1.25,
             "worker_retry_initial_seconds": 3.5,

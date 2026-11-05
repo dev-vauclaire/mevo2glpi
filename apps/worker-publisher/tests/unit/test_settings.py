@@ -40,17 +40,29 @@ def publisher_environment(
         "-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n",
         encoding="ascii",
     )
+    originating_phone_number_key = tmp_path / "originating-phone-number.key"
+    originating_phone_number_key.write_text(
+        "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=\n",
+        encoding="ascii",
+    )
     values = {
+        "PUBLISHER_GRAPH_AUTH_MODE": "entra_certificate",
+        "PUBLISHER_GRAPH_BASE_URL": OFFICIAL_GRAPH_BASE_URL,
         "PUBLISHER_ENTRA_TENANT_ID": "00000000-0000-4000-8000-000000000001",
         "PUBLISHER_ENTRA_CLIENT_ID": "00000000-0000-4000-8000-000000000002",
         "PUBLISHER_MAILBOX_ID": "00000000-0000-4000-8000-000000000003",
         "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH": str(private_key),
         "PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH": str(certificate),
         "DATABASE_URL": "postgresql+psycopg://gta:synthetic@db/gta",
+        "ORIGINATING_PHONE_NUMBER_KEY_PATH": str(originating_phone_number_key),
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
-    return {"private_key": private_key, "certificate": certificate}
+    return {
+        "private_key": private_key,
+        "certificate": certificate,
+        "originating_phone_number_key": originating_phone_number_key,
+    }
 
 
 def test_settings_load_two_distinct_pem_paths_and_runtime_defaults(
@@ -75,6 +87,24 @@ def test_settings_load_two_distinct_pem_paths_and_runtime_defaults(
     )
     assert settings.publisher_log_level is PublisherLogLevel.INFO
     assert settings.publisher_max_attachment_bytes == MAX_ATTACHMENT_BYTES
+    assert (
+        settings.originating_phone_number_key_path
+        == (publisher_environment["originating_phone_number_key"])
+    )
+
+
+def test_originating_phone_number_key_path_must_be_a_readable_file(
+    publisher_environment: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del publisher_environment
+    monkeypatch.setenv(
+        "ORIGINATING_PHONE_NUMBER_KEY_PATH",
+        "/missing/originating-phone-number.key",
+    )
+
+    with pytest.raises(ValidationError):
+        PublisherSettings()
 
 
 def test_settings_load_release_identity_from_environment(
@@ -198,7 +228,11 @@ def test_synthetic_graph_mode_rejects_entra_settings_without_reading_pem_files(
         "/secrets/must-not-be-read/certificate.pem",
     )
 
-    def fail_if_read(*_args: object, **_kwargs: object) -> Path:
+    validate_readable_file = settings_module._validate_readable_file
+
+    def fail_if_read(path: Path, *, variable_name: str) -> Path:
+        if variable_name == "ORIGINATING_PHONE_NUMBER_KEY_PATH":
+            return validate_readable_file(path, variable_name=variable_name)
         raise AssertionError("synthetic mode must not inspect PEM files")
 
     monkeypatch.setattr(settings_module, "_validate_readable_file", fail_if_read)

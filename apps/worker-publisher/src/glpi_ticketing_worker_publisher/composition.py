@@ -9,6 +9,10 @@ from uuid import UUID
 import httpx2
 from sqlalchemy.orm import Session
 
+from glpi_ticketing_common import (
+    OriginatingPhoneNumberCipher,
+    OriginatingPhoneNumberKeyError,
+)
 from glpi_ticketing_common.backoff import ExponentialBackoffPolicy
 
 from .graph import (
@@ -66,8 +70,20 @@ def build_publisher_worker(
         page_size=settings.publisher_graph_page_size,
         max_attachment_bytes=settings.publisher_max_attachment_bytes,
     )
+    try:
+        originating_phone_number_cipher = (
+            OriginatingPhoneNumberCipher.from_base64_key_file(
+                settings.originating_phone_number_key_path
+            )
+        )
+    except OriginatingPhoneNumberKeyError:
+        raise PublisherConfigurationError(
+            "originating phone number key configuration is invalid"
+        ) from None
+
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
+        originating_phone_number_cipher=originating_phone_number_cipher,
         ownership_guard=ownership_guard,
     )
     return PublisherWorker(

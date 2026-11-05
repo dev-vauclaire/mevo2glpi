@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TypeVar
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from glpi_ticketing_common import (
+    OriginatingPhoneNumberCipher,
+    OriginatingPhoneNumberCipherError,
+)
 from glpi_ticketing_database import (
     AudioRetentionRepository,
     ErrorScope,
@@ -37,6 +41,8 @@ class AutomationJobAcquisition:
     previous_status: JobStatus
     resumed: bool
     source_received_at: datetime | None
+    originating_phone_number: str | None = field(repr=False)
+    originating_phone_number_error_code: str | None
 
 
 class AutomationJobLifecycleService:
@@ -59,6 +65,7 @@ class AutomationJobLifecycleService:
         mail_ingestion_repository_factory: Callable[
             [Session], MailIngestionRepository
         ] = MailIngestionRepository,
+        originating_phone_number_cipher: OriginatingPhoneNumberCipher | None = None,
     ) -> None:
         for value, field_name in (
             (session_factory, "session_factory"),
@@ -74,6 +81,14 @@ class AutomationJobLifecycleService:
                 raise TypeError(f"{field_name} must be callable")
         if ownership_guard is not None and not callable(ownership_guard):
             raise TypeError("ownership_guard must be callable")
+        if originating_phone_number_cipher is not None and not isinstance(
+            originating_phone_number_cipher,
+            OriginatingPhoneNumberCipher,
+        ):
+            raise TypeError(
+                "originating_phone_number_cipher must be an "
+                "OriginatingPhoneNumberCipher or None"
+            )
 
         self._session_factory = session_factory
         self._ownership_guard = ownership_guard or _no_op
@@ -81,6 +96,7 @@ class AutomationJobLifecycleService:
         self._event_repository_factory = event_repository_factory
         self._retention_repository_factory = retention_repository_factory
         self._mail_ingestion_repository_factory = mail_ingestion_repository_factory
+        self._originating_phone_number_cipher = originating_phone_number_cipher
 
     def resume_or_claim_next(self, now: datetime) -> AutomationJobAcquisition | None:
         """Acquire one job and append the corresponding audit event atomically."""
@@ -106,13 +122,23 @@ class AutomationJobLifecycleService:
                 ),
                 occurred_at=now,
             )
+            (
+                source_received_at,
+                originating_phone_number,
+                originating_phone_number_error_code,
+            ) = _source_metadata(
+                source_ingestion,
+                acquisition.job.uuid,
+                self._originating_phone_number_cipher,
+            )
             return AutomationJobAcquisition(
                 job=acquisition.job,
                 previous_status=acquisition.previous_status,
                 resumed=acquisition.resumed,
-                source_received_at=_source_received_at(
-                    source_ingestion,
-                    acquisition.job.uuid,
+                source_received_at=source_received_at,
+                originating_phone_number=originating_phone_number,
+                originating_phone_number_error_code=(
+                    originating_phone_number_error_code
                 ),
             )
 
@@ -236,13 +262,25 @@ class AutomationJobLifecycleService:
         job_uuid: UUID,
         ticket_id: int,
         now: datetime,
+        *,
+        clear_originating_phone_number: bool = False,
     ) -> JobSnapshot:
         """Persist a GLPI ticket and append its audit event atomically."""
+
+        if not isinstance(clear_originating_phone_number, bool):
+            raise TypeError("clear_originating_phone_number must be a boolean")
 
         def operation(session: Session) -> JobSnapshot:
             snapshot = self._job_repository_factory(session).record_ticket_confirmed(
                 job_uuid, ticket_id, now
             )
+            if clear_originating_phone_number:
+                self._mail_ingestion_repository_factory(
+                    session
+                ).clear_originating_phone_number_ciphertext(
+                    job_uuid,
+                    now=now,
+                )
             self._append_event(
                 session,
                 snapshot,
@@ -409,23 +447,42 @@ def _no_op() -> None:
     return None
 
 
-def _source_received_at(
+def _source_metadata(
     source_ingestion: MailIngestionSnapshot | None,
     job_uuid: UUID,
-) -> datetime | None:
-    """Return trusted UTC source time or ``None`` for an inconsistent link."""
+    cipher: OriginatingPhoneNumberCipher | None,
+) -> tuple[datetime | None, str | None, str | None]:
+    """Return trusted source metadata without exposing protected values."""
     if source_ingestion is None:
-        return None
+        return None, None, None
     if source_ingestion.uuid != job_uuid:
-        return None
+        return None, None, None
     if source_ingestion.job_uuid != job_uuid:
-        return None
+        return None, None, None
     if source_ingestion.disposition is not MailIngestionDisposition.ACCEPTED:
-        return None
+        return None, None, None
     received_at = source_ingestion.received_at
     if not isinstance(received_at, datetime) or received_at.utcoffset() is None:
-        return None
-    return received_at.astimezone(UTC)
+        return None, None, None
+
+    ciphertext = source_ingestion.originating_phone_number_ciphertext
+    if ciphertext is None:
+        return received_at.astimezone(UTC), None, None
+    if cipher is None:
+        return (
+            received_at.astimezone(UTC),
+            None,
+            "originating_phone_number_cipher_unavailable",
+        )
+    try:
+        phone_number = cipher.decrypt(ciphertext, job_uuid)
+    except (OriginatingPhoneNumberCipherError, TypeError, ValueError):
+        return (
+            received_at.astimezone(UTC),
+            None,
+            "originating_phone_number_decryption_failed",
+        )
+    return received_at.astimezone(UTC), phone_number, None
 
 
 __all__ = ["AutomationJobAcquisition", "AutomationJobLifecycleService"]

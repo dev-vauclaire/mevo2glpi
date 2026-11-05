@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import re
 import time
@@ -221,10 +222,13 @@ def _build_settings(
     transcribe_ai_environment,
 ) -> WorkerSettings:
     credentials = glpi_environment.credentials
+    phone_number_key = audio_root.parent / "originating-phone-number.key"
+    phone_number_key.write_bytes(base64.b64encode(b"k" * 32) + b"\n")
     return WorkerSettings(
         public_base_url=PUBLIC_BASE_URL,
         database_url=database_url,
         audio_root=audio_root,
+        originating_phone_number_key_path=phone_number_key,
         database_connect_timeout_seconds=5,
         worker_idle_interval_seconds=1,
         worker_retry_initial_seconds=1,

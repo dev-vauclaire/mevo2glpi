@@ -22,6 +22,7 @@ pytestmark = pytest.mark.database
 
 PREVIOUS_REVISION = "0004_add_observability_queries"
 MAIL_INGESTION_REVISION = "0005_add_mail_ingestions"
+PROTECTED_PHONE_PREVIOUS_REVISION = "0007_transcription_failed_event"
 
 
 @pytest.fixture
@@ -77,6 +78,74 @@ def test_fresh_database_upgrades_to_replay_aware_mail_ingestion_head(
         if column["name"] == "audio_extension"
     )
     assert audio_extension["nullable"] is True
+    protected_phone = next(
+        column
+        for column in inspect(database_engine).get_columns("mail_ingestions")
+        if column["name"] == "originating_phone_number_ciphertext"
+    )
+    assert protected_phone["nullable"] is True
+    assert _current_revision(database_engine) == _head_revision()
+
+
+def test_existing_database_adds_nullable_protected_phone_without_backfill(
+    database_engine: Engine,
+) -> None:
+    _migrate(database_engine, PROTECTED_PHONE_PREVIOUS_REVISION)
+    ingestion_uuid = uuid4()
+    legacy_ingestions = _reflect_tables(database_engine)["mail_ingestions"]
+    with database_engine.begin() as connection:
+        connection.execute(
+            legacy_ingestions.insert(),
+            {
+                "uuid": ingestion_uuid,
+                "mailbox_id": uuid4(),
+                "message_id": "AAMkBeforeProtectedOriginatingPhone",
+                "received_at": datetime(2026, 11, 4, tzinfo=UTC),
+            },
+        )
+
+    upgrade_to_head(database_engine)
+
+    ingestions = _reflect_tables(database_engine)["mail_ingestions"]
+    with database_engine.connect() as connection:
+        protected_phone = connection.scalar(
+            select(ingestions.c.originating_phone_number_ciphertext).where(
+                ingestions.c.uuid == ingestion_uuid
+            )
+        )
+
+    assert protected_phone is None
+    assert _current_revision(database_engine) == _head_revision()
+
+
+def test_downgrade_refuses_to_discard_protected_originating_phone(
+    database_engine: Engine,
+) -> None:
+    upgrade_to_head(database_engine)
+    ingestion_uuid = uuid4()
+    ingestions = _reflect_tables(database_engine)["mail_ingestions"]
+    with database_engine.begin() as connection:
+        connection.execute(
+            ingestions.insert(),
+            {
+                "uuid": ingestion_uuid,
+                "mailbox_id": uuid4(),
+                "message_id": "AAMkProtectedOriginatingPhone",
+                "originating_phone_number_ciphertext": b"protected",
+                "received_at": datetime(2026, 11, 4, tzinfo=UTC),
+            },
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="originating phone number ciphertexts remain",
+    ):
+        _migrate(
+            database_engine,
+            PROTECTED_PHONE_PREVIOUS_REVISION,
+            downgrade=True,
+        )
+
     assert _current_revision(database_engine) == _head_revision()
 
 

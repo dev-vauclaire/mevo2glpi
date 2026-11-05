@@ -17,6 +17,9 @@ from .scenarios import (
 )
 
 INBOX_FOLDER_ID = "inbox"
+SYNTHETIC_VOICE_MESSAGE_SUBJECT = (
+    "Message vocale de la part de06 78 37 43 63pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +42,7 @@ class SyntheticMessage:
     message_id: str
     parent_folder_id: str
     received_at: datetime
+    subject: str = field(repr=False)
     attachments: tuple[SyntheticAttachment, ...]
     scenario: SeedScenario | None
 
@@ -113,6 +117,7 @@ class MicrosoftGraphSimulatorState:
             message_id=f"message-{identifier}",
             parent_folder_id=INBOX_FOLDER_ID,
             received_at=received_at.astimezone(UTC),
+            subject=SYNTHETIC_VOICE_MESSAGE_SUBJECT,
             attachments=tuple(
                 self._attachment_from_template(identifier, index, template)
                 for index, template in enumerate(attachments, start=1)
@@ -191,6 +196,7 @@ class MicrosoftGraphSimulatorState:
 __all__ = [
     "INBOX_FOLDER_ID",
     "MicrosoftGraphSimulatorState",
+    "SYNTHETIC_VOICE_MESSAGE_SUBJECT",
     "SyntheticAttachment",
     "SyntheticMessage",
 ]

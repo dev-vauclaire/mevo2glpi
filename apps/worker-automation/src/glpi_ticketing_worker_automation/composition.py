@@ -13,6 +13,10 @@ import httpx
 from pydantic import HttpUrl
 from sqlalchemy.orm import Session
 
+from glpi_ticketing_common import (
+    OriginatingPhoneNumberCipher,
+    OriginatingPhoneNumberKeyError,
+)
 from glpi_ticketing_glpi import GlpiClient, GlpiTicketDefaults
 
 from .settings import WorkerSettings
@@ -91,9 +95,20 @@ def build_automation_worker(
         raise TypeError("on_job_started must be callable")
 
     audio_root = _resolve_existing_directory(settings.audio_root)
+    try:
+        originating_phone_number_cipher = (
+            OriginatingPhoneNumberCipher.from_base64_key_file(
+                settings.originating_phone_number_key_path
+            )
+        )
+    except OriginatingPhoneNumberKeyError:
+        raise WorkerConfigurationError(
+            "originating phone number key configuration is invalid"
+        ) from None
     lifecycle = AutomationJobLifecycleService(
         session_factory=session_factory,
         ownership_guard=ownership_guard,
+        originating_phone_number_cipher=originating_phone_number_cipher,
     )
 
     def record_transcription_submission(

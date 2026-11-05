@@ -100,6 +100,9 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     )
     assert documented_values["TRANSCRIPTION_PROVIDER"] == "openai_compatible"
     assert documented_values["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "120"
+    assert documented_values["ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH"] == (
+        "/etc/gta/secrets/staging-originating-phone-number.key"
+    )
     assert documented_values["GLPI_BASE_URL"].startswith("https://")
     assert "PUBLISHER_ENTRA_CLIENT_ID" not in documented_values
     assert "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_HOST_PATH" not in documented_values
@@ -207,6 +210,16 @@ def test_staging_uses_the_separated_simulator_and_transcription_services(
         )
         is None
     )
+
+    phone_key_target = "/run/secrets/originating-phone-number.key"
+    for service_name in ("worker-publisher", "worker-automation"):
+        service = services[service_name]
+        phone_key = _volume_for(service, phone_key_target)
+        assert phone_key is not None
+        assert phone_key["read_only"] is True
+        assert service["environment"]["ORIGINATING_PHONE_NUMBER_KEY_PATH"] == (
+            phone_key_target
+        )
     assert (
         _volume_for(
             services["worker-publisher"],

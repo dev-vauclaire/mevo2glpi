@@ -17,6 +17,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
 IMMUTABLE_ID_PREFERENCE = 'IdType="ImmutableId"'
+SYNTHETIC_SUBJECT = (
+    "Message vocale de la part de06 78 37 43 63pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +47,7 @@ class FakeMessage:
     message_id: str
     parent_folder_id: str
     received_at: str = "2026-09-08T07:30:00Z"
+    subject: str | None = SYNTHETIC_SUBJECT
     attachments: list[FakeAttachment] = field(default_factory=list)
 
 
@@ -266,6 +270,7 @@ def _handler_for(state: FakeGraphState) -> type[BaseHTTPRequestHandler]:
                         "parentFolderId": message.parent_folder_id,
                         "receivedDateTime": message.received_at,
                         "hasAttachments": bool(message.attachments),
+                        "subject": message.subject,
                     }
                     for message in page
                 ]

@@ -359,6 +359,22 @@ SHA-256, ce qui confirme que le certificat correspond à la clé privée.
 Consigner l'empreinte du certificat, son expiration et son responsable, sans
 enregistrer la clé privée ni sa passphrase.
 
+### Créer la clé de protection du numéro d'origine
+
+Créer une clé dédiée, distincte des clés Entra et des autres secrets :
+
+```bash
+sudo sh -c 'umask 027; openssl rand -base64 32 > /etc/gta/secrets/originating-phone-number.key'
+sudo chown root:10001 /etc/gta/secrets/originating-phone-number.key
+sudo chmod 0640 /etc/gta/secrets/originating-phone-number.key
+sudo stat -c '%n uid=%u gid=%g mode=%a' /etc/gta/secrets/originating-phone-number.key
+```
+
+Ne jamais afficher ni committer son contenu. Publisher et automation montent
+le même fichier en lecture seule. Conserver cette clé pendant les mises à jour
+et les restaurations tant qu'un job est en cours ; sa perte rendrait sa
+métadonnée d'origine indéchiffrable.
+
 ### Créer les réseaux
 
 Créer les réseaux partagés une seule fois, depuis Dokploy ou sur la VM :

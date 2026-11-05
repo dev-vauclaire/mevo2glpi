@@ -504,7 +504,22 @@ def _build_ticket_content(command: GlpiTicketCreateCommand) -> str:
     transcription = html.escape(command.transcription, quote=True)
     transcription = "<br>\n".join(transcription.splitlines())
     audio_url = html.escape(command.audio_url, quote=True)
-    return f'<p>{transcription}</p><p>Audio : <a href="{audio_url}">{audio_url}</a></p>'
+    call_information = ""
+    if command.originating_phone_number is not None:
+        formatted_phone_number = " ".join(
+            command.originating_phone_number[index : index + 2]
+            for index in range(0, len(command.originating_phone_number), 2)
+        )
+        call_information = (
+            "<p><strong>Informations sur l’appel</strong><br>\n"
+            f"Numéro d’origine : {formatted_phone_number}<br>\n"
+            "<em>Ce numéro peut différer du numéro de rappel demandé "
+            "dans le message.</em></p>"
+        )
+    return (
+        f"{call_information}<p>{transcription}</p>"
+        f'<p>Audio : <a href="{audio_url}">{audio_url}</a></p>'
+    )
 
 
 def _serialize_ticket_opening_date(command: GlpiTicketCreateCommand) -> str:

@@ -25,7 +25,10 @@ from .enums import (
     WorkerRuntimeState,
     WorkerServiceName,
 )
-from .mail_ingestion import MailIngestion
+from .mail_ingestion import (
+    ORIGINATING_PHONE_NUMBER_CIPHERTEXT_MAX_BYTES,
+    MailIngestion,
+)
 from .mail_ingestion_event import MailIngestionEvent
 from .ticket_creation_job import TicketCreationJob
 from .ticket_creation_job_event import TicketCreationJobEvent
@@ -49,6 +52,7 @@ __all__ = [
     "MailIngestionStage",
     "MailIngestionStatus",
     "NAMING_CONVENTION",
+    "ORIGINATING_PHONE_NUMBER_CIPHERTEXT_MAX_BYTES",
     "RetentionPolicy",
     "RetentionStatus",
     "TicketCreationJob",

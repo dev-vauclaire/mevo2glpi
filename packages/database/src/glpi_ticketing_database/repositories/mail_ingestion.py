@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import (
+    ORIGINATING_PHONE_NUMBER_CIPHERTEXT_MAX_BYTES,
     AudioExtension,
     MailIngestion,
     MailIngestionDisposition,
@@ -43,6 +44,10 @@ class DiscoveredMail:
     mailbox_id: UUID
     message_id: str
     received_at: datetime
+    originating_phone_number_ciphertext: bytes | None = field(
+        default=None,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -72,6 +77,10 @@ class MailIngestionSnapshot:
     first_started_at: datetime | None
     updated_at: datetime
     finished_at: datetime | None
+    originating_phone_number_ciphertext: bytes | None = field(
+        default=None,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -122,6 +131,9 @@ class MailIngestionRepository:
             uuid=discovered_mail.uuid,
             mailbox_id=discovered_mail.mailbox_id,
             message_id=discovered_mail.message_id,
+            originating_phone_number_ciphertext=(
+                discovered_mail.originating_phone_number_ciphertext
+            ),
             attachment_id=None,
             job_uuid=None,
             status=MailIngestionStatus.PENDING.value,
@@ -170,6 +182,37 @@ class MailIngestionRepository:
             .limit(1)
         ).first()
         return _to_snapshot(ingestion) if ingestion is not None else None
+
+    def clear_originating_phone_number_ciphertext(
+        self,
+        ingestion_uuid: UUID,
+        *,
+        now: datetime,
+    ) -> MailIngestionSnapshot:
+        """Erase protected caller metadata after confirming its GLPI ticket."""
+        validate_uuid(ingestion_uuid, "ingestion_uuid")
+        now = validate_utc_datetime(now, "now")
+        ingestion = self._session.get(
+            MailIngestion,
+            ingestion_uuid,
+            with_for_update=True,
+        )
+        if ingestion is None:
+            raise MailIngestionNotFoundError(
+                f"mail ingestion {ingestion_uuid} does not exist"
+            )
+        if (
+            ingestion.job_uuid != ingestion_uuid
+            or ingestion.disposition != MailIngestionDisposition.ACCEPTED.value
+        ):
+            raise InvalidMailIngestionTransitionError(
+                "protected caller metadata requires an accepted linked job"
+            )
+        if ingestion.originating_phone_number_ciphertext is not None:
+            ingestion.originating_phone_number_ciphertext = None
+            ingestion.updated_at = now
+            self._session.flush()
+        return _to_snapshot(ingestion)
 
     def resume_or_claim_next(
         self,
@@ -395,6 +438,7 @@ class MailIngestionRepository:
         ingestion.disposition = MailIngestionDisposition.REJECTED.value
         ingestion.rejection_category = rejection_category
         ingestion.rejection_code = rejection_code
+        ingestion.originating_phone_number_ciphertext = None
         ingestion.stage = MailIngestionStage.ACKNOWLEDGEMENT.value
         ingestion.consecutive_retry_count = 0
         ingestion.updated_at = now
@@ -602,7 +646,24 @@ def _validate_discovered_mail(discovered_mail: DiscoveredMail) -> None:
     validate_uuid(discovered_mail.uuid, "discovered_mail.uuid")
     validate_uuid(discovered_mail.mailbox_id, "discovered_mail.mailbox_id")
     _validate_graph_identifier(discovered_mail.message_id, "message_id")
+    _validate_originating_phone_number_ciphertext(
+        discovered_mail.originating_phone_number_ciphertext
+    )
     validate_utc_datetime(discovered_mail.received_at, "received_at")
+
+
+def _validate_originating_phone_number_ciphertext(
+    ciphertext: bytes | None,
+) -> bytes | None:
+    if ciphertext is None:
+        return None
+    if not isinstance(ciphertext, bytes):
+        raise TypeError("originating_phone_number_ciphertext must be bytes or None")
+    if not 1 <= len(ciphertext) <= ORIGINATING_PHONE_NUMBER_CIPHERTEXT_MAX_BYTES:
+        raise ValueError(
+            "originating_phone_number_ciphertext must be non-empty and bounded"
+        )
+    return ciphertext
 
 
 def _validate_replay_filter(
@@ -757,6 +818,11 @@ def _to_snapshot(ingestion: MailIngestion) -> MailIngestionSnapshot:
         first_started_at=ingestion.first_started_at,
         updated_at=ingestion.updated_at,
         finished_at=ingestion.finished_at,
+        originating_phone_number_ciphertext=(
+            bytes(ingestion.originating_phone_number_ciphertext)
+            if ingestion.originating_phone_number_ciphertext is not None
+            else None
+        ),
     )
 
 

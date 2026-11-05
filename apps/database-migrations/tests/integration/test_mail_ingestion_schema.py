@@ -230,6 +230,26 @@ def test_mail_source_identifiers_and_counters_are_database_enforced(
         )
 
 
+def test_protected_originating_phone_ciphertext_is_bounded(
+    migrated_engine: Engine,
+) -> None:
+    _insert(
+        migrated_engine,
+        INGESTIONS,
+        _pending_ingestion(originating_phone_number_ciphertext=b"protected"),
+    )
+
+    for invalid_ciphertext in (b"", b"x" * 129):
+        _assert_rejected(
+            migrated_engine,
+            INGESTIONS,
+            _pending_ingestion(
+                originating_phone_number_ciphertext=invalid_ciphertext,
+            ),
+            "ck_mail_ingestions_originating_phone_number_ciphertext_size",
+        )
+
+
 def test_mail_retry_requires_schedule_attempt_and_sanitized_error(
     migrated_engine: Engine,
 ) -> None:

@@ -111,6 +111,7 @@ class GlpiTicketCreateCommand:
     audio_url: str
     opened_at: datetime
     defaults: GlpiTicketDefaults
+    originating_phone_number: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.audio_uuid, UUID):
@@ -128,6 +129,7 @@ class GlpiTicketCreateCommand:
         _validate_utc_datetime(self.opened_at, "opened_at")
         if not isinstance(self.defaults, GlpiTicketDefaults):
             raise TypeError("defaults must be a GlpiTicketDefaults")
+        _validate_originating_phone_number(self.originating_phone_number)
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +194,23 @@ def _validate_audio_url(audio_url: object) -> None:
         raise ValueError("audio_url must be an absolute HTTP URL")
     if parsed_url.username or parsed_url.password:
         raise ValueError("audio_url must not contain credentials")
+
+
+def _validate_originating_phone_number(phone_number: object) -> None:
+    if phone_number is None:
+        return
+    if not isinstance(phone_number, str):
+        raise TypeError("originating_phone_number must be a string or None")
+    if (
+        len(phone_number) != 10
+        or not phone_number.isascii()
+        or not phone_number.isdecimal()
+        or phone_number[0] != "0"
+        or phone_number[1] == "0"
+    ):
+        raise ValueError(
+            "originating_phone_number must be a canonical French phone number"
+        )
 
 
 def _validate_utc_datetime(value: object, field_name: str) -> None:

@@ -8,6 +8,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy.orm import Session
 
+from glpi_ticketing_common import OriginatingPhoneNumberCipher
 from glpi_ticketing_database import (
     AudioExtension,
     ErrorScope,
@@ -29,6 +30,7 @@ from glpi_ticketing_worker_automation.worker import (
 JOB_UUID = UUID("123e4567-e89b-42d3-a456-426614174000")
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
 SOURCE_RECEIVED_AT = datetime(2026, 8, 27, 7, 30, tzinfo=UTC)
+ORIGINATING_PHONE_NUMBER = "0678374363"
 
 
 def test_claim_and_event_are_orchestrated_in_one_application_transaction() -> None:
@@ -47,6 +49,7 @@ def test_claim_and_event_are_orchestrated_in_one_application_transaction() -> No
         job_uuid=JOB_UUID,
         disposition=MailIngestionDisposition.ACCEPTED,
         received_at=SOURCE_RECEIVED_AT,
+        originating_phone_number_ciphertext=None,
     )
     guards: list[str] = []
     service = _service(
@@ -64,6 +67,8 @@ def test_claim_and_event_are_orchestrated_in_one_application_transaction() -> No
         previous_status=JobStatus.PENDING,
         resumed=False,
         source_received_at=SOURCE_RECEIVED_AT,
+        originating_phone_number=None,
+        originating_phone_number_error_code=None,
     )
     job_repository.resume_or_claim_next.assert_called_once_with(NOW)
     mail_repository.get_by_uuid.assert_called_once_with(JOB_UUID)
@@ -132,6 +137,7 @@ def test_claim_normalizes_aware_source_date_to_utc() -> None:
             30,
             tzinfo=timezone(timedelta(hours=2)),
         ),
+        originating_phone_number_ciphertext=None,
     )
     service = _service(
         session,
@@ -144,6 +150,80 @@ def test_claim_normalizes_aware_source_date_to_utc() -> None:
 
     assert result is not None
     assert result.source_received_at == SOURCE_RECEIVED_AT
+
+
+def test_claim_decrypts_originating_phone_number_bound_to_ingestion() -> None:
+    session = create_autospec(Session, instance=True)
+    job_repository = MagicMock()
+    event_repository = MagicMock()
+    mail_repository = MagicMock()
+    cipher = OriginatingPhoneNumberCipher(b"k" * 32)
+    acquisition = JobAcquisition(
+        job=_snapshot(status=JobStatus.PROCESSING, stage=JobStage.TRANSCRIPTION),
+        previous_status=JobStatus.PENDING,
+        resumed=False,
+    )
+    job_repository.resume_or_claim_next.return_value = acquisition
+    mail_repository.get_by_uuid.return_value = SimpleNamespace(
+        uuid=JOB_UUID,
+        job_uuid=JOB_UUID,
+        disposition=MailIngestionDisposition.ACCEPTED,
+        received_at=SOURCE_RECEIVED_AT,
+        originating_phone_number_ciphertext=cipher.encrypt(
+            ORIGINATING_PHONE_NUMBER,
+            JOB_UUID,
+        ),
+    )
+    service = _service(
+        session,
+        job_repository=job_repository,
+        event_repository=event_repository,
+        mail_repository=mail_repository,
+        originating_phone_number_cipher=cipher,
+    )
+
+    result = service.resume_or_claim_next(NOW)
+
+    assert result is not None
+    assert result.originating_phone_number == ORIGINATING_PHONE_NUMBER
+    assert result.originating_phone_number_error_code is None
+    assert ORIGINATING_PHONE_NUMBER not in repr(result)
+
+
+def test_claim_reports_sanitized_error_for_untrusted_phone_ciphertext() -> None:
+    session = create_autospec(Session, instance=True)
+    job_repository = MagicMock()
+    event_repository = MagicMock()
+    mail_repository = MagicMock()
+    acquisition = JobAcquisition(
+        job=_snapshot(status=JobStatus.PROCESSING, stage=JobStage.TRANSCRIPTION),
+        previous_status=JobStatus.PENDING,
+        resumed=False,
+    )
+    job_repository.resume_or_claim_next.return_value = acquisition
+    mail_repository.get_by_uuid.return_value = SimpleNamespace(
+        uuid=JOB_UUID,
+        job_uuid=JOB_UUID,
+        disposition=MailIngestionDisposition.ACCEPTED,
+        received_at=SOURCE_RECEIVED_AT,
+        originating_phone_number_ciphertext=b"untrusted",
+    )
+    service = _service(
+        session,
+        job_repository=job_repository,
+        event_repository=event_repository,
+        mail_repository=mail_repository,
+        originating_phone_number_cipher=OriginatingPhoneNumberCipher(b"k" * 32),
+    )
+
+    result = service.resume_or_claim_next(NOW)
+
+    assert result is not None
+    assert result.originating_phone_number is None
+    assert (
+        result.originating_phone_number_error_code
+        == "originating_phone_number_decryption_failed"
+    )
 
 
 def test_idempotent_submission_does_not_duplicate_its_event() -> None:
@@ -206,6 +286,45 @@ def test_terminal_transcription_failure_is_audited_before_ticketing() -> None:
         error_category="terminal",
         technical_code="invalid_transcription",
     )
+
+
+def test_ticket_confirmation_erases_protected_number_in_same_transaction() -> None:
+    session = create_autospec(Session, instance=True)
+    job_repository = MagicMock()
+    event_repository = MagicMock()
+    mail_repository = MagicMock()
+    snapshot = _snapshot(
+        status=JobStatus.PROCESSING,
+        stage=JobStage.FINALIZATION,
+        ticket_id=84,
+    )
+    job_repository.record_ticket_confirmed.return_value = snapshot
+    service = _service(
+        session,
+        job_repository=job_repository,
+        event_repository=event_repository,
+        mail_repository=mail_repository,
+    )
+
+    result = service.record_ticket_confirmed(
+        JOB_UUID,
+        84,
+        NOW,
+        clear_originating_phone_number=True,
+    )
+
+    assert result == snapshot
+    job_repository.record_ticket_confirmed.assert_called_once_with(
+        JOB_UUID,
+        84,
+        NOW,
+    )
+    mail_repository.clear_originating_phone_number_ciphertext.assert_called_once_with(
+        JOB_UUID,
+        now=NOW,
+    )
+    event_repository.append.assert_called_once()
+    session.begin.assert_called_once_with()
 
 
 def test_completion_orders_job_retention_then_event_in_same_transaction() -> None:
@@ -319,6 +438,7 @@ def _service(
     retention_repository: MagicMock | None = None,
     mail_repository: MagicMock | None = None,
     ownership_guard=None,
+    originating_phone_number_cipher: OriginatingPhoneNumberCipher | None = None,
 ) -> AutomationJobLifecycleService:
     return AutomationJobLifecycleService(
         session_factory=lambda: session,
@@ -331,6 +451,7 @@ def _service(
         mail_ingestion_repository_factory=lambda _session: (
             mail_repository if mail_repository is not None else MagicMock()
         ),
+        originating_phone_number_cipher=originating_phone_number_cipher,
     )
 
 

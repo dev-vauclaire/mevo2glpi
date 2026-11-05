@@ -11,6 +11,7 @@ from pathlib import Path
 from types import TracebackType
 from uuid import UUID
 
+from glpi_ticketing_common import OriginatingPhoneNumberCipher
 from glpi_ticketing_database import (
     ErrorScope,
     JobStage,
@@ -74,6 +75,7 @@ class FakeMailIngestion:
     job_uuid: UUID = AUDIO_UUID
     disposition: MailIngestionDisposition = MailIngestionDisposition.ACCEPTED
     received_at: datetime = SOURCE_RECEIVED_AT
+    originating_phone_number_ciphertext: bytes | None = None
 
 
 class FakeState:
@@ -82,9 +84,11 @@ class FakeState:
         job: FakeJob | None = None,
         *,
         source_received_at: datetime | None = SOURCE_RECEIVED_AT,
+        originating_phone_number_ciphertext: bytes | None = None,
     ) -> None:
         self.job = job or FakeJob()
         self.source_received_at = source_received_at
+        self.originating_phone_number_ciphertext = originating_phone_number_ciphertext
         self.eligible = True
         self.active_transactions = 0
         self.repository_calls: list[tuple[object, ...]] = []
@@ -255,7 +259,25 @@ class FakeMailIngestionRepository:
         self._state.repository_calls.append(("get_ingestion_by_uuid", job_uuid))
         if self._state.source_received_at is None:
             return None
-        return FakeMailIngestion(received_at=self._state.source_received_at)
+        return FakeMailIngestion(
+            received_at=self._state.source_received_at,
+            originating_phone_number_ciphertext=(
+                self._state.originating_phone_number_ciphertext
+            ),
+        )
+
+    def clear_originating_phone_number_ciphertext(
+        self,
+        job_uuid: UUID,
+        *,
+        now: datetime,
+    ) -> FakeMailIngestion:
+        assert self._state.active_transactions == 1
+        self._state.repository_calls.append(
+            ("clear_originating_phone_number_ciphertext", job_uuid, now)
+        )
+        self._state.originating_phone_number_ciphertext = None
+        return FakeMailIngestion(received_at=self._state.source_received_at or NOW)
 
 
 class FakeTicketCreationJobEventRepository:
@@ -333,6 +355,7 @@ def build_worker(
     ownership_guard: Callable[[], None] | None = None,
     on_job_started: Callable[[UUID], None] | None = None,
     maximum_consecutive_retries: int = 3,
+    originating_phone_number_cipher: OriginatingPhoneNumberCipher | None = None,
 ) -> AutomationWorker:
     lifecycle = AutomationJobLifecycleService(
         session_factory=lambda: FakeSession(state),  # type: ignore[arg-type]
@@ -341,6 +364,7 @@ def build_worker(
         event_repository_factory=FakeTicketCreationJobEventRepository,  # type: ignore[arg-type]
         retention_repository_factory=FakeAudioRetentionRepository,  # type: ignore[arg-type]
         mail_ingestion_repository_factory=FakeMailIngestionRepository,  # type: ignore[arg-type]
+        originating_phone_number_cipher=originating_phone_number_cipher,
     )
     transitions = JobTransitionService(
         lifecycle=lifecycle,

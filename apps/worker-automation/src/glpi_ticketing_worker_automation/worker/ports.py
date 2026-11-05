@@ -26,6 +26,8 @@ class JobAcquisitionProtocol(Protocol):
 
     job: JobSnapshotProtocol
     source_received_at: datetime | None
+    originating_phone_number: str | None
+    originating_phone_number_error_code: str | None
 
 
 class JobLifecycleProtocol(Protocol):
@@ -65,6 +67,8 @@ class JobLifecycleProtocol(Protocol):
         job_uuid: UUID,
         ticket_id: int,
         now: datetime,
+        *,
+        clear_originating_phone_number: bool = False,
     ) -> object: ...
 
     def mark_completed(

@@ -127,6 +127,10 @@ def message_payload(message_id: str, folder_id: str = "inbox") -> dict[str, obje
         "parentFolderId": folder_id,
         "receivedDateTime": "2026-09-08T07:30:00Z",
         "hasAttachments": True,
+        "subject": (
+            "Message vocale de la part de06 78 37 43 63"
+            "pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+        ),
     }
 
 
@@ -142,6 +146,9 @@ def test_list_messages_uses_configured_page_size_and_follows_safe_next_link() ->
                 f"/users/{MAILBOX_ID}/mailFolders/inbox/messages"
             )
             assert request.url.params["$top"] == "2"
+            assert request.url.params["$select"] == (
+                "id,parentFolderId,receivedDateTime,hasAttachments,subject"
+            )
             return httpx.Response(
                 200,
                 json={
@@ -167,8 +174,40 @@ def test_list_messages_uses_configured_page_size_and_follows_safe_next_link() ->
         "immutable-message-2",
     ]
     assert messages[0].received_at == datetime(2026, 9, 8, 7, 30, tzinfo=UTC)
+    assert messages[0].subject == (
+        "Message vocale de la part de06 78 37 43 63pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+    )
+    assert "06 78 37 43 63" not in repr(messages[0])
     assert len(requests) == 2
     assert len({request.headers["client-request-id"] for request in requests}) == 2
+
+
+@pytest.mark.parametrize("subject", [None, ""])
+def test_list_messages_accepts_an_absent_subject(subject: object) -> None:
+    payload = message_payload("immutable-message")
+    payload["subject"] = subject
+
+    client, http_client, _ = make_client(
+        lambda _request: httpx.Response(200, json={"value": [payload]})
+    )
+    with http_client:
+        messages = client.list_messages()
+
+    assert messages[0].subject is None
+
+
+@pytest.mark.parametrize("subject", [42, "x" * 1_025, "unsafe\nsubject"])
+def test_list_messages_ignores_an_invalid_optional_subject(subject: object) -> None:
+    payload = message_payload("immutable-message")
+    payload["subject"] = subject
+
+    client, http_client, _ = make_client(
+        lambda _request: httpx.Response(200, json={"value": [payload]})
+    )
+    with http_client:
+        messages = client.list_messages()
+
+    assert messages[0].subject is None
 
 
 @pytest.mark.parametrize(

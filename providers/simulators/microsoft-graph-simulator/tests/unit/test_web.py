@@ -111,6 +111,9 @@ async def test_graph_lists_and_downloads_seeded_audio(
     messages = messages_response.json()["value"]
     assert [message["id"] for message in messages] == [seeded["message_id"]]
     assert messages[0]["receivedDateTime"] == "2026-10-26T08:30:00Z"
+    assert messages[0]["subject"] == (
+        "Message vocale de la part de06 78 37 43 63pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+    )
 
     message_id = messages[0]["id"]
     attachments_response = await client.get(

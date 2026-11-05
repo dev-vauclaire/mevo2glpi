@@ -27,6 +27,11 @@ SYNTHETIC_GRAPH_BASE_URL = "http://gta-staging-microsoft-graph:8080/v1.0"
 
 
 def _synthetic_settings(audio_root: Path) -> PublisherSettings:
+    key_path = audio_root / "originating-phone-number.key"
+    key_path.write_text(
+        "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=\n",
+        encoding="ascii",
+    )
     return PublisherSettings(
         publisher_graph_auth_mode=PublisherGraphAuthMode.SYNTHETIC,
         publisher_graph_base_url=SYNTHETIC_GRAPH_BASE_URL,
@@ -35,6 +40,7 @@ def _synthetic_settings(audio_root: Path) -> PublisherSettings:
             "postgresql+psycopg://publisher:synthetic@database/jobs"
         ),
         audio_root=audio_root,
+        originating_phone_number_key_path=key_path,
     )
 
 
@@ -69,6 +75,29 @@ def test_composition_fails_closed_when_certificate_settings_are_incomplete(
     ):
         build_publisher_worker(
             malformed_settings,
+            http_client=http_client,
+            session_factory=cast(object, lambda: None),
+        )
+
+
+def test_composition_fails_closed_when_phone_number_key_is_invalid(
+    tmp_path: Path,
+) -> None:
+    settings = _synthetic_settings(tmp_path)
+    settings.originating_phone_number_key_path.write_text(
+        "not-a-valid-key\n",
+        encoding="ascii",
+    )
+
+    with (
+        httpx2.Client() as http_client,
+        pytest.raises(
+            PublisherConfigurationError,
+            match="phone number key configuration is invalid",
+        ),
+    ):
+        build_publisher_worker(
+            settings,
             http_client=http_client,
             session_factory=cast(object, lambda: None),
         )

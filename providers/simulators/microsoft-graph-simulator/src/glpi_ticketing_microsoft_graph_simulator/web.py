@@ -319,6 +319,7 @@ def _message_payload(message: SyntheticMessage) -> dict[str, object]:
         "parentFolderId": message.parent_folder_id,
         "receivedDateTime": message.received_at.isoformat().replace("+00:00", "Z"),
         "hasAttachments": bool(message.attachments),
+        "subject": message.subject,
     }
 
 

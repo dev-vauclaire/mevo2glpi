@@ -66,6 +66,72 @@ def test_source_identity_is_idempotent_but_distinct_messages_are_allowed(
         )
 
 
+def test_protected_originating_number_is_persisted_then_cleared_by_job(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    ingestion_uuid = UUID("00000000-0000-0000-0000-000000000104")
+    ciphertext = b"versioned-authenticated-ciphertext"
+
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        repository.add_discovered(
+            DiscoveredMail(
+                uuid=ingestion_uuid,
+                mailbox_id=MAILBOX_UUID,
+                message_id="immutable-message-protected",
+                received_at=NOW,
+                originating_phone_number_ciphertext=ciphertext,
+            ),
+            now=NOW,
+        )
+        repository.resume_or_claim_next(NOW)
+        repository.record_attachment_validated(
+            ingestion_uuid,
+            attachment_id="attachment-protected",
+            audio_extension=AudioExtension.WAV,
+            attachment_size_bytes=128,
+            now=NOW + timedelta(seconds=1),
+        )
+        TicketCreationJobRepository(session).add_pending(
+            PendingJob(
+                uuid=ingestion_uuid,
+                storage_key=f"{ingestion_uuid}.wav",
+                audio_extension=AudioExtension.WAV,
+                audio_size_bytes=128,
+            )
+        )
+        repository.record_accepted(
+            ingestion_uuid,
+            job_uuid=ingestion_uuid,
+            now=NOW + timedelta(seconds=2),
+        )
+        repository.record_completed(
+            ingestion_uuid,
+            now=NOW + timedelta(seconds=3),
+        )
+
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        before = repository.get_by_uuid(ingestion_uuid)
+        assert before is not None
+        assert before.originating_phone_number_ciphertext == ciphertext
+
+        cleared = repository.clear_originating_phone_number_ciphertext(
+            ingestion_uuid,
+            now=NOW + timedelta(seconds=4),
+        )
+        assert cleared is not None
+        assert cleared.originating_phone_number_ciphertext is None
+
+        cleared_again = repository.clear_originating_phone_number_ciphertext(
+            ingestion_uuid,
+            now=NOW + timedelta(seconds=5),
+        )
+        assert cleared_again is not None
+        assert cleared_again.originating_phone_number_ciphertext is None
+
+
 def test_claim_priority_and_both_terminal_dispositions(
     migrated_engine: Engine,
 ) -> None:

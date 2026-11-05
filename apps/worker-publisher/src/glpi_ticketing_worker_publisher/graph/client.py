@@ -119,7 +119,9 @@ class GraphClient:
                 "messages",
             ),
             initial_params={
-                "$select": "id,parentFolderId,receivedDateTime,hasAttachments",
+                "$select": (
+                    "id,parentFolderId,receivedDateTime,hasAttachments,subject"
+                ),
                 "$orderby": "receivedDateTime asc",
                 "$top": str(self._page_size),
             },
@@ -865,6 +867,7 @@ def _parse_message(
         ),
         received_at=_require_datetime(payload, "receivedDateTime", operation),
         has_attachments=_require_bool(payload, "hasAttachments", operation),
+        subject=_optional_subject(payload),
     )
 
 
@@ -939,6 +942,20 @@ def _require_string(
         or any(not character.isprintable() for character in value)
     ):
         raise GraphProtocolError(operation, f"invalid_{_snake_case(key)}")
+    return value
+
+
+def _optional_subject(payload: Mapping[str, object]) -> str | None:
+    """Decode a usable subject without making optional metadata blocking."""
+    value = payload.get("subject")
+    if value is None or value == "":
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) > 1_024
+        or any(not character.isprintable() for character in value)
+    ):
+        return None
     return value
 
 

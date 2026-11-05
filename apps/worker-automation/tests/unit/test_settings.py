@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
 @pytest.fixture(autouse=True)
 def configure_required_worker_settings(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Provide baseline settings unless a test explicitly removes one."""
     monkeypatch.setenv("LEGACY_TRANSCRIPTION_BASE_URL", TRANSCRIPTION_BASE_URL)
@@ -43,6 +45,12 @@ def configure_required_worker_settings(
     monkeypatch.setenv("GLPI_TICKET_URGENCY", GLPI_TICKET_LEVEL)
     monkeypatch.setenv("GLPI_TICKET_IMPACT", GLPI_TICKET_LEVEL)
     monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+    phone_number_key = tmp_path / "originating-phone-number.key"
+    phone_number_key.write_bytes(base64.b64encode(b"k" * 32) + b"\n")
+    monkeypatch.setenv(
+        "ORIGINATING_PHONE_NUMBER_KEY_PATH",
+        str(phone_number_key),
+    )
 
 
 def test_worker_settings_expose_canonical_storage_and_required_database(

@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
+from glpi_ticketing_common import OriginatingPhoneNumberCipher
 from glpi_ticketing_common.audio_files import publish_audio
 from glpi_ticketing_database import (
     AudioExtension,
@@ -60,6 +61,7 @@ SOURCE_RECEIVED_AT = datetime(2026, 8, 27, 7, 30, tzinfo=UTC)
 MAILBOX_ID = UUID("78f1f5c0-c798-4af9-9876-f61ef00d996c")
 SYNTHETIC_AUDIO = b"RIFF-persistent-worker-integration"
 TRANSCRIPTION = "Transcription réservée au ticket de test"
+ORIGINATING_PHONE_NUMBER = "0678374363"
 
 
 @dataclass(slots=True)
@@ -164,7 +166,13 @@ def test_pending_job_completes_with_events_retention_and_unchanged_audio(
     tmp_path: Path,
 ) -> None:
     session_factory = create_session_factory(migrated_engine)
-    audio_uuid, audio_path = _add_pending_job(session_factory, tmp_path)
+    cipher = OriginatingPhoneNumberCipher(b"k" * 32)
+    audio_uuid, audio_path = _add_pending_job(
+        session_factory,
+        tmp_path,
+        originating_phone_number=ORIGINATING_PHONE_NUMBER,
+        originating_phone_number_cipher=cipher,
+    )
     transcriber = PersistingFakeTranscriber(session_factory)
     glpi_client = FakeGlpiClient(ticket_id=42)
     worker = _worker(
@@ -173,12 +181,16 @@ def test_pending_job_completes_with_events_retention_and_unchanged_audio(
         transcriber,
         glpi_client,
         MutableClock(NOW),
+        originating_phone_number_cipher=cipher,
     )
 
     outcome = worker.run_once()
 
     assert outcome == CompletedOutcome(audio_uuid=audio_uuid, ticket_id=42)
     assert [command.opened_at for command in glpi_client.calls] == [SOURCE_RECEIVED_AT]
+    assert [command.originating_phone_number for command in glpi_client.calls] == [
+        ORIGINATING_PHONE_NUMBER
+    ]
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
     assert list(tmp_path.iterdir()) == [audio_path]
 
@@ -190,12 +202,15 @@ def test_pending_job_completes_with_events_retention_and_unchanged_audio(
             .where(TicketCreationJobEvent.job_uuid == audio_uuid)
             .order_by(TicketCreationJobEvent.event_id)
         ).all()
+        source_ingestion = MailIngestionRepository(session).get_by_uuid(audio_uuid)
 
     assert job is not None
     assert job.status == JobStatus.COMPLETED.value
     assert job.stage == JobStage.FINALIZATION.value
     assert job.glpi_ticket_id == 42
     assert job.transcription_provider_job_id == "provider-job-1"
+    assert source_ingestion is not None
+    assert source_ingestion.originating_phone_number_ciphertext is None
     assert job.attempt_count == 1
     assert retention is not None
     assert retention.policy == RetentionPolicy.TICKET_OR_DEADLINE.value
@@ -613,10 +628,19 @@ def _add_pending_job(
     audio_root: Path,
     *,
     with_source_ingestion: bool = True,
+    originating_phone_number: str | None = None,
+    originating_phone_number_cipher: OriginatingPhoneNumberCipher | None = None,
 ) -> tuple[UUID, Path]:
     audio_uuid = uuid4()
     storage_key = f"{audio_uuid}.wav"
     published = publish_audio(audio_root, storage_key, BytesIO(SYNTHETIC_AUDIO))
+    ciphertext = None
+    if originating_phone_number is not None:
+        assert originating_phone_number_cipher is not None
+        ciphertext = originating_phone_number_cipher.encrypt(
+            originating_phone_number,
+            audio_uuid,
+        )
     with session_factory.begin() as session:
         ingestion_repository = MailIngestionRepository(session)
         if with_source_ingestion:
@@ -626,6 +650,7 @@ def _add_pending_job(
                     mailbox_id=MAILBOX_ID,
                     message_id=f"message-{audio_uuid}",
                     received_at=SOURCE_RECEIVED_AT,
+                    originating_phone_number_ciphertext=ciphertext,
                 ),
                 now=NOW,
             )
@@ -676,10 +701,12 @@ def _worker(
     clock: MutableClock,
     *,
     job_repository_factory=TicketCreationJobRepository,
+    originating_phone_number_cipher: OriginatingPhoneNumberCipher | None = None,
 ) -> AutomationWorker:
     lifecycle = AutomationJobLifecycleService(
         session_factory=session_factory,
         job_repository_factory=job_repository_factory,
+        originating_phone_number_cipher=originating_phone_number_cipher,
     )
     retry_policy = RetryBackoffPolicy(
         initial_seconds=5,

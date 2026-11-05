@@ -91,6 +91,7 @@ class GraphMessage:
     parent_folder_id: FolderId = field(repr=False)
     received_at: datetime
     has_attachments: bool
+    subject: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         _validate_graph_identifier(self.message_id, "message_id")
@@ -98,6 +99,18 @@ class GraphMessage:
         _validate_aware_datetime(self.received_at, "received_at")
         if not isinstance(self.has_attachments, bool):
             raise TypeError("has_attachments must be a boolean")
+        if self.subject is not None:
+            if not isinstance(self.subject, str):
+                raise TypeError("subject must be a string or None")
+            if (
+                not self.subject
+                or len(self.subject) > 1_024
+                or any(not character.isprintable() for character in self.subject)
+            ):
+                raise ValueError(
+                    "subject must be non-empty, printable and no longer than "
+                    "1024 characters"
+                )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

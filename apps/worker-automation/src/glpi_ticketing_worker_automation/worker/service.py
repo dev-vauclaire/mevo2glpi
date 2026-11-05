@@ -80,6 +80,21 @@ class AutomationWorker:
         self._on_job_started(audio_uuid)
         LOGGER.info("audio processing started audio_uuid=%s", audio_uuid)
 
+        if (
+            job.glpi_ticket_id is None
+            and acquisition.originating_phone_number_error_code is not None
+        ):
+            return self._transitions.block(
+                audio_uuid,
+                stage=JobStage.TRANSCRIPTION,
+                failure=FailureDetails(
+                    scope=ErrorScope.SYSTEM,
+                    category="data_protection",
+                    technical_code=(acquisition.originating_phone_number_error_code),
+                ),
+                automatic_probe=False,
+            )
+
         source_received_at = acquisition.source_received_at
         if job.glpi_ticket_id is None and source_received_at is None:
             return self._transitions.block(
@@ -119,6 +134,7 @@ class AutomationWorker:
             job,
             transcription=transcription.transcription,
             opened_at=source_received_at,
+            originating_phone_number=acquisition.originating_phone_number,
         )
         if not isinstance(ticket, TicketCreationSuccess):
             return ticket

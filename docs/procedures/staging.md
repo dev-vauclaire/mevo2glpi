@@ -469,6 +469,18 @@ Les fichiers `*.env.example` sont des contrats de configuration, pas des
 fichiers à déployer. Copier leur contenu dans l'onglet **Environment** du
 projet Dokploy correspondant, puis remplacer tous les placeholders.
 
+Créer auparavant une clé synthétique propre au staging :
+
+```bash
+sudo install -d -o root -g 10001 -m 0750 /etc/gta/secrets
+sudo sh -c 'umask 027; openssl rand -base64 32 > /etc/gta/secrets/staging-originating-phone-number.key'
+sudo chown root:10001 /etc/gta/secrets/staging-originating-phone-number.key
+sudo chmod 0640 /etc/gta/secrets/staging-originating-phone-number.key
+```
+
+Cette clé est commune uniquement aux services publisher et automation du
+staging. Elle ne doit jamais reprendre la valeur de production.
+
 Contrôler les invariants suivants :
 
 - `APP_ENVIRONMENT=staging` ;
@@ -492,6 +504,8 @@ Contrôler les invariants suivants :
   instance et non à l'identifiant de production ;
 - `CA_BUNDLE_HOST_PATH=/etc/ssl/certs/ca-certificates.crt` ;
 - `PUBLIC_BASE_URL` contient le domaine HTTPS interne du web.
+- `ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH` cible la clé staging créée sur la
+  VM.
 
 Le provider nominal est `openai_compatible`. Le mock Transcribe AI reste
 disponible uniquement pour une bascule legacy explicite ; aucun basculement

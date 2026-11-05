@@ -332,6 +332,19 @@ def test_mail_source_identity_is_unique_and_case_sensitive() -> None:
     assert ingestions.c.attachment_id.type.collation == "C"
 
 
+def test_originating_phone_number_is_only_stored_as_nullable_ciphertext() -> None:
+    ingestions = Base.metadata.tables["mail_ingestions"]
+    check_names = {
+        constraint.name
+        for constraint in ingestions.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert "originating_phone_number" not in ingestions.c
+    assert ingestions.c.originating_phone_number_ciphertext.nullable is True
+    assert "ck_mail_ingestions_originating_phone_number_ciphertext_size" in check_names
+
+
 def test_storage_key_and_state_invariants_have_database_checks() -> None:
     jobs = Base.metadata.tables["ticket_creation_jobs"]
     check_names = {
