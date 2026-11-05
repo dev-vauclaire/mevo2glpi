@@ -25,7 +25,10 @@ def test_index_exposes_read_only_dashboard_and_operator_retry() -> None:
     assert "{{ release_short_commit_sha }}" in template
     assert "Traitement des demandes audio" not in template
     assert "Réseau interne" not in template
-    assert "<h1>GLPI Ticketing Automation</h1>" in template
+    assert "<h1>mevo2glpi</h1>" in template
+    assert "path='/images/logo_circulaire_claire.png'" in template
+    assert 'class="app-brand__logo"' in template
+    assert 'alt=""' in template
     assert 'type="module"' in template
     assert "path='/js/app.js'" in template
 

@@ -88,6 +88,19 @@ h3 {
   padding-block: 1.75rem;
 }
 
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.app-brand__logo {
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: none;
+  object-fit: contain;
+}
+
 .page-shell {
   display: grid;
   gap: 1.5rem;
@@ -672,6 +685,11 @@ tbody tr:last-child td {
   .section-heading__aside {
     width: fit-content;
     text-align: left;
+  }
+
+  .app-brand__logo {
+    width: 2.75rem;
+    height: 2.75rem;
   }
 
   .filters .button {

@@ -80,7 +80,7 @@ def create_app(
         release_identity.environment is not DeploymentEnvironment.PRODUCTION
     )
     app = FastAPI(
-        title="GLPI ticketing automation",
+        title="mevo2glpi",
         version=__version__,
         lifespan=lifespan,
         docs_url="/docs" if documentation_enabled else None,

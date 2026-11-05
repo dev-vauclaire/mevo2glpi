@@ -7,7 +7,7 @@
       name="description"
       content="Suivi opérationnel des demandes de création de tickets GLPI."
     >
-    <title>GLPI Ticketing Automation</title>
+    <title>mevo2glpi</title>
     <link rel="stylesheet" href="{{ request.url_for('static', path='/css/app.css') }}">
     <script
       type="module"
@@ -17,7 +17,16 @@
   <body>
     <header class="app-header">
       <div class="app-header__content">
-        <h1>GLPI Ticketing Automation</h1>
+        <div class="app-brand">
+          <img
+            class="app-brand__logo"
+            src="{{ request.url_for('static', path='/images/logo_circulaire_claire.png') }}"
+            alt=""
+            width="52"
+            height="52"
+          >
+          <h1>mevo2glpi</h1>
+        </div>
         <p
           class="environment-badge"
           data-release-identity

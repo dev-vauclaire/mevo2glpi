@@ -25,3 +25,9 @@ def test_web_image_context_includes_its_workspace_packages() -> None:
     assert "COPY packages/database/src packages/database/src" in dockerfile
     assert "!packages/common/src/**" in dockerignore_rules
     assert "!packages/database/src/**" in dockerignore_rules
+
+
+def test_web_package_contains_the_project_logo() -> None:
+    web_package = Path(__file__).resolve().parents[2] / "src" / "glpi_ticketing_web"
+
+    assert (web_package / "static" / "images" / "logo_circulaire_claire.png").is_file()

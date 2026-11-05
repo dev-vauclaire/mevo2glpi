@@ -137,8 +137,12 @@ def test_page_references_versioned_static_assets(
     assert response.status_code == 200
     assert 'href="http://testserver/static/css/app.css"' in response.text
     assert 'src="http://testserver/static/js/app.js"' in response.text
-    assert "<title>GLPI Ticketing Automation</title>" in response.text
-    assert "<h1>GLPI Ticketing Automation</h1>" in response.text
+    assert "<title>mevo2glpi</title>" in response.text
+    assert "<h1>mevo2glpi</h1>" in response.text
+    assert (
+        'src="http://testserver/static/images/logo_circulaire_claire.png"'
+        in response.text
+    )
     assert "Traitement des demandes audio" not in response.text
     assert "Réseau interne" not in response.text
     assert "Staging · main ·" in response.text
@@ -146,6 +150,9 @@ def test_page_references_versioned_static_assets(
     assert RELEASE_IDENTITY.commit_sha in response.text
     assert web_context.client.get("/static/css/app.css").status_code == 200
     assert web_context.client.get("/static/js/app.js").status_code == 200
+    logo_response = web_context.client.get("/static/images/logo_circulaire_claire.png")
+    assert logo_response.status_code == 200
+    assert logo_response.headers["content-type"] == "image/png"
 
 
 def test_api_job_collection_rejects_ingestion_posts(
