@@ -1,0 +1,129 @@
+name: ${COMPOSE_PROJECT_NAME:-mevo2glpi-staging-glpi}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+x-glpi-database-environment: &glpi-database-environment
+  GLPI_DB_HOST: glpi-db
+  GLPI_DB_PORT: "3306"
+  GLPI_DB_NAME: ${GLPI_TEST_DB_NAME:?Set GLPI_TEST_DB_NAME}
+  GLPI_DB_USER: ${GLPI_TEST_DB_USER:?Set GLPI_TEST_DB_USER}
+  GLPI_DB_PASSWORD: ${GLPI_TEST_DB_PASSWORD:?Set GLPI_TEST_DB_PASSWORD}
+
+x-glpi-bootstrap-environment: &glpi-bootstrap-environment
+  <<: *glpi-database-environment
+  GLPI_TEST_USERNAME: ${GLPI_TEST_USERNAME:?Set GLPI_TEST_USERNAME}
+  GLPI_TEST_PASSWORD: ${GLPI_TEST_PASSWORD:?Set GLPI_TEST_PASSWORD}
+  GLPI_TEST_OAUTH_CLIENT_NAME: ${GLPI_TEST_OAUTH_CLIENT_NAME:?Set GLPI_TEST_OAUTH_CLIENT_NAME}
+  GLPI_TEST_CLIENT_ID: ${GLPI_TEST_CLIENT_ID:?Set GLPI_TEST_CLIENT_ID}
+  GLPI_TEST_CLIENT_SECRET: ${GLPI_TEST_CLIENT_SECRET:?Set GLPI_TEST_CLIENT_SECRET}
+  GLPI_TEST_REQUEST_SOURCE_NAME: ${GLPI_TEST_REQUEST_SOURCE_NAME:-MEVO}
+  GLPI_TEST_TIMEZONE: ${GLPI_TEST_TIMEZONE:-Europe/Paris}
+
+services:
+  glpi-db:
+    image: mysql:8.4.11@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+    environment:
+      MYSQL_DATABASE: ${GLPI_TEST_DB_NAME:?Set GLPI_TEST_DB_NAME}
+      MYSQL_USER: ${GLPI_TEST_DB_USER:?Set GLPI_TEST_DB_USER}
+      MYSQL_PASSWORD: ${GLPI_TEST_DB_PASSWORD:?Set GLPI_TEST_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${GLPI_TEST_DB_ROOT_PASSWORD:?Set GLPI_TEST_DB_ROOT_PASSWORD}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          MYSQL_PWD=$$MYSQL_ROOT_PASSWORD
+          mysqladmin ping --host=127.0.0.1 --user=root --silent
+      interval: 2s
+      timeout: 5s
+      retries: 90
+      start_period: 10s
+    volumes:
+      - glpi-database-data:/var/lib/mysql
+    networks:
+      - glpi-database
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+
+  glpi-test:
+    image: ${GLPI_TEST_IMAGE_NAME:-mevo2glpi-staging-glpi:11.0.7}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      glpi-db:
+        condition: service_healthy
+    environment:
+      <<: *glpi-database-environment
+      TZ: ${GLPI_TEST_TIMEZONE:-Europe/Paris}
+      GLPI_CRONTAB_ENABLED: "0"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test -f /var/glpi/config/config_db.php &&
+          php -r '$$socket = @fsockopen("127.0.0.1", 80, $$errno, $$error, 2); exit($$socket === false ? 1 : 0);'
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    expose:
+      - "80"
+    volumes:
+      - glpi-data:/var/glpi
+    networks:
+      - glpi-database
+      - dokploy-network
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+
+  glpi-bootstrap:
+    image: ${GLPI_TEST_IMAGE_NAME:-mevo2glpi-staging-glpi:11.0.7}
+    depends_on:
+      glpi-db:
+        condition: service_healthy
+      glpi-test:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        php /opt/glpi-test/bootstrap_oauth.php >/dev/null
+        php /opt/glpi-test/bootstrap_request_source.php >/dev/null
+    environment:
+      <<: *glpi-bootstrap-environment
+    volumes:
+      - glpi-data:/var/glpi
+    networks:
+      - glpi-database
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    restart: "no"
+    logging: *logging
+
+networks:
+  glpi-database:
+    name: ${GLPI_TEST_DATABASE_NETWORK_NAME:-mevo2glpi-staging-glpi-database-network}
+    internal: true
+  dokploy-network:
+    name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
+    external: true
+
+volumes:
+  glpi-data:
+    name: ${GLPI_TEST_DATA_VOLUME_NAME:-mevo2glpi-staging-glpi-data}
+  glpi-database-data:
+    name: ${GLPI_TEST_DATABASE_VOLUME_NAME:-mevo2glpi-staging-glpi-database-data}

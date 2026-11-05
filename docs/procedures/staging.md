@@ -3,15 +3,15 @@
 ## Objectif et périmètre
 
 Cette procédure décrit l'installation initiale et la recette de mevo2glpi dans
-un environnement Dokploy de staging. Elle suppose qu'une
-instance GLPI de test existe déjà et qu'elle est accessible directement en
-HTTPS depuis la VM de staging.
+un environnement Dokploy de staging. Deux cibles GLPI sont possibles :
 
-Il est techniquement possible de démarrer un GLPI conteneurisé pour un
-laboratoire isolé. Cette variante est décrite dans la
-[procédure de développement local](developpement-local.md), mais elle ne fait
-pas partie du staging de référence : la recette doit porter sur une instance
-GLPI de test représentative de celle utilisée par l'établissement.
+- une instance de test existante, accessible directement en HTTPS depuis la VM ;
+- le Compose GLPI 11.0.7 autonome du dépôt, réservé au staging lorsque
+  l'instance externe n'est pas disponible.
+
+Une seule cible doit être configurée dans `GLPI_BASE_URL` pour une recette
+donnée. Le GLPI conteneurisé ne remplace pas la qualification finale contre
+l'instance de test représentative de celle utilisée par l'établissement.
 
 Le staging n'utilise ni boîte Exchange de production, ni GLPI de production,
 ni audio réel. Une mise à jour d'un environnement déjà installé suit la
@@ -30,9 +30,11 @@ flowchart LR
         subgraph DOKPLOY["Dokploy"]
             direction TB
 
-            subgraph SIMULATORS_APP["Projet Dokploy<br/>Providers mocks"]
-                direction LR
+            subgraph GRAPH_APP["Application Dockerfile<br/>Microsoft Graph mock"]
                 GRAPH["microsoft-graph-simulator"]
+            end
+
+            subgraph TRANSCRIBE_MOCK_APP["Application Dockerfile<br/>Transcribe AI mock"]
                 TRANSCRIBE_AI["transcribe-ai-simulator"]
             end
 
@@ -52,12 +54,19 @@ flowchart LR
             subgraph POSTGRES_APP["Database PostgreSQL"]
                 POSTGRES["PostgreSQL<br/>postgres-staging"]
             end
+
+            subgraph GLPI_APP["Projet Compose optionnel<br/>GLPI de staging"]
+                direction LR
+                GLPI_LOCAL["glpi-test<br/>11.0.7"]
+                GLPI_DB["glpi-db<br/>MySQL 8.4"]
+                GLPI_BOOTSTRAP["glpi-bootstrap<br/>one-shot"]
+            end
         end
 
         AUDIO["Volume Docker nommé<br/>gta-staging-audio-data"]
     end
 
-    GLPI["GLPI de test existant<br/>Instance externe réelle"]
+    GLPI_EXTERNAL["GLPI de test existant<br/>Alternative externe réelle"]
     OPERATEUR["Poste opérateur<br/>Navigateur avec HTTPS"]
 
     subgraph LEGEND["Légende"]
@@ -80,12 +89,17 @@ flowchart LR
     PUBLISHER --> POSTGRES
     AUTOMATION --> POSTGRES
     RETENTION --> POSTGRES
+    GLPI_LOCAL --> GLPI_DB
+    GLPI_BOOTSTRAP --> GLPI_LOCAL
+    GLPI_BOOTSTRAP --> GLPI_DB
     PUBLISHER --> AUDIO
     AUTOMATION --> AUDIO
     RETENTION --> AUDIO
     WEB --> AUDIO
-    AUTOMATION --> GLPI
-    RETENTION --> GLPI
+    AUTOMATION -. "GLPI_BASE_URL : une seule cible" .-> GLPI_LOCAL
+    RETENTION -. "GLPI_BASE_URL : une seule cible" .-> GLPI_LOCAL
+    AUTOMATION -. "alternative" .-> GLPI_EXTERNAL
+    RETENTION -. "alternative" .-> GLPI_EXTERNAL
     OPERATEUR -->|"dashboard et audio fictif"| WEB
 
     classDef vm fill:#f1f5f9,stroke:#334155,color:#111827,stroke-width:2px
@@ -97,10 +111,10 @@ flowchart LR
     classDef external fill:#fef2f2,stroke:#b91c1c,color:#111827,stroke-width:2px
     classDef actor fill:#fdf2f8,stroke:#be185d,color:#111827,stroke-width:2px
 
-    class GRAPH,TRANSCRIBE_AI,TRANSCRIBER,WEB,MIGRATIONS,PUBLISHER,AUTOMATION,RETENTION container
-    class POSTGRES database
+    class GRAPH,TRANSCRIBE_AI,TRANSCRIBER,WEB,MIGRATIONS,PUBLISHER,AUTOMATION,RETENTION,GLPI_LOCAL,GLPI_BOOTSTRAP container
+    class POSTGRES,GLPI_DB database
     class AUDIO volume
-    class GLPI external
+    class GLPI_EXTERNAL external
     class OPERATEUR actor
     class L_VM vm
     class L_DOKPLOY dokploy
@@ -113,31 +127,37 @@ flowchart LR
 
     style VM fill:#f1f5f9,stroke:#334155,color:#111827,stroke-width:2px
     style DOKPLOY fill:#fffbeb,stroke:#b45309,color:#111827,stroke-width:2px
-    style SIMULATORS_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
+    style GRAPH_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
+    style TRANSCRIBE_MOCK_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
     style TRANSCRIPTION_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
     style GTA_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
     style POSTGRES_APP fill:#f0fdf4,stroke:#15803d,color:#111827,stroke-width:2px
+    style GLPI_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
     style LEGEND fill:#ffffff,stroke:#64748b,color:#111827,stroke-dasharray:4 4
 ```
 
-Microsoft Graph et le contrat Transcribe AI historique sont mockés dans une
-application Dokploy dédiée. Le simulateur Graph ne teste donc pas
+Microsoft Graph et le contrat Transcribe AI historique sont deux applications
+Dokploy Dockerfile indépendantes. Le simulateur Graph ne teste donc pas
 l'authentification Microsoft Entra ID. La transcription Parakeet, les services
-mevo2glpi et PostgreSQL sont déployés dans Dokploy, tandis que le GLPI de test reste
-un service externe réel.
+mevo2glpi et PostgreSQL sont déployés dans Dokploy. GLPI est soit l'instance de
+test externe, soit le projet Compose autonome optionnel affiché dans le schéma.
 
-Trois applications Docker Compose Dokploy sont déployées séparément :
+Les déploiements Dokploy sont séparés :
 
-1. **Providers mocks**, avec les conteneurs Microsoft Graph et Transcribe AI ;
-2. **Transcription**, avec le conteneur Parakeet ;
-3. **Applications (mevo2glpi)**, avec le web, la migration one-shot et les trois
-   workers.
+1. **Microsoft Graph mock**, application Dockerfile ;
+2. **Transcribe AI mock**, application Dockerfile ;
+3. **Transcription**, projet Compose avec Parakeet ;
+4. **Applications (mevo2glpi)**, projet Compose avec le web, la migration
+   one-shot et les trois workers ;
+5. **GLPI de staging**, projet Compose optionnel avec GLPI, MySQL et son
+   bootstrap idempotent.
 
 PostgreSQL est créé séparément comme une application **Database** dans
 Dokploy ; il ne constitue pas un projet Docker Compose supplémentaire.
 
 Les contrats techniques restent décrits dans les README des
-[providers de test](../../infra/docker/providers/README.md) et de la
+[providers de test](../../infra/docker/providers/README.md), du
+[GLPI conteneurisé](../../infra/docker/providers/glpi-test/README.md) et de la
 [transcription](../../infra/docker/transcription/README.md).
 
 ## Prérequis
@@ -156,10 +176,10 @@ Prévoir au minimum :
 - 12 Gio de RAM ;
 - 50 Gio d'espace disque.
 
-### GLPI de test existant
+### Cible GLPI de test
 
 Le staging est qualifié avec **GLPI 11.0.7** et la version d'API explicitement
-épinglée **V2.3.0**. Les prérequis GLPI sont :
+épinglée **V2.3.0**. Pour une instance existante, les prérequis GLPI sont :
 
 - l'API V2 activée ;
 - une URL directe ne passant pas par un portail SSO interactif ;
@@ -181,6 +201,12 @@ La documentation OpenAPI de l'instance doit répondre sur :
 https://NOM_GLPI_TEST/api.php/v2.3.0/doc.json
 ```
 
+Le Compose GLPI optionnel automatise l'installation, l'activation de l'API V2,
+la création de l'utilisateur technique, du client OAuth Password et de la
+source `MEVO`. Il exige néanmoins un domaine HTTPS de staging, des secrets
+exclusivement synthétiques et deux volumes neufs ou explicitement identifiés
+comme appartenant à cet environnement.
+
 ### DNS, réseau et accès
 
 Les noms ci-dessous sont symboliques et doivent être remplacés par les valeurs
@@ -193,7 +219,7 @@ donc apparaître avec l'adresse source de la VM.
 | Nom | Cible attendue | Résolution requise depuis | Action |
 | --- | --- | --- | --- |
 | `NOM_VM_STAGING` | adresse IP de la VM de staging | postes opérateurs et administrateurs | créer un enregistrement interne `A` et, si utilisé, `AAAA` |
-| `NOM_GLPI_TEST` | adresse IP du GLPI de test | VM de staging | rendre le nom résolvable par le DNS utilisé par Docker |
+| `NOM_GLPI_TEST` | adresse du GLPI externe, ou adresse de la VM lorsque le Compose optionnel est utilisé | VM de staging et postes chargés de la recette GLPI | rendre le nom résolvable par le DNS utilisé par Docker et les postes concernés |
 | `github.com`, `api.github.com` | adresses publiées par GitHub | VM de staging | autoriser leur résolution pour récupérer le dépôt privé |
 | `auth.docker.io`, `registry-1.docker.io`, `production.cloudfront.docker.com`, `ghcr.io`, `pkg-containers.githubusercontent.com` | adresses publiées par Docker Hub et GHCR | VM de staging | autoriser leur résolution pour télécharger les images de base |
 | suffixes `huggingface.co` et `hf.co`, avec tous leurs sous-domaines | adresses publiées par Hugging Face | VM de staging | autoriser leur résolution pour télécharger le modèle Parakeet épinglé |
@@ -209,7 +235,7 @@ donc apparaître avec l'adresse source de la VM.
 | VM de staging | DNS de l'établissement | UDP et TCP | 53 | autoriser | résolution des noms internes et externes par la VM et les conteneurs |
 | VM de staging (service de synchronisation système) | serveur NTP de l'établissement | UDP | 123 | autoriser si nécessaire | maintenir l'horloge système de la VM |
 | VM de staging | domaines externes listés dans la matrice DNS | TCP | 443 | autoriser en sortie | récupérer le dépôt, les images et le modèle Parakeet épinglé |
-| VM de staging | `NOM_GLPI_TEST` | TCP | 443 | autoriser en sortie | appels à l'API GLPI V2 par les workers `automation` et `retention`, avec vérification TLS |
+| VM de staging | `NOM_GLPI_TEST` | TCP | 443 | autoriser en sortie | appels à l'API GLPI V2 par les workers `automation` et `retention`, avec vérification TLS ; ce flux peut revenir vers Traefik sur la même VM avec le Compose optionnel |
 
 La politique cible est de refuser tout autre flux. PostgreSQL, les workers, les
 mocks et le moteur de transcription ne doivent jamais être publiés directement
@@ -260,9 +286,10 @@ Après installation :
 
 ### Installer la confiance envers GLPI
 
-Le bundle CA sert aux connexions **sortantes** des conteneurs vers le GLPI de
-test, qui est externe à la VM. Ce bundle n'est pas le certificat présenté aux
-opérateurs par le dashboard.
+Le bundle CA sert aux connexions HTTPS des conteneurs vers la cible GLPI. Avec
+une instance externe, le trafic sort de la VM ; avec le Compose optionnel, il
+rejoint le domaine GLPI publié par Traefik sur cette même VM. Ce bundle n'est
+pas le certificat présenté aux opérateurs par le dashboard.
 
 À partir d'une CA fournie par l'administrateur système :
 
@@ -280,7 +307,8 @@ CA_BUNDLE_HOST_PATH=/etc/ssl/certs/ca-certificates.crt
 Le fichier doit être lisible par l'UID/GID non privilégié `10001`. Ne jamais
 désactiver la vérification TLS pour contourner une chaîne incomplète.
 
-Valider GLPI :
+Pour une instance existante, valider GLPI à cette étape. Pour le Compose
+optionnel, effectuer les mêmes contrôles après son premier déploiement :
 
 ```bash
 openssl s_client -connect NOM_GLPI_TEST:443 -servername NOM_GLPI_TEST -CAfile /etc/ssl/certs/ca-certificates.crt -verify_return_error </dev/null
@@ -294,15 +322,18 @@ Vérifier ensuite que la documentation de l'API épinglée est accessible :
 curl --fail --silent --show-error https://NOM_GLPI_TEST/api.php/v2.3.0/doc.json >/dev/null
 ```
 
-Enfin, obtenir une fois un token avec l'utilisateur et le client OAuth de
-staging en suivant la documentation GLPI. Ne pas afficher le token, les
-identifiants ou la réponse complète dans le terminal partagé ou le compte rendu.
+Avec une instance existante, obtenir une fois un token avec l'utilisateur et
+le client OAuth de staging en suivant la documentation GLPI. Avec le Compose
+optionnel, ce contrôle est effectué après son bootstrap. Ne pas afficher le
+token, les identifiants ou la réponse complète dans le terminal partagé ou le
+compte rendu.
 
-### Préparer le certificat HTTPS du dashboard
+### Préparer les certificats HTTPS entrants
 
 Le certificat **entrant** protège l'accès des opérateurs au dashboard et aux
-audios fictifs. Il est terminé par Traefik et n'est jamais monté dans les
-applications.
+audios fictifs. Avec le Compose GLPI optionnel, un certificat couvre également
+le domaine GLPI de staging. Ces certificats sont terminés par Traefik et ne sont
+jamais montés dans les applications.
 
 Demander à l'administrateur système :
 
@@ -313,9 +344,10 @@ Demander à l'administrateur système :
 - la CA racine ou intermédiaire déjà approuvée par les postes opérateur ;
 - le responsable et la date de renouvellement.
 
-Importer le certificat et sa clé dans l'interface **Certificates** de Dokploy,
-puis sélectionner ce certificat personnalisé pour le domaine du web. Consulter
-la documentation Dokploy sur les
+Importer chaque certificat et sa clé dans l'interface **Certificates** de
+Dokploy, puis sélectionner le certificat correspondant pour le domaine du web
+et, s'il existe, celui du GLPI conteneurisé. Consulter la documentation Dokploy
+sur les
 [certificats](https://docs.dokploy.com/docs/core/certificates) et les
 [domaines](https://docs.dokploy.com/docs/core/docker-compose/domains).
 
@@ -330,12 +362,33 @@ directement depuis l'interface graphique de Dokploy ou en ligne de commande sur
 la VM. Pour la variante en ligne de commande :
 
 ```bash
-sudo docker network create --driver bridge --internal gta-staging-simulators-network
+sudo docker network create --driver overlay --attachable --internal gta-staging-simulators-network
 sudo docker network create --driver bridge --internal gta-staging-transcription-network
 sudo docker network create --driver bridge gta-staging-database-network
 ```
 
 `dokploy-network` est créé et géré par Dokploy.
+
+Le réseau des simulateurs doit être `overlay`, `attachable` et `internal` : les
+deux applications Dockerfile sont déployées comme des services Swarm, tandis
+que le projet Compose mevo2glpi doit pouvoir rejoindre le même réseau. Vérifier
+un réseau préexistant avec :
+
+```bash
+sudo docker network inspect --format '{{.Driver}} {{.Attachable}} {{.Internal}}' gta-staging-simulators-network
+```
+
+Le résultat attendu est `overlay true true`. Si le réseau historique est en
+`bridge`, arrêter d'abord l'ancien Compose Providers mocks et vérifier qu'aucun
+conteneur ne l'utilise, puis le recréer explicitement :
+
+```bash
+sudo docker network rm gta-staging-simulators-network
+sudo docker network create --driver overlay --attachable --internal gta-staging-simulators-network
+```
+
+Ne jamais supprimer ce réseau pendant qu'un simulateur ou un worker y est
+rattaché.
 
 Préparer le répertoire d'audios fictifs avant de déployer les simulateurs. Son
 existence est obligatoire, même s'il reste vide. Le groupe `10001` correspond
@@ -353,14 +406,18 @@ pas validés :
 - [ ] la VM respecte le dimensionnement choisi ;
 - [ ] Ubuntu, Docker, Docker Compose et Dokploy sont opérationnels ;
 - [ ] la date, l'heure, le fuseau et NTP sont corrects ;
-- [ ] les noms GLPI et dashboard sont résolus correctement ;
-- [ ] la chaîne TLS de GLPI est valide avec le bundle CA configuré ;
-- [ ] l'API GLPI V2.3.0 répond et le grant OAuth Password délivre un token sans
-      exposer celui-ci ;
-- [ ] les trois réseaux existent et aucun domaine ni port public n'expose
+- [ ] les noms du dashboard et, si elle est déjà disponible, de la cible GLPI
+      sont résolus correctement ;
+- [ ] pour une cible GLPI existante, sa chaîne TLS est valide avec le bundle CA
+      configuré ;
+- [ ] pour une cible GLPI existante, l'API V2.3.0 répond et le grant OAuth
+      Password délivre un token sans exposer celui-ci ;
+- [ ] les trois réseaux existent, le réseau des simulateurs est
+      `overlay`/`attachable`/`internal` et aucun domaine ni port public n'expose
       PostgreSQL ;
 - [ ] le répertoire de fixtures est lisible par le GID `10001` ;
-- [ ] le certificat du dashboard couvre son nom DNS et n'est pas expiré ;
+- [ ] les certificats du dashboard et, s'il est prévu, du GLPI conteneurisé
+      couvrent leur nom DNS et ne sont pas expirés ;
 - [ ] les ports et flux réseau respectent les règles du pare-feu.
 
 Consigner la date, l'opérateur, la version Dokploy et le résultat des contrôles
@@ -402,30 +459,32 @@ La configuration se limite aux opérations suivantes :
 3. reporter les paramètres de connexion internes fournis par Dokploy dans
    `DATABASE_URL`.
 
-### Créer les trois projets Compose
+### Créer les projets et applications
 
-Créer les projets dans cet ordre :
+Créer les déploiements dans cet ordre :
 
-| Ordre | Projet | Fichier Compose | Modèle d'environnement |
+| Ordre | Déploiement Dokploy | Type | Source de configuration |
 | ---: | --- | --- | --- |
-| 1 | Providers mocks | `infra/docker/providers/docker-compose.staging.yml` | `infra/docker/providers/staging.env.example` |
-| 2 | Transcription | `infra/docker/transcription/docker-compose.transcription.yml` | `infra/docker/transcription/staging.env.example` |
-| 3 | Applications | `infra/docker/apps/docker-compose.staging.yml` | `infra/docker/apps/staging.env.example` |
+| 1 | GLPI de staging, si l'instance externe est indisponible | Docker Compose | `infra/docker/providers/glpi-test/docker-compose.staging.yml` et `staging.env.example` |
+| 2 | Microsoft Graph mock | Application Dockerfile | `infra/docker/providers/microsoft-graph-simulator/Dockerfile` et `.env.example` |
+| 3 | Transcribe AI mock | Application Dockerfile | `infra/docker/providers/transcribe-ai-simulator/Dockerfile` et `.env.example` |
+| 4 | Transcription | Docker Compose | `infra/docker/transcription/docker-compose.transcription.yml` et `staging.env.example` |
+| 5 | Applications | Docker Compose | `infra/docker/apps/docker-compose.staging.yml` et `staging.env.example` |
 
-Pour les trois projets :
+Pour tous les déploiements provenant du dépôt :
 
 - sélectionner le même dépôt et la branche `main` ;
 - relever le SHA complet de `main` avant le premier déploiement et vérifier que
-  Dokploy extrait cette même révision pour les trois projets ;
+  Dokploy extrait cette même révision pour chaque déploiement ;
 - désactiver toute exposition publique non demandée ;
 - conserver l'auto-déploiement désactivé et déclencher manuellement les
-  déploiements dans l'ordre providers, transcription, puis applications ;
+  déploiements dans l'ordre du tableau ;
 - limiter les watch paths au périmètre du projet.
 
 Renseigner ce même SHA dans `APP_COMMIT_SHA` pour les projets **Transcription**
-et **Applications (mevo2glpi)**. Le projet **Providers mocks** ne consomme ni
-`APP_RELEASE` ni `APP_COMMIT_SHA` : sa révision est contrôlée directement dans
-Dokploy.
+et **Applications (mevo2glpi)**. GLPI et les deux mocks ne consomment ni
+`APP_RELEASE` ni `APP_COMMIT_SHA` : leur révision est contrôlée directement
+dans Dokploy.
 
 Avant chaque déploiement manuel, vérifier que `main` pointe toujours vers le
 SHA relevé. `APP_COMMIT_SHA` assure la traçabilité affichée par l'application,
@@ -436,9 +495,20 @@ la [procédure de mise à jour](mise-a-jour.md).
 Watch paths recommandés :
 
 ```text
-# Providers mocks
-providers/**
-infra/docker/providers/**
+# GLPI de staging optionnel
+infra/docker/providers/glpi-test/**
+.dockerignore
+
+# Microsoft Graph mock
+providers/simulators/microsoft-graph-simulator/**
+infra/docker/providers/microsoft-graph-simulator/**
+.dockerignore
+pyproject.toml
+uv.lock
+
+# Transcribe AI mock
+providers/simulators/transcribe-ai-simulator/**
+infra/docker/providers/transcribe-ai-simulator/**
 .dockerignore
 pyproject.toml
 uv.lock
@@ -463,11 +533,76 @@ pyproject.toml
 uv.lock
 ```
 
+Configurer les deux applications Dockerfile avec le contexte de build `.` et
+le chemin de Dockerfile indiqué dans le tableau. Elles doivent rejoindre
+`gta-staging-simulators-network`, sans domaine ni port publié, avec les alias :
+
+- `gta-staging-microsoft-graph` pour Microsoft Graph ;
+- `gta-staging-transcribe-ai` pour Transcribe AI.
+
+Après déploiement, vérifier que ce réseau privé est leur seul réseau métier et
+qu'aucune règle Traefik ne les expose. Le réseau `dokploy-network` n'est pas
+nécessaire à ces mocks.
+
+Configurer dans les réglages avancés Dokploy le réseau et ses alias, une seule
+réplique, le healthcheck, une politique de redémarrage automatique et des
+limites de ressources adaptées au staging. Les Dockerfiles imposent déjà
+l'utilisateur non privilégié `10001`. L'interface Application documentée ne
+permet pas de garantir le reste du durcissement du Compose (`read_only`,
+`cap_drop`, `no-new-privileges`, `pids_limit`, `tmpfs` et rotation JSON) ; cette
+limitation est détaillée dans le README de chaque simulateur.
+
+Pour Microsoft Graph, ajouter également le bind mount en lecture seule :
+
+```text
+/srv/gta-staging/audio-fixtures:/fixtures/audio:ro
+```
+
+L'ancien `infra/docker/providers/docker-compose.staging.yml` reste une solution
+de transition uniquement jusqu'à validation des deux applications Dockerfile.
+Il ne doit pas fonctionner simultanément avec elles, car elles partagent les
+mêmes alias DNS et le même état simulé.
+
+### Configurer le GLPI de staging optionnel
+
+Ignorer cette section lorsqu'une instance GLPI de test existante est
+disponible. Sinon, créer le projet Compose GLPI avec deux volumes neufs et les
+valeurs synthétiques du modèle `staging.env.example`. Les noms de l'utilisateur
+et du client OAuth doivent conserver le préfixe `glpi-test-` exigé par le
+bootstrap.
+
+Dans Dokploy, associer un domaine HTTPS uniquement au service `glpi-test`, sur
+son port interne `80`. `glpi-db` et `glpi-bootstrap` ne rejoignent jamais
+Traefik et ne reçoivent aucun domaine ni port public.
+
+Le déploiement est valide lorsque :
+
+1. `glpi-db` est sain ;
+2. `glpi-test` termine son auto-installation et devient sain ;
+3. `glpi-bootstrap` s'arrête avec le code `0` après avoir activé l'API V2 et
+   créé l'utilisateur, le client OAuth et la source `MEVO` ;
+4. le domaine HTTPS répond sur `/api.php/v2.3.0/doc.json` ;
+5. un second lancement de `glpi-bootstrap` termine également avec le code `0`.
+
+Récupérer ensuite l'identifiant local de la source `MEVO` depuis le terminal de
+`glpi-test`, sans afficher les autres identifiants :
+
+```bash
+php /opt/glpi-test/bootstrap_request_source.php
+```
+
+Reporter le champ JSON `id` dans `GLPI_TICKET_REQUEST_SOURCE_ID` et renseigner
+le domaine HTTPS dans `GLPI_BASE_URL`. Les identifiants GLPI/OAuth doivent être
+identiques dans le Compose GLPI et dans le projet Applications. Leur rotation
+après le premier bootstrap nécessite une procédure explicite ; modifier
+simplement les variables provoque volontairement un échec de réconciliation.
+
 ### Renseigner les environnements
 
 Les fichiers `*.env.example` sont des contrats de configuration, pas des
 fichiers à déployer. Copier leur contenu dans l'onglet **Environment** du
-projet Dokploy correspondant, puis remplacer tous les placeholders.
+projet ou de l'application Dokploy correspondant, puis remplacer tous les
+placeholders.
 
 Créer auparavant une clé synthétique propre au staging :
 
@@ -492,14 +627,15 @@ Contrôler les invariants suivants :
 - `DATABASE_NETWORK_NAME=gta-staging-database-network` ;
 - `TRANSCRIPTION_API_KEY` est identique dans les projets transcription et
   applications ;
-- `TRANSCRIBE_AI_SIMULATOR_API_KEY` est identique dans les projets providers et
-  applications si le repli legacy doit rester testable ;
+- `TRANSCRIBE_AI_SIMULATOR_API_KEY` est identique dans l'application Transcribe
+  AI mock et le projet Applications si le repli legacy doit rester testable ;
 - `PUBLISHER_MAILBOX_ID` dans le projet Applications est strictement identique
-  à `MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID` dans le projet Providers ;
-- `MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH` pointe vers le
-  répertoire préparé sur la VM, qui existe et est lisible par le GID `10001` ;
+  à `MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID` dans l'application Graph ;
+- le bind Graph utilise exactement `/srv/gta-staging/audio-fixtures` comme
+  source et `/fixtures/audio` comme cible en lecture seule ;
 - `DATABASE_URL` cible exclusivement la base staging ;
-- `GLPI_BASE_URL` et les identifiants ciblent exclusivement le GLPI de test ;
+- `GLPI_BASE_URL` et les identifiants ciblent exclusivement la cible GLPI de
+  test choisie pour cette recette ;
 - `GLPI_TICKET_REQUEST_SOURCE_ID` correspond à la source `MEVO` de cette
   instance et non à l'identifiant de production ;
 - `CA_BUNDLE_HOST_PATH=/etc/ssl/certs/ca-certificates.crt` ;
@@ -526,11 +662,18 @@ trafic à travers Traefik et `dokploy-network`.
 
 ## Déploiement et validations techniques
 
-### 1. Déployer les providers mocks
+### 1. Déployer GLPI si nécessaire
 
-Déployer la stack providers et attendre que `microsoft-graph-simulator` et
-`transcribe-ai-simulator` soient `healthy`. Aucun port ne doit être publié vers
-l'hôte ou Traefik.
+Si l'instance externe est indisponible, déployer d'abord le Compose GLPI et
+réaliser tous les contrôles de la section « Configurer le GLPI de staging
+optionnel ». Si l'instance externe est utilisée, vérifier simplement qu'elle
+est saine avant de continuer.
+
+### 2. Déployer les mocks
+
+Déployer séparément les applications Dockerfile `microsoft-graph-simulator` et
+`transcribe-ai-simulator`, puis attendre qu'elles soient `healthy`. Aucun port
+ne doit être publié vers l'hôte ou Traefik.
 
 Dans le terminal du mock Microsoft Graph :
 
@@ -546,7 +689,7 @@ glpi-ticketing-transcribe-ai-simulator-smoke
 
 Ne pas poursuivre si l'un de ces deux contrôles échoue.
 
-### 2. Déployer la transcription
+### 3. Déployer la transcription
 
 Déployer la stack transcription et attendre que `transcription-api` soit
 `healthy`. Le service reste exclusivement sur le réseau privé de
@@ -561,10 +704,11 @@ python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1
 Ne pas poursuivre tant que le modèle n'est pas chargé et que la sonde n'est pas
 saine.
 
-### 3. Déployer les applications
+### 4. Déployer les applications
 
-Déployer le projet Applications. Les projets Compose ne pouvant pas exprimer
-de dépendance entre eux, les deux stacks précédentes doivent déjà être saines.
+Déployer le projet Applications. Les projets Dokploy ne pouvant pas exprimer
+de dépendance entre eux, les mocks, la transcription et la cible GLPI doivent
+déjà être sains.
 
 Vérifier dans cet ordre :
 
@@ -583,11 +727,14 @@ La recette fonctionnelle peut commencer uniquement lorsque :
 
 - [ ] les deux mocks sont `healthy` ;
 - [ ] la transcription est `healthy` ;
+- [ ] avec le Compose GLPI optionnel, `glpi-db` et `glpi-test` sont sains et
+      `glpi-bootstrap` a terminé deux fois avec le code `0` ;
 - [ ] la migration est terminée avec le code `0` ;
 - [ ] le web et les trois workers sont en cours d'exécution ;
 - [ ] les trois heartbeats sont frais ;
 - [ ] `staging`, `main` et le SHA attendu sont affichés ;
-- [ ] seul le web est accessible via Traefik ;
+- [ ] seuls le web et, s'il est utilisé, `glpi-test` sont accessibles via
+      Traefik ;
 - [ ] le certificat HTTPS du web est accepté depuis un poste opérateur ;
 - [ ] le GLPI de test est joignable avec vérification TLS.
 
@@ -699,7 +846,8 @@ Limites connues :
 - le staging dépend du DNS, du routage, de NTP et des CA de la VM ;
 - le web n'applique pas encore d'authentification utilisateur ;
 - le rollback applicatif ne rétrograde pas automatiquement PostgreSQL ;
-- aucune opération de nettoyage ne doit viser le GLPI de test externe.
+- aucune opération de nettoyage ne doit viser le GLPI de test externe ni les
+  volumes du Compose GLPI optionnel sans autorisation explicite.
 
 ## Nettoyage et retour arrière
 
@@ -713,10 +861,10 @@ Cette commande ne supprime pas les fixtures de la VM. Retirer manuellement les
 fichiers fictifs devenus inutiles.
 
 Ne jamais utiliser un nettoyage Docker global. Ne pas exécuter
-`docker compose down -v` sur le projet Applications, afin de conserver le
-volume audio, et ne pas supprimer l'application Database PostgreSQL ni son
-volume. Ces données doivent rester disponibles pour l'analyse et le retour
-arrière.
+`docker compose down -v` sur les projets Applications ou GLPI, afin de
+conserver les volumes audio et GLPI/MySQL, et ne pas supprimer l'application
+Database PostgreSQL ni son volume. Ces données doivent rester disponibles pour
+l'analyse et le retour arrière.
 
 En cas d'échec, arrêter les workers avant tout retour arrière et appliquer la
 [procédure de mise à jour](mise-a-jour.md). Ne pas rétrograder une migration
@@ -727,7 +875,8 @@ Alembic sans procédure explicitement validée.
 Le staging est valide lorsque :
 
 - les deux portes de validation sont signées ;
-- les trois stacks sont saines ;
+- les deux mocks, la transcription, les applications et la cible GLPI sont
+  sains ;
 - la migration est terminée ;
 - les trois workers ont un heartbeat frais ;
 - les parcours WAV et OGG créent chacun un ticket corrélé dans le GLPI de test ;

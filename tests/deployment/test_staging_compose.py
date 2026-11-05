@@ -99,6 +99,12 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
         "gta-staging-transcription-network"
     )
     assert documented_values["TRANSCRIPTION_PROVIDER"] == "openai_compatible"
+    assert documented_values["PUBLISHER_GRAPH_BASE_URL"] == (
+        "http://gta-staging-microsoft-graph:8080/v1.0"
+    )
+    assert documented_values["LEGACY_TRANSCRIPTION_BASE_URL"] == (
+        "http://gta-staging-transcribe-ai:8080"
+    )
     assert documented_values["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "120"
     assert documented_values["ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH"] == (
         "/etc/gta/secrets/staging-originating-phone-number.key"
