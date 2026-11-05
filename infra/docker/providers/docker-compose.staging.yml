@@ -1,4 +1,4 @@
-name: ${COMPOSE_PROJECT_NAME:-gta-staging-simulators}
+name: ${COMPOSE_PROJECT_NAME:-mevo2glpi-staging-simulators}
 
 x-simulator-runtime: &simulator-runtime
   init: true
@@ -20,7 +20,7 @@ x-simulator-runtime: &simulator-runtime
 services:
   microsoft-graph-simulator:
     <<: *simulator-runtime
-    image: ${COMPOSE_PROJECT_NAME:-gta-staging-simulators}-microsoft-graph-simulator:0.1.0
+    image: ${COMPOSE_PROJECT_NAME:-mevo2glpi-staging-simulators}-microsoft-graph-simulator:0.1.0
     build:
       context: ../../..
       dockerfile: infra/docker/providers/microsoft-graph-simulator/Dockerfile
@@ -41,11 +41,11 @@ services:
     networks:
       simulators:
         aliases:
-          - gta-staging-microsoft-graph
+          - mevo2glpi-staging-microsoft-graph
 
   transcribe-ai-simulator:
     <<: *simulator-runtime
-    image: ${COMPOSE_PROJECT_NAME:-gta-staging-simulators}-transcribe-ai-simulator:0.1.0
+    image: ${COMPOSE_PROJECT_NAME:-mevo2glpi-staging-simulators}-transcribe-ai-simulator:0.1.0
     build:
       context: ../../..
       dockerfile: infra/docker/providers/transcribe-ai-simulator/Dockerfile
@@ -58,9 +58,27 @@ services:
     networks:
       simulators:
         aliases:
-          - gta-staging-transcribe-ai
+          - mevo2glpi-staging-transcribe-ai
+
+  openai-transcription-simulator:
+    <<: *simulator-runtime
+    image: ${COMPOSE_PROJECT_NAME:-mevo2glpi-staging-simulators}-openai-transcription-simulator:0.1.0
+    build:
+      context: ../../..
+      dockerfile: infra/docker/providers/openai-transcription-simulator/Dockerfile
+    environment:
+      OPENAI_TRANSCRIPTION_SIMULATOR_HOST: 0.0.0.0
+      OPENAI_TRANSCRIPTION_SIMULATOR_PORT: "8080"
+      OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY: ${OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY:?Set OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY}
+      OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES: ${OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES:-26214400}
+    expose:
+      - "8080"
+    networks:
+      simulators:
+        aliases:
+          - mevo2glpi-staging-openai-transcription
 
 networks:
   simulators:
-    name: ${SIMULATORS_NETWORK_NAME:-gta-staging-simulators-network}
+    name: ${SIMULATORS_NETWORK_NAME:-mevo2glpi-staging-simulators-network}
     external: true

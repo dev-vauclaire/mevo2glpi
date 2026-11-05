@@ -79,7 +79,7 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     )
 
     assert set(documented_values) == interpolated_names
-    assert documented_values["COMPOSE_PROJECT_NAME"] == "gta-staging"
+    assert documented_values["COMPOSE_PROJECT_NAME"] == "mevo2glpi-staging"
     assert documented_values["APP_ENVIRONMENT"] == "staging"
     assert documented_values["APP_RELEASE"] == "main"
     assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
@@ -87,27 +87,30 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     assert documented_values["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
         "CHANGE_ME_WITH_THE_STAGING_MEVO_REQUEST_SOURCE_ID"
     )
-    assert documented_values["AUDIO_VOLUME_NAME"].startswith("gta-staging-")
-    assert documented_values["DATABASE_NETWORK_NAME"].startswith("gta-staging-")
+    assert documented_values["AUDIO_VOLUME_NAME"].startswith("mevo2glpi-staging-")
+    assert documented_values["DATABASE_NETWORK_NAME"].startswith("mevo2glpi-staging-")
     assert "@postgres-staging:5432/" in documented_values["DATABASE_URL"]
     assert "sslmode=disable" in documented_values["DATABASE_URL"]
     assert "sslmode=verify-full" not in documented_values["DATABASE_URL"]
     assert documented_values["SIMULATORS_NETWORK_NAME"] == (
-        "gta-staging-simulators-network"
+        "mevo2glpi-staging-simulators-network"
     )
     assert documented_values["TRANSCRIPTION_NETWORK_NAME"] == (
-        "gta-staging-transcription-network"
+        "mevo2glpi-staging-transcription-network"
     )
     assert documented_values["TRANSCRIPTION_PROVIDER"] == "openai_compatible"
     assert documented_values["PUBLISHER_GRAPH_BASE_URL"] == (
-        "http://gta-staging-microsoft-graph:8080/v1.0"
+        "http://mevo2glpi-staging-microsoft-graph:8080/v1.0"
     )
     assert documented_values["LEGACY_TRANSCRIPTION_BASE_URL"] == (
-        "http://gta-staging-transcribe-ai:8080"
+        "http://mevo2glpi-staging-transcribe-ai:8080"
+    )
+    assert documented_values["OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL"] == (
+        "http://mevo2glpi-staging-transcription:5092/v1"
     )
     assert documented_values["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "120"
     assert documented_values["ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH"] == (
-        "/etc/gta/secrets/staging-originating-phone-number.key"
+        "/etc/mevo2glpi/secrets/staging-originating-phone-number.key"
     )
     assert documented_values["GLPI_BASE_URL"].startswith("https://")
     assert "PUBLISHER_ENTRA_CLIENT_ID" not in documented_values
@@ -129,17 +132,19 @@ def test_staging_manifest_uses_separate_external_dependency_networks(
     services = _services(config)
 
     assert set(services) == STAGING_SERVICES
-    assert config["name"] == "gta-staging"
-    assert config["networks"]["database"]["name"] == ("gta-staging-database-network")
+    assert config["name"] == "mevo2glpi-staging"
+    assert config["networks"]["database"]["name"] == (
+        "mevo2glpi-staging-database-network"
+    )
     assert config["networks"]["database"]["external"] is True
     assert config["networks"]["dokploy-network"]["name"] == "dokploy-network"
     assert config["networks"]["dokploy-network"]["external"] is True
     assert config["networks"]["simulators"]["name"] == (
-        "gta-staging-simulators-network"
+        "mevo2glpi-staging-simulators-network"
     )
     assert config["networks"]["simulators"]["external"] is True
     assert config["networks"]["transcription"]["name"] == (
-        "gta-staging-transcription-network"
+        "mevo2glpi-staging-transcription-network"
     )
     assert config["networks"]["transcription"]["external"] is True
     assert set(config["networks"]) == {
@@ -148,7 +153,7 @@ def test_staging_manifest_uses_separate_external_dependency_networks(
         "simulators",
         "transcription",
     }
-    assert config["volumes"] == {"audio-data": {"name": "gta-staging-audio-data"}}
+    assert config["volumes"] == {"audio-data": {"name": "mevo2glpi-staging-audio-data"}}
 
     assert set(services["database-migrations"]["networks"]) == {"database"}
     assert set(services["web"]["networks"]) == {"database", "dokploy-network"}
@@ -186,14 +191,14 @@ def test_staging_uses_the_separated_simulator_and_transcription_services(
 
     assert publisher_environment["PUBLISHER_GRAPH_AUTH_MODE"] == "synthetic"
     assert publisher_environment["PUBLISHER_GRAPH_BASE_URL"] == (
-        "http://gta-staging-microsoft-graph:8080/v1.0"
+        "http://mevo2glpi-staging-microsoft-graph:8080/v1.0"
     )
     assert automation_environment["LEGACY_TRANSCRIPTION_BASE_URL"] == (
-        "http://gta-staging-transcribe-ai:8080"
+        "http://mevo2glpi-staging-transcribe-ai:8080"
     )
     assert automation_environment["TRANSCRIPTION_PROVIDER"] == "openai_compatible"
     assert automation_environment["OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL"] == (
-        "http://gta-staging-transcription:5092/v1"
+        "http://mevo2glpi-staging-transcription:5092/v1"
     )
     assert automation_environment["OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL"] == (
         "parakeet-ultra"

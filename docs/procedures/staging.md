@@ -30,19 +30,18 @@ flowchart LR
         subgraph DOKPLOY["Dokploy"]
             direction TB
 
-            subgraph GRAPH_APP["Application Dockerfile<br/>Microsoft Graph mock"]
+            subgraph SIMULATORS_APP["Projet Compose<br/>Simulateurs"]
+                direction LR
                 GRAPH["microsoft-graph-simulator"]
-            end
-
-            subgraph TRANSCRIBE_MOCK_APP["Application Dockerfile<br/>Transcribe AI mock"]
                 TRANSCRIBE_AI["transcribe-ai-simulator"]
+                OPENAI_MOCK["openai-transcription-simulator"]
             end
 
             subgraph TRANSCRIPTION_APP["Projet Dokploy<br/>Transcription"]
                 TRANSCRIBER["transcription-api<br/>Parakeet Ultra CPU"]
             end
 
-            subgraph GTA_APP["Projet Dokploy<br/>Applications (mevo2glpi)"]
+            subgraph MEVO_APP["Projet Dokploy<br/>Applications (mevo2glpi)"]
                 direction LR
                 WEB["web"]
                 MIGRATIONS["database-migrations<br/>one-shot"]
@@ -63,7 +62,7 @@ flowchart LR
             end
         end
 
-        AUDIO["Volume Docker nommé<br/>gta-staging-audio-data"]
+        AUDIO["Volume Docker nommé<br/>mevo2glpi-staging-audio-data"]
     end
 
     GLPI_EXTERNAL["GLPI de test existant<br/>Alternative externe réelle"]
@@ -83,6 +82,7 @@ flowchart LR
 
     GRAPH --> PUBLISHER
     TRANSCRIBE_AI -. "repli legacy" .-> AUTOMATION
+    OPENAI_MOCK -. "contrat OpenAI de test" .-> AUTOMATION
     AUTOMATION --> TRANSCRIBER
     MIGRATIONS --> POSTGRES
     WEB --> POSTGRES
@@ -111,7 +111,7 @@ flowchart LR
     classDef external fill:#fef2f2,stroke:#b91c1c,color:#111827,stroke-width:2px
     classDef actor fill:#fdf2f8,stroke:#be185d,color:#111827,stroke-width:2px
 
-    class GRAPH,TRANSCRIBE_AI,TRANSCRIBER,WEB,MIGRATIONS,PUBLISHER,AUTOMATION,RETENTION,GLPI_LOCAL,GLPI_BOOTSTRAP container
+    class GRAPH,TRANSCRIBE_AI,OPENAI_MOCK,TRANSCRIBER,WEB,MIGRATIONS,PUBLISHER,AUTOMATION,RETENTION,GLPI_LOCAL,GLPI_BOOTSTRAP container
     class POSTGRES,GLPI_DB database
     class AUDIO volume
     class GLPI_EXTERNAL external
@@ -127,33 +127,34 @@ flowchart LR
 
     style VM fill:#f1f5f9,stroke:#334155,color:#111827,stroke-width:2px
     style DOKPLOY fill:#fffbeb,stroke:#b45309,color:#111827,stroke-width:2px
-    style GRAPH_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
-    style TRANSCRIBE_MOCK_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
+    style SIMULATORS_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
     style TRANSCRIPTION_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
-    style GTA_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
+    style MEVO_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
     style POSTGRES_APP fill:#f0fdf4,stroke:#15803d,color:#111827,stroke-width:2px
     style GLPI_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
     style LEGEND fill:#ffffff,stroke:#64748b,color:#111827,stroke-dasharray:4 4
 ```
 
-Microsoft Graph et le contrat Transcribe AI historique sont deux applications
-Dokploy Dockerfile indépendantes. Le simulateur Graph ne teste donc pas
-l'authentification Microsoft Entra ID. La transcription Parakeet, les services
-mevo2glpi et PostgreSQL sont déployés dans Dokploy. GLPI est soit l'instance de
-test externe, soit le projet Compose autonome optionnel affiché dans le schéma.
+Microsoft Graph, le contrat Transcribe AI historique et le contrat de
+transcription OpenAI-compatible sont réunis dans un Compose de simulateurs. Le
+simulateur Graph ne teste donc pas l'authentification Microsoft Entra ID. La
+transcription Parakeet, les services mevo2glpi et PostgreSQL sont déployés dans
+Dokploy. GLPI est soit l'instance de test externe, soit le projet Compose
+autonome optionnel affiché dans le schéma.
 
 Les déploiements Dokploy sont séparés :
 
-1. **Microsoft Graph mock**, application Dockerfile ;
-2. **Transcribe AI mock**, application Dockerfile ;
-3. **Transcription**, projet Compose avec Parakeet ;
-4. **Applications (mevo2glpi)**, projet Compose avec le web, la migration
+1. **Simulateurs**, projet Compose avec Microsoft Graph, Transcribe AI et le
+   contrat OpenAI-compatible ;
+2. **Transcription**, projet Compose avec Parakeet ;
+3. **Applications (mevo2glpi)**, projet Compose avec le web, la migration
    one-shot et les trois workers ;
-5. **GLPI de staging**, projet Compose optionnel avec GLPI, MySQL et son
+4. **GLPI de staging**, projet Compose optionnel avec GLPI, MySQL et son
    bootstrap idempotent.
 
-PostgreSQL est créé séparément comme une application **Database** dans
-Dokploy ; il ne constitue pas un projet Docker Compose supplémentaire.
+PostgreSQL reste déployé séparément comme une application **Database** dans
+Dokploy ; la transition conserve cette base et son volume existants. Il ne
+constitue pas un projet Docker Compose supplémentaire.
 
 Les contrats techniques restent décrits dans les README des
 [providers de test](../../infra/docker/providers/README.md), du
@@ -294,7 +295,7 @@ pas le certificat présenté aux opérateurs par le dashboard.
 À partir d'une CA fournie par l'administrateur système :
 
 ```bash
-sudo install -m 0644 /chemin/ca-interne.pem /usr/local/share/ca-certificates/gta-internal-ca.crt
+sudo install -m 0644 /chemin/ca-interne.pem /usr/local/share/ca-certificates/mevo2glpi-internal-ca.crt
 sudo update-ca-certificates
 ```
 
@@ -362,41 +363,212 @@ directement depuis l'interface graphique de Dokploy ou en ligne de commande sur
 la VM. Pour la variante en ligne de commande :
 
 ```bash
-sudo docker network create --driver overlay --attachable --internal gta-staging-simulators-network
-sudo docker network create --driver bridge --internal gta-staging-transcription-network
-sudo docker network create --driver bridge gta-staging-database-network
+sudo docker network create --driver bridge --internal mevo2glpi-staging-simulators-network
+sudo docker network create --driver bridge --internal mevo2glpi-staging-transcription-network
+sudo docker network create --driver bridge mevo2glpi-staging-database-network
 ```
 
 `dokploy-network` est créé et géré par Dokploy.
 
-Le réseau des simulateurs doit être `overlay`, `attachable` et `internal` : les
-deux applications Dockerfile sont déployées comme des services Swarm, tandis
-que le projet Compose mevo2glpi doit pouvoir rejoindre le même réseau. Vérifier
-un réseau préexistant avec :
+Les trois simulateurs et mevo2glpi sont des projets Compose exécutés sur la
+même VM. Un réseau externe `bridge` et `internal` leur permet de communiquer
+sans publier les simulateurs. Vérifier les réseaux avec :
 
 ```bash
-sudo docker network inspect --format '{{.Driver}} {{.Attachable}} {{.Internal}}' gta-staging-simulators-network
+sudo docker network inspect --format '{{.Name}} {{.Driver}} {{.Internal}}' mevo2glpi-staging-simulators-network mevo2glpi-staging-transcription-network mevo2glpi-staging-database-network
 ```
 
-Le résultat attendu est `overlay true true`. Si le réseau historique est en
-`bridge`, arrêter d'abord l'ancien Compose Providers mocks et vérifier qu'aucun
-conteneur ne l'utilise, puis le recréer explicitement :
-
-```bash
-sudo docker network rm gta-staging-simulators-network
-sudo docker network create --driver overlay --attachable --internal gta-staging-simulators-network
-```
-
-Ne jamais supprimer ce réseau pendant qu'un simulateur ou un worker y est
-rattaché.
+Les réseaux simulateurs et transcription doivent indiquer `bridge true`. Le
+réseau de base de données doit indiquer `bridge false`, car la sortie réseau
+des workers ne dépend pas de ce réseau. Pendant la transition, conserver les
+anciens réseaux `gta-staging-*` : ne jamais renommer ni supprimer en place un
+réseau utilisé par un conteneur.
 
 Préparer le répertoire d'audios fictifs avant de déployer les simulateurs. Son
 existence est obligatoire, même s'il reste vide. Le groupe `10001` correspond
 au groupe non privilégié des conteneurs :
 
 ```bash
-sudo install -d -o root -g 10001 -m 0750 /srv/gta-staging/audio-fixtures
+sudo install -d -o root -g 10001 -m 0750 /srv/mevo2glpi-staging/audio-fixtures
 ```
+
+### Migrer hors ligne le volume audio existant
+
+Cette section s'applique à la transition d'un staging existant. La base
+PostgreSQL applicative, son utilisateur, son nom de base et son volume sont
+conservés sans modification. Seuls son rattachement au nouveau réseau et le
+nom du volume audio partagé changent.
+
+Changer directement `AUDIO_VOLUME_NAME` ferait démarrer mevo2glpi avec un
+volume vide alors que PostgreSQL contient encore les `storage_key` existantes.
+La copie doit donc être réalisée hors ligne.
+
+Avant la fenêtre de maintenance :
+
+1. vérifier dans le dashboard qu'aucun job n'est `pending` ou `processing` ;
+2. relever le SHA déployé, le nom de la base et les noms exacts des deux
+   volumes ;
+3. conserver la configuration Dokploy historique permettant de redéployer
+   `gta-staging-audio-data` ;
+4. arrêter successivement `worker-publisher`, `worker-automation`, puis
+   `worker-retention` ;
+5. vérifier que le one-shot `database-migrations` n'est pas en cours ;
+6. laisser provisoirement `web` actif uniquement pour le contrôle suivant.
+
+Une fois les trois workers arrêtés, exécuter ce contrôle depuis le terminal
+Dokploy du service `web`. Il compare PostgreSQL au volume actuellement monté
+sans afficher de clé de stockage. Les audios dont la suppression est déjà
+engagée ou terminée sont exclus du contrôle :
+
+```bash
+python - <<'PY'
+import os
+from pathlib import Path
+
+from sqlalchemy import create_engine, text
+
+
+audio_root = Path(os.environ["AUDIO_ROOT"])
+engine = create_engine(os.environ["DATABASE_URL"])
+expected_files = 0
+missing_files = 0
+with engine.connect() as connection:
+    storage_keys = connection.execute(
+        text(
+            """
+            SELECT job.storage_key
+            FROM ticket_creation_jobs AS job
+            LEFT JOIN audio_retentions AS retention
+                ON retention.job_uuid = job.uuid
+            WHERE retention.status IS NULL
+               OR retention.status NOT IN ('deleting', 'deleted')
+            """
+        )
+    ).scalars()
+    for storage_key in storage_keys:
+        expected_files += 1
+        missing_files += int(not (audio_root / storage_key).is_file())
+engine.dispose()
+print(f"expected_files={expected_files} missing_files={missing_files}")
+raise SystemExit(1 if missing_files else 0)
+PY
+```
+
+Le résultat attendu contient `missing_files=0`. Un autre résultat signale une
+incohérence antérieure à la migration : ne pas effectuer la copie avant de
+l'avoir analysée. Après un contrôle réussi, arrêter également `web`.
+
+Dans une même session shell sur la VM, renseigner les noms effectivement
+relevés. Ils ne contiennent aucun secret :
+
+```bash
+export SOURCE_AUDIO_VOLUME=gta-staging-audio-data
+export TARGET_AUDIO_VOLUME=mevo2glpi-staging-audio-data
+```
+
+Confirmer qu'aucun conteneur en cours d'exécution n'utilise encore le volume
+source. La commande suivante doit produire une sortie vide :
+
+```bash
+sudo docker ps --filter "volume=${SOURCE_AUDIO_VOLUME}" --format '{{.ID}} {{.Names}}'
+```
+
+Contrôler le volume source, puis créer la cible sans supprimer la source :
+
+```bash
+sudo docker volume inspect "${SOURCE_AUDIO_VOLUME}" >/dev/null
+sudo docker volume create "${TARGET_AUDIO_VOLUME}"
+sudo docker volume inspect "${TARGET_AUDIO_VOLUME}" >/dev/null
+```
+
+La première commande doit réussir. Dans le cas contraire, arrêter
+immédiatement : un montage Docker par nom pourrait créer implicitement un
+volume source vide.
+
+La cible doit être vide. Un code de sortie non nul impose d'arrêter la
+procédure et d'identifier son contenu :
+
+```bash
+sudo docker volume inspect "${TARGET_AUDIO_VOLUME}" >/dev/null && sudo docker run --rm --network none --read-only --cap-drop ALL --mount "type=volume,src=${TARGET_AUDIO_VOLUME},dst=/target,readonly" python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 python -c 'import os, sys; sys.exit(0 if not os.listdir("/target") else 1)'
+```
+
+Cette image utilitaire et son digest sont déjà épinglés dans les Dockerfiles du
+dépôt. Copier les fichiers et leurs métadonnées avec le volume source monté en
+lecture seule :
+
+```bash
+sudo docker volume inspect "${SOURCE_AUDIO_VOLUME}" >/dev/null && sudo docker volume inspect "${TARGET_AUDIO_VOLUME}" >/dev/null && sudo docker run --rm --network none --read-only --mount "type=volume,src=${SOURCE_AUDIO_VOLUME},dst=/source,readonly" --mount "type=volume,src=${TARGET_AUDIO_VOLUME},dst=/target" python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 sh -c 'cp -a /source/. /target/'
+```
+
+Comparer ensuite les inventaires. Le contrôle ne révèle aucun nom de fichier :
+il affiche uniquement le nombre de fichiers, leur taille totale et une
+empreinte calculée à partir des chemins relatifs, des permissions, des
+propriétaires et du contenu. Les deux lignes JSON doivent avoir les mêmes
+valeurs `files`, `bytes` et `sha256`.
+
+```bash
+sudo docker volume inspect "${SOURCE_AUDIO_VOLUME}" >/dev/null && sudo docker volume inspect "${TARGET_AUDIO_VOLUME}" >/dev/null && sudo docker run --rm -i --network none --read-only --cap-drop ALL --mount "type=volume,src=${SOURCE_AUDIO_VOLUME},dst=/source,readonly" --mount "type=volume,src=${TARGET_AUDIO_VOLUME},dst=/target,readonly" python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 python - /source /target <<'PY'
+import hashlib
+import json
+import os
+import sys
+
+
+def inventory(root: str) -> dict[str, object]:
+    digest = hashlib.sha256()
+    file_count = 0
+    total_bytes = 0
+    for directory, directories, filenames in os.walk(root):
+        directories.sort()
+        for directory_name in directories:
+            path = os.path.join(directory, directory_name)
+            if os.path.islink(path) or not os.path.isdir(path):
+                raise RuntimeError("unsupported filesystem entry")
+            relative_path = os.path.relpath(path, root).encode()
+            directory_stat = os.stat(path, follow_symlinks=False)
+            digest.update(b"D")
+            digest.update(len(relative_path).to_bytes(8, "big"))
+            digest.update(relative_path)
+            digest.update((directory_stat.st_mode & 0o7777).to_bytes(4, "big"))
+            digest.update(directory_stat.st_uid.to_bytes(8, "big"))
+            digest.update(directory_stat.st_gid.to_bytes(8, "big"))
+        for filename in sorted(filenames):
+            path = os.path.join(directory, filename)
+            if os.path.islink(path) or not os.path.isfile(path):
+                raise RuntimeError("unsupported filesystem entry")
+            relative_path = os.path.relpath(path, root).encode()
+            file_stat = os.stat(path, follow_symlinks=False)
+            digest.update(b"F")
+            digest.update(len(relative_path).to_bytes(8, "big"))
+            digest.update(relative_path)
+            digest.update(file_stat.st_size.to_bytes(8, "big"))
+            digest.update((file_stat.st_mode & 0o7777).to_bytes(4, "big"))
+            digest.update(file_stat.st_uid.to_bytes(8, "big"))
+            digest.update(file_stat.st_gid.to_bytes(8, "big"))
+            with open(path, "rb") as audio_file:
+                while chunk := audio_file.read(1024 * 1024):
+                    digest.update(chunk)
+            total_bytes += file_stat.st_size
+            file_count += 1
+    return {"files": file_count, "bytes": total_bytes, "sha256": digest.hexdigest()}
+
+
+for volume_root in sys.argv[1:]:
+    print(json.dumps(inventory(volume_root), sort_keys=True))
+PY
+```
+
+Ne configurer `AUDIO_VOLUME_NAME=mevo2glpi-staging-audio-data` qu'après cette
+vérification. L'ancien volume `gta-staging-audio-data` est conservé intact et
+ne doit être supprimé ni pendant la migration, ni avant la validation
+fonctionnelle complète et l'expiration de la fenêtre de retour arrière.
+
+En cas d'échec avant toute nouvelle ingestion, arrêter les nouveaux services
+et redéployer l'ancienne configuration avec le volume source. Si de nouveaux
+jobs ont déjà été acceptés, ne pas basculer aveuglément : la base conservée
+peut référencer des audios présents uniquement dans le nouveau volume. Arrêter
+les writers et réaliser une réconciliation explicite ou restaurer ensemble un
+état PostgreSQL et audio cohérent.
 
 ## Porte de validation 1 — Socle VM
 
@@ -412,9 +584,9 @@ pas validés :
       configuré ;
 - [ ] pour une cible GLPI existante, l'API V2.3.0 répond et le grant OAuth
       Password délivre un token sans exposer celui-ci ;
-- [ ] les trois réseaux existent, le réseau des simulateurs est
-      `overlay`/`attachable`/`internal` et aucun domaine ni port public n'expose
-      PostgreSQL ;
+- [ ] les trois réseaux `mevo2glpi-staging-*` existent, les réseaux des
+      simulateurs et de la transcription sont `bridge`/`internal`, et aucun
+      domaine ni port public n'expose PostgreSQL ;
 - [ ] le répertoire de fixtures est lisible par le GID `10001` ;
 - [ ] les certificats du dashboard et, s'il est prévu, du GLPI conteneurisé
       couvrent leur nom DNS et ne sont pas expirés ;
@@ -446,18 +618,35 @@ Vérifier que Dokploy peut :
 La GitHub App doit être révoquée ou renouvelée si la VM est compromise ou si
 elle n'est plus utilisée.
 
-### Créer le service PostgreSQL de staging
+### Conserver le service PostgreSQL de staging
 
-Créer PostgreSQL comme une application **Database** dans Dokploy, puis
-rattacher son service à `gta-staging-database-network`. Aucun domaine ni port
-public ne doit lui être associé.
+La transition conserve l'application **Database** PostgreSQL existante, son
+volume, sa base, son rôle et ses identifiants. Rattacher son service à
+`mevo2glpi-staging-database-network` en plus du réseau historique pendant la
+fenêtre de retour arrière. Aucun domaine ni port public ne doit lui être
+associé.
 
 La configuration se limite aux opérations suivantes :
 
-1. créer l'application Database PostgreSQL dans Dokploy ;
-2. la rattacher à `gta-staging-database-network` ;
-3. reporter les paramètres de connexion internes fournis par Dokploy dans
-   `DATABASE_URL`.
+1. conserver l'application Database et ses données sans la recréer ;
+2. la rattacher à `mevo2glpi-staging-database-network` tout en gardant
+   temporairement l'ancien rattachement ;
+3. conserver dans `DATABASE_URL` le nom de base, le rôle et le mot de passe
+   existants ; seul le nom DNS interne change si l'alias réseau change ;
+4. vérifier la connexion depuis `database-migrations` avant de détacher
+   l'ancien réseau.
+
+Après le rattachement, valider depuis un conteneur jetable que l'alias utilisé
+dans `DATABASE_URL` est résolu et que PostgreSQL écoute. Cette commande ne
+transmet aucun identifiant :
+
+```bash
+sudo docker run --rm --network mevo2glpi-staging-database-network --read-only --cap-drop ALL --security-opt no-new-privileges:true python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 python -c 'import socket; connection = socket.create_connection(("postgres-staging", 5432), timeout=5); connection.close(); print("PostgreSQL DNS/TCP OK")'
+```
+
+Si l'alias fourni par Dokploy n'est pas `postgres-staging`, reporter son vrai
+nom dans `DATABASE_URL` avant le déploiement. Ne pas modifier les autres
+composants de l'URL.
 
 ### Créer les projets et applications
 
@@ -466,10 +655,9 @@ Créer les déploiements dans cet ordre :
 | Ordre | Déploiement Dokploy | Type | Source de configuration |
 | ---: | --- | --- | --- |
 | 1 | GLPI de staging, si l'instance externe est indisponible | Docker Compose | `infra/docker/providers/glpi-test/docker-compose.staging.yml` et `staging.env.example` |
-| 2 | Microsoft Graph mock | Application Dockerfile | `infra/docker/providers/microsoft-graph-simulator/Dockerfile` et `.env.example` |
-| 3 | Transcribe AI mock | Application Dockerfile | `infra/docker/providers/transcribe-ai-simulator/Dockerfile` et `.env.example` |
-| 4 | Transcription | Docker Compose | `infra/docker/transcription/docker-compose.transcription.yml` et `staging.env.example` |
-| 5 | Applications | Docker Compose | `infra/docker/apps/docker-compose.staging.yml` et `staging.env.example` |
+| 2 | Simulateurs | Docker Compose | `infra/docker/providers/docker-compose.staging.yml` et `staging.env.example` |
+| 3 | Transcription | Docker Compose | `infra/docker/transcription/docker-compose.transcription.yml` et `staging.env.example` |
+| 4 | Applications | Docker Compose | `infra/docker/apps/docker-compose.staging.yml` et `staging.env.example` |
 
 Pour tous les déploiements provenant du dépôt :
 
@@ -482,7 +670,7 @@ Pour tous les déploiements provenant du dépôt :
 - limiter les watch paths au périmètre du projet.
 
 Renseigner ce même SHA dans `APP_COMMIT_SHA` pour les projets **Transcription**
-et **Applications (mevo2glpi)**. GLPI et les deux mocks ne consomment ni
+et **Applications (mevo2glpi)**. GLPI et les trois simulateurs ne consomment ni
 `APP_RELEASE` ni `APP_COMMIT_SHA` : leur révision est contrôlée directement
 dans Dokploy.
 
@@ -499,16 +687,13 @@ Watch paths recommandés :
 infra/docker/providers/glpi-test/**
 .dockerignore
 
-# Microsoft Graph mock
-providers/simulators/microsoft-graph-simulator/**
+# Simulateurs Microsoft Graph, Transcribe AI et OpenAI-compatible
+providers/simulators/**
+infra/docker/providers/docker-compose.staging.yml
+infra/docker/providers/staging.env.example
 infra/docker/providers/microsoft-graph-simulator/**
-.dockerignore
-pyproject.toml
-uv.lock
-
-# Transcribe AI mock
-providers/simulators/transcribe-ai-simulator/**
 infra/docker/providers/transcribe-ai-simulator/**
+infra/docker/providers/openai-transcription-simulator/**
 .dockerignore
 pyproject.toml
 uv.lock
@@ -533,35 +718,33 @@ pyproject.toml
 uv.lock
 ```
 
-Configurer les deux applications Dockerfile avec le contexte de build `.` et
-le chemin de Dockerfile indiqué dans le tableau. Elles doivent rejoindre
-`gta-staging-simulators-network`, sans domaine ni port publié, avec les alias :
+Le projet Compose Simulateurs doit rejoindre
+`mevo2glpi-staging-simulators-network`, sans domaine ni port publié, avec les
+alias :
 
-- `gta-staging-microsoft-graph` pour Microsoft Graph ;
-- `gta-staging-transcribe-ai` pour Transcribe AI.
+- `mevo2glpi-staging-microsoft-graph` pour Microsoft Graph ;
+- `mevo2glpi-staging-transcribe-ai` pour Transcribe AI ;
+- `mevo2glpi-staging-openai-transcription` pour le contrat
+  OpenAI-compatible.
 
 Après déploiement, vérifier que ce réseau privé est leur seul réseau métier et
 qu'aucune règle Traefik ne les expose. Le réseau `dokploy-network` n'est pas
 nécessaire à ces mocks.
 
-Configurer dans les réglages avancés Dokploy le réseau et ses alias, une seule
-réplique, le healthcheck, une politique de redémarrage automatique et des
-limites de ressources adaptées au staging. Les Dockerfiles imposent déjà
-l'utilisateur non privilégié `10001`. L'interface Application documentée ne
-permet pas de garantir le reste du durcissement du Compose (`read_only`,
-`cap_drop`, `no-new-privileges`, `pids_limit`, `tmpfs` et rotation JSON) ; cette
-limitation est détaillée dans le README de chaque simulateur.
+Le Compose impose une seule réplique, les healthchecks, une politique de
+redémarrage, l'utilisateur non privilégié, un système de fichiers en lecture
+seule, la suppression des capabilities, `no-new-privileges`, une limite de PID,
+un `tmpfs` borné et la rotation des logs.
 
 Pour Microsoft Graph, ajouter également le bind mount en lecture seule :
 
 ```text
-/srv/gta-staging/audio-fixtures:/fixtures/audio:ro
+/srv/mevo2glpi-staging/audio-fixtures:/fixtures/audio:ro
 ```
 
-L'ancien `infra/docker/providers/docker-compose.staging.yml` reste une solution
-de transition uniquement jusqu'à validation des deux applications Dockerfile.
-Il ne doit pas fonctionner simultanément avec elles, car elles partagent les
-mêmes alias DNS et le même état simulé.
+Ne pas déployer simultanément les anciennes applications Dockerfile
+individuelles : elles utiliseraient les mêmes alias DNS et dupliqueraient l'état
+simulé.
 
 ### Configurer le GLPI de staging optionnel
 
@@ -604,13 +787,30 @@ fichiers à déployer. Copier leur contenu dans l'onglet **Environment** du
 projet ou de l'application Dokploy correspondant, puis remplacer tous les
 placeholders.
 
-Créer auparavant une clé synthétique propre au staging :
+La base applicative conservée peut contenir des numéros d'origine chiffrés.
+La transition doit donc réutiliser **exactement la même clé** que l'ancien
+déploiement. Copier le fichier sans jamais afficher son contenu, puis vérifier
+que les deux fichiers sont identiques :
 
 ```bash
-sudo install -d -o root -g 10001 -m 0750 /etc/gta/secrets
-sudo sh -c 'umask 027; openssl rand -base64 32 > /etc/gta/secrets/staging-originating-phone-number.key'
-sudo chown root:10001 /etc/gta/secrets/staging-originating-phone-number.key
-sudo chmod 0640 /etc/gta/secrets/staging-originating-phone-number.key
+sudo install -d -o root -g 10001 -m 0750 /etc/mevo2glpi/secrets
+sudo install -o root -g 10001 -m 0640 /etc/gta/secrets/staging-originating-phone-number.key /etc/mevo2glpi/secrets/staging-originating-phone-number.key
+sudo cmp --silent /etc/gta/secrets/staging-originating-phone-number.key /etc/mevo2glpi/secrets/staging-originating-phone-number.key
+```
+
+La dernière commande doit terminer avec le code `0`. Conserver l'ancien
+fichier pendant toute la fenêtre de retour arrière. Une nouvelle clé rendrait
+les valeurs déjà chiffrées illisibles et ne doit donc pas être générée pendant
+cette migration.
+
+Pour une installation neuve uniquement, créer une clé synthétique propre au
+staging :
+
+```bash
+sudo install -d -o root -g 10001 -m 0750 /etc/mevo2glpi/secrets
+sudo sh -c 'umask 027; openssl rand -base64 32 > /etc/mevo2glpi/secrets/staging-originating-phone-number.key'
+sudo chown root:10001 /etc/mevo2glpi/secrets/staging-originating-phone-number.key
+sudo chmod 0640 /etc/mevo2glpi/secrets/staging-originating-phone-number.key
 ```
 
 Cette clé est commune uniquement aux services publisher et automation du
@@ -621,17 +821,27 @@ Contrôler les invariants suivants :
 - `APP_ENVIRONMENT=staging` ;
 - `APP_RELEASE=main` et `APP_COMMIT_SHA` contient le SHA complet réellement
   déployé ;
-- `SIMULATORS_NETWORK_NAME=gta-staging-simulators-network` ;
-- `TRANSCRIPTION_NETWORK_NAME=gta-staging-transcription-network` ;
-- `TRANSCRIPTION_NETWORK_ALIAS=gta-staging-transcription` ;
-- `DATABASE_NETWORK_NAME=gta-staging-database-network` ;
+- `COMPOSE_PROJECT_NAME=mevo2glpi-staging` pour les applications,
+  `mevo2glpi-staging-simulators` pour les simulateurs et
+  `mevo2glpi-staging-transcription` pour la transcription ;
+- `SIMULATORS_NETWORK_NAME=mevo2glpi-staging-simulators-network` ;
+- `TRANSCRIPTION_NETWORK_NAME=mevo2glpi-staging-transcription-network` ;
+- `TRANSCRIPTION_NETWORK_ALIAS=mevo2glpi-staging-transcription` ;
+- `DATABASE_NETWORK_NAME=mevo2glpi-staging-database-network` ;
+- `AUDIO_VOLUME_NAME=mevo2glpi-staging-audio-data` après la copie hors ligne ;
 - `TRANSCRIPTION_API_KEY` est identique dans les projets transcription et
   applications ;
-- `TRANSCRIBE_AI_SIMULATOR_API_KEY` est identique dans l'application Transcribe
-  AI mock et le projet Applications si le repli legacy doit rester testable ;
+- `TRANSCRIBE_AI_SIMULATOR_API_KEY` est identique dans le service Transcribe AI
+  du projet Simulateurs et le projet Applications si le repli legacy doit
+  rester testable ;
+- en fonctionnement nominal avec Parakeet,
+  `OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY` peut être distincte des autres
+  clés ; pour tester ce mock, la synchroniser avec `TRANSCRIPTION_API_KEY` et
+  `OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL` doit cibler
+  `http://mevo2glpi-staging-openai-transcription:8080/v1` ;
 - `PUBLISHER_MAILBOX_ID` dans le projet Applications est strictement identique
-  à `MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID` dans l'application Graph ;
-- le bind Graph utilise exactement `/srv/gta-staging/audio-fixtures` comme
+  à `MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID` dans le service Graph ;
+- le bind Graph utilise exactement `/srv/mevo2glpi-staging/audio-fixtures` comme
   source et `/fixtures/audio` comme cible en lecture seule ;
 - `DATABASE_URL` cible exclusivement la base staging ;
 - `GLPI_BASE_URL` et les identifiants ciblent exclusivement la cible GLPI de
@@ -639,9 +849,9 @@ Contrôler les invariants suivants :
 - `GLPI_TICKET_REQUEST_SOURCE_ID` correspond à la source `MEVO` de cette
   instance et non à l'identifiant de production ;
 - `CA_BUNDLE_HOST_PATH=/etc/ssl/certs/ca-certificates.crt` ;
-- `PUBLIC_BASE_URL` contient le domaine HTTPS interne du web.
-- `ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH` cible la clé staging créée sur la
-  VM.
+- `PUBLIC_BASE_URL` contient le domaine HTTPS interne du web ;
+- `ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH` cible
+  `/etc/mevo2glpi/secrets/staging-originating-phone-number.key`.
 
 Le provider nominal est `openai_compatible`. Le mock Transcribe AI reste
 disponible uniquement pour une bascule legacy explicite ; aucun basculement
@@ -669,11 +879,12 @@ réaliser tous les contrôles de la section « Configurer le GLPI de staging
 optionnel ». Si l'instance externe est utilisée, vérifier simplement qu'elle
 est saine avant de continuer.
 
-### 2. Déployer les mocks
+### 2. Déployer les simulateurs
 
-Déployer séparément les applications Dockerfile `microsoft-graph-simulator` et
-`transcribe-ai-simulator`, puis attendre qu'elles soient `healthy`. Aucun port
-ne doit être publié vers l'hôte ou Traefik.
+Déployer le projet Compose Simulateurs, qui contient
+`microsoft-graph-simulator`, `transcribe-ai-simulator` et
+`openai-transcription-simulator`, puis attendre que les trois services soient
+`healthy`. Aucun port ne doit être publié vers l'hôte ou Traefik.
 
 Dans le terminal du mock Microsoft Graph :
 
@@ -687,7 +898,15 @@ Dans le terminal du mock Transcribe AI :
 glpi-ticketing-transcribe-ai-simulator-smoke
 ```
 
-Ne pas poursuivre si l'un de ces deux contrôles échoue.
+Dans le terminal du mock OpenAI-compatible :
+
+```bash
+python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=5).read().decode())'
+```
+
+Ne pas poursuivre si l'un de ces trois contrôles échoue. Le mock
+OpenAI-compatible valide le contrat synchrone sans mesurer la qualité du modèle
+Parakeet ; la stack Transcription reste nécessaire pour cette recette.
 
 ### 3. Déployer la transcription
 
@@ -725,7 +944,7 @@ Vérifier dans cet ordre :
 
 La recette fonctionnelle peut commencer uniquement lorsque :
 
-- [ ] les deux mocks sont `healthy` ;
+- [ ] les trois simulateurs sont `healthy` ;
 - [ ] la transcription est `healthy` ;
 - [ ] avec le Compose GLPI optionnel, `glpi-db` et `glpi-test` sont sains et
       `glpi-bootstrap` a terminé deux fois avec le code `0` ;
@@ -799,7 +1018,7 @@ pour les scénarios acceptés.
 Installer uniquement un WAV ou un OGG fictif de moins de 25 Mio :
 
 ```bash
-sudo install -o root -g 10001 -m 0640 ./test-vocal.wav /srv/gta-staging/audio-fixtures/test-vocal.wav
+sudo install -o root -g 10001 -m 0640 ./test-vocal.wav /srv/mevo2glpi-staging/audio-fixtures/test-vocal.wav
 ```
 
 Puis l'injecter depuis le terminal du mock :
@@ -875,7 +1094,7 @@ Alembic sans procédure explicitement validée.
 Le staging est valide lorsque :
 
 - les deux portes de validation sont signées ;
-- les deux mocks, la transcription, les applications et la cible GLPI sont
+- les trois simulateurs, la transcription, les applications et la cible GLPI sont
   sains ;
 - la migration est terminée ;
 - les trois workers ont un heartbeat frais ;

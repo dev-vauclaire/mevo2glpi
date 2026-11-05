@@ -62,7 +62,7 @@ Le service doit devenir `healthy`. Sa readiness interne est exposée sur
 interrogée sans afficher de clé ni de transcription :
 
 ```bash
-python -c 'import httpx; print(httpx.get("http://gta-staging-transcription:5092/health/ready", timeout=5).json())'
+python -c 'import httpx; print(httpx.get("http://mevo2glpi-staging-transcription:5092/health/ready", timeout=5).json())'
 ```
 
 En production, utiliser l'alias `gta-prod-transcription` à la place de l'alias

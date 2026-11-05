@@ -1,4 +1,4 @@
-"""Exercise real clients against the two containerized staging simulators."""
+"""Exercise real clients against the three containerized staging simulators."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from pydantic import SecretStr
 from glpi_ticketing_worker_automation.transcription import (
     JobStatus,
     LegacyTranscriptionClient,
+    OpenAICompatibleTranscriber,
 )
 from glpi_ticketing_worker_publisher.graph import (
     GraphClient,
@@ -42,15 +43,17 @@ pytestmark = [
 
 @dataclass(slots=True)
 class StagingSimulatorEnvironment:
-    """Own two isolated simulator containers and synthetic credentials."""
+    """Own three isolated simulator containers and synthetic credentials."""
 
     project_name: str
     environment_file: Path
     override_file: Path
     process_environment: Mapping[str, str] = field(repr=False)
     admin_token: str = field(repr=False)
+    openai_api_key: str = field(repr=False)
     transcription_api_key: str = field(repr=False)
     graph_host_port: int
+    openai_host_port: int
     transcription_host_port: int
     simulators_network_name: str
 
@@ -99,6 +102,13 @@ def _reserve_loopback_port() -> int:
         return int(reservation.getsockname()[1])
 
 
+def _reserve_unique_loopback_ports(count: int) -> tuple[int, ...]:
+    ports: set[int] = set()
+    while len(ports) < count:
+        ports.add(_reserve_loopback_port())
+    return tuple(ports)
+
+
 def _docker_network(command: str, network_name: str, *, check: bool = True) -> None:
     arguments = ["docker", "network", command]
     if command == "create":
@@ -115,23 +125,23 @@ def _docker_network(command: str, network_name: str, *, check: bool = True) -> N
 def staging_simulator_environment(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[StagingSimulatorEnvironment]:
-    """Build, start and remove two loopback-only staging simulators."""
+    """Build, start and remove three loopback-only staging simulators."""
     if os.environ.get("PYTEST_XDIST_WORKER") is not None:
         pytest.fail("The staging simulator suite must not run with pytest-xdist")
 
     suffix = secrets.token_hex(6)
-    project_name = f"gta-staging-simulator-test-{suffix}"
-    runtime_root = tmp_path_factory.mktemp("gta-staging-simulator")
+    project_name = f"mevo2glpi-staging-simulator-test-{suffix}"
+    runtime_root = tmp_path_factory.mktemp("mevo2glpi-staging-simulator")
     environment_file = runtime_root / "compose.env"
     override_file = runtime_root / "compose.override.yml"
     audio_fixtures_root = runtime_root / "audio-fixtures"
     audio_fixtures_root.mkdir(mode=0o755)
     admin_token = secrets.token_urlsafe(32)
+    openai_api_key = secrets.token_urlsafe(32)
     transcription_api_key = secrets.token_urlsafe(32)
-    graph_host_port = _reserve_loopback_port()
-    transcription_host_port = _reserve_loopback_port()
-    while transcription_host_port == graph_host_port:
-        transcription_host_port = _reserve_loopback_port()
+    graph_host_port, openai_host_port, transcription_host_port = (
+        _reserve_unique_loopback_ports(3)
+    )
     simulators_network_name = f"{project_name}-simulators"
     values = _read_example_environment()
     values.update(
@@ -142,6 +152,7 @@ def staging_simulator_environment(
                 audio_fixtures_root
             ),
             "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN": admin_token,
+            "OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY": openai_api_key,
             "TRANSCRIBE_AI_SIMULATOR_API_KEY": transcription_api_key,
         }
     )
@@ -158,6 +169,11 @@ def staging_simulator_environment(
         f'      - "127.0.0.1:{transcription_host_port}:8080"\n'
         "    networks:\n"
         "      host-test: {}\n"
+        "  openai-transcription-simulator:\n"
+        "    ports:\n"
+        f'      - "127.0.0.1:{openai_host_port}:8080"\n'
+        "    networks:\n"
+        "      host-test: {}\n"
         "networks:\n"
         "  host-test:\n"
         "    driver: bridge\n",
@@ -170,8 +186,10 @@ def staging_simulator_environment(
         override_file=override_file,
         process_environment=process_environment,
         admin_token=admin_token,
+        openai_api_key=openai_api_key,
         transcription_api_key=transcription_api_key,
         graph_host_port=graph_host_port,
+        openai_host_port=openai_host_port,
         transcription_host_port=transcription_host_port,
         simulators_network_name=simulators_network_name,
     )
@@ -181,6 +199,7 @@ def staging_simulator_environment(
         environment.compose(
             "build",
             "microsoft-graph-simulator",
+            "openai-transcription-simulator",
             "transcribe-ai-simulator",
         )
         environment.compose(
@@ -188,6 +207,7 @@ def staging_simulator_environment(
             "--detach",
             "--wait",
             "microsoft-graph-simulator",
+            "openai-transcription-simulator",
             "transcribe-ai-simulator",
         )
         yield environment
@@ -201,6 +221,7 @@ def staging_simulator_environment(
         _docker_network("rm", simulators_network_name, check=False)
         for image_name in (
             f"{project_name}-microsoft-graph-simulator:0.1.0",
+            f"{project_name}-openai-transcription-simulator:0.1.0",
             f"{project_name}-transcribe-ai-simulator:0.1.0",
         ):
             run_command(
@@ -216,6 +237,10 @@ def _graph_base_url(environment: StagingSimulatorEnvironment) -> str:
 
 def _transcription_base_url(environment: StagingSimulatorEnvironment) -> str:
     return f"http://127.0.0.1:{environment.transcription_host_port}"
+
+
+def _openai_base_url(environment: StagingSimulatorEnvironment) -> str:
+    return f"http://127.0.0.1:{environment.openai_host_port}/v1"
 
 
 def test_real_graph_client_uses_the_microsoft_graph_simulator(
@@ -284,3 +309,27 @@ def test_real_transcription_client_uses_the_transcribe_ai_simulator(
     assert pending.status is JobStatus.PENDING
     assert completed.status is JobStatus.COMPLETED
     assert completed.transcription == "Transcription synthétique de recette staging."
+
+
+def test_real_openai_transcriber_uses_the_openai_compatible_simulator(
+    staging_simulator_environment: StagingSimulatorEnvironment,
+    tmp_path: Path,
+) -> None:
+    audio_uuid = UUID("123e4567-e89b-42d3-a456-426614174000")
+    audio_path = tmp_path / f"{audio_uuid}.ogg"
+    audio_path.write_bytes(b"OggS-synthetic-openai-provider-contract")
+
+    with httpx.Client() as transcription_http_client:
+        transcriber = OpenAICompatibleTranscriber(
+            base_url=_openai_base_url(staging_simulator_environment),
+            api_key=SecretStr(staging_simulator_environment.openai_api_key),
+            model="synthetic-openai-model",
+            language="fr",
+            http_client=transcription_http_client,
+            timeout=5,
+        )
+        result = transcriber.transcribe(audio_path)
+
+    assert result.audio_uuid == audio_uuid
+    assert result.audio_path == audio_path
+    assert result.transcription == "Transcription synthétique de développement."

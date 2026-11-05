@@ -12,7 +12,7 @@ MICROSOFT_GRAPH_SIMULATOR_HOST=0.0.0.0
 MICROSOFT_GRAPH_SIMULATOR_PORT=8080
 MICROSOFT_GRAPH_SIMULATOR_MAILBOX_ID=<UUID fictif>
 MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN=<clé synthétique>
-MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH=/srv/gta-staging/audio-fixtures
+MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH=/srv/mevo2glpi-staging/audio-fixtures
 ```
 
 Le Compose de staging monte le dernier répertoire en lecture seule dans

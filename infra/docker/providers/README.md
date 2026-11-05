@@ -1,48 +1,62 @@
-# Providers de test
+# Simulateurs de staging
 
-Ce dossier contient les images Docker réutilisables des services externes de
-test et leurs recettes de déploiement en staging.
+Le Compose [`docker-compose.staging.yml`](docker-compose.staging.yml) déploie
+dans une même application Dokploy les trois contrats externes simulés :
 
-La cible de staging déploie séparément deux applications Dokploy de type
-Dockerfile :
+- Microsoft Graph, utilisé par le publisher pour découvrir et télécharger les
+  messages vocaux ;
+- Transcribe AI, contrat historique asynchrone avec polling ;
+- une API de transcription synchrone OpenAI-compatible.
 
-- [Microsoft Graph Simulator](microsoft-graph-simulator/README.md), qui
-  reproduit le sous-ensemble de Microsoft Graph utilisé par le publisher ;
-- [Transcribe AI Simulator](transcribe-ai-simulator/README.md), qui reproduit
-  le contrat historique avec polling.
+GLPI de test reste une application Compose distincte dans `glpi-test/`. Le
+provider CPU réel reste une stack distincte dans `../transcription/`. Le Compose
+de développement complet se trouve dans
+`../development/docker-compose.test-services.yml`.
 
-Le Compose `docker-compose.staging.yml` regroupant ces deux services reste
-temporairement disponible comme mécanisme de retour arrière. Il sera supprimé
-après validation des deux applications Dockerfile dans Dokploy ; il ne doit pas
-être utilisé simultanément avec elles.
+## Déploiement
 
-GLPI de test et le simulateur OpenAI-compatible sont utilisés par le Compose de
-développement `../development/docker-compose.test-services.yml`. Le véritable
-provider OpenAI-compatible Parakeet reste indépendant dans `../transcription/`.
-Le lancement local, les ports loopback, le bootstrap GLPI et l'injection de
-messages sont décrits dans la
-[procédure de développement](../../../docs/procedures/developpement-local.md).
+Le réseau externe privé `mevo2glpi-staging-simulators-network` doit exister
+avant le déploiement. Dans Dokploy, les trois services rejoignent ce réseau et
+restent inaccessibles depuis l'hôte et Traefik. Le Compose leur attribue des
+alias DNS stables :
 
-## Staging
+| Service | Alias interne |
+| --- | --- |
+| Microsoft Graph | `mevo2glpi-staging-microsoft-graph` |
+| Transcribe AI | `mevo2glpi-staging-transcribe-ai` |
+| OpenAI-compatible | `mevo2glpi-staging-openai-transcription` |
 
-Chaque application possède son propre `.env.example` et son propre README. Les
-deux applications :
+Copier les variables de [`staging.env.example`](staging.env.example) dans
+l'environnement Dokploy, puis remplacer toutes les valeurs `CHANGE_ME` par des
+secrets synthétiques réservés au staging. Aucun secret réel ne doit être placé
+dans le dépôt.
 
-- construisent les deux simulateurs depuis le workspace uv racine ;
-- rejoignent le réseau externe privé `gta-staging-simulators-network` avec un
-  alias DNS stable ;
-- n'exposent aucun port vers l'hôte ou Traefik ;
-- exigent des clés exclusivement réservées au staging ;
-- utilisent des services non privilégiés et des healthchecks bornés.
+Le répertoire désigné par
+`MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH` doit exister avant le
+déploiement. Il est monté en lecture seule, sans création implicite, et ne doit
+contenir que des audios fictifs lisibles par l'UID/GID `10001`. La commande
+`reset` du simulateur Microsoft Graph ne supprime jamais ces fichiers.
 
-Microsoft Graph monte en plus les fixtures audio en lecture seule sans les
-créer implicitement. L'interface Application documentée par Dokploy ne permet
-pas de reproduire toutes les restrictions d'exécution du Compose. Cette limite
-et les garanties réellement disponibles sont détaillées dans chaque README.
+Validation locale du manifeste, sans démarrer de conteneur :
 
-Les fixtures doivent être fictives, lisibles par l'UID/GID `10001` et ne
-contenir aucune donnée réelle. La commande `reset` du simulateur Microsoft
-Graph n'efface jamais ce répertoire.
+```bash
+docker compose \
+  --env-file infra/docker/providers/staging.env.example \
+  --file infra/docker/providers/docker-compose.staging.yml \
+  config --quiet
+```
+
+## Garanties d'exécution
+
+Les trois services utilisent un utilisateur non privilégié, une racine en
+lecture seule, un `tmpfs` borné, `cap_drop: ALL`, `no-new-privileges`, une limite
+de processus, un healthcheck et une rotation des journaux. Seul Microsoft Graph
+monte un répertoire hôte.
+
+Les tests locaux créent un réseau `bridge` jetable afin de ne pas dépendre de
+Swarm. Sur la VM Dokploy, le réseau externe doit conserver la topologie retenue
+par la plateforme ; ce détail ne change ni les alias DNS ni le contrat du
+Compose.
 
 Watch paths recommandés :
 
@@ -54,7 +68,7 @@ pyproject.toml
 uv.lock
 ```
 
-Les contrats HTTP et les commandes d'administration sont décrits avec les
-simulateurs [Microsoft Graph](../../../providers/simulators/microsoft-graph-simulator/README.md),
+Les contrats HTTP et les commandes d'administration sont décrits dans les
+README des simulateurs [Microsoft Graph](../../../providers/simulators/microsoft-graph-simulator/README.md),
 [Transcribe AI](../../../providers/simulators/transcribe-ai-simulator/README.md)
 et [OpenAI-compatible](../../../providers/simulators/openai-transcription-simulator/README.md).

@@ -103,14 +103,16 @@ def test_transcription_environment_documents_every_interpolated_variable() -> No
     documented_values = _example_environment()
 
     assert set(documented_values) == interpolated_names
-    assert documented_values["COMPOSE_PROJECT_NAME"] == "gta-staging-transcription"
+    assert documented_values["COMPOSE_PROJECT_NAME"] == (
+        "mevo2glpi-staging-transcription"
+    )
     assert documented_values["APP_RELEASE"] == "main"
     assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
     assert documented_values["TRANSCRIPTION_NETWORK_NAME"] == (
-        "gta-staging-transcription-network"
+        "mevo2glpi-staging-transcription-network"
     )
     assert documented_values["TRANSCRIPTION_NETWORK_ALIAS"] == (
-        "gta-staging-transcription"
+        "mevo2glpi-staging-transcription"
     )
     assert {
         name: documented_values[name] for name in DOCUMENTED_SECRET_NAMES
@@ -193,7 +195,7 @@ def test_production_environment_renders_the_private_production_network() -> None
 def test_transcription_manifest_contains_only_the_api(
     transcription_compose_config: dict[str, object],
 ) -> None:
-    assert transcription_compose_config["name"] == "gta-staging-transcription"
+    assert transcription_compose_config["name"] == ("mevo2glpi-staging-transcription")
     assert set(_services(transcription_compose_config)) == {"transcription-api"}
 
 
@@ -252,10 +254,10 @@ def test_transcription_api_is_reachable_only_on_the_private_network(
     assert "labels" not in service
     assert set(service["networks"]) == {"transcription"}
     assert service["networks"]["transcription"]["aliases"] == [
-        "gta-staging-transcription"
+        "mevo2glpi-staging-transcription"
     ]
     assert transcription_compose_config["networks"]["transcription"] == {
-        "name": "gta-staging-transcription-network",
+        "name": "mevo2glpi-staging-transcription-network",
         "ipam": {},
         "external": True,
     }

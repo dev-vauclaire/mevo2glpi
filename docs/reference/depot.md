@@ -54,11 +54,12 @@ Le nom visible du projet est `mevo2glpi`. Les namespaces et commandes Python
 préserver la compatibilité avec les images et les scripts existants.
 
 La même règle s'applique aux variables `GTA_*`, aux ressources Docker et
-PostgreSQL existantes, aux chemins de secrets, aux identifiants Entra, aux
-verrous PostgreSQL et au contexte cryptographique des données déjà chiffrées.
-Ils ne doivent pas faire l'objet d'un remplacement textuel global. Leur
-renommage nécessiterait une migration dédiée avec une procédure de retour
-arrière.
+PostgreSQL qui n'ont pas encore fait l'objet d'une migration validée, aux
+identifiants Entra, aux verrous PostgreSQL et au contexte cryptographique des
+données déjà chiffrées. Ils ne doivent pas faire l'objet d'un remplacement
+textuel global. Le staging constitue une migration opérationnelle documentée ;
+les identifiants internes historiques et les ressources de production restent
+inchangés jusqu'à leur propre procédure de transition et de retour arrière.
 
 L'URL du dépôt GitHub reste également inchangée tant que le dépôt distant n'a
 pas été renommé.

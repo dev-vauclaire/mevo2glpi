@@ -1,4 +1,4 @@
-name: ${COMPOSE_PROJECT_NAME:-gta-staging}
+name: ${COMPOSE_PROJECT_NAME:-mevo2glpi-staging}
 
 # Les cinq applications héritent du socle commun. Les simulateurs et le moteur
 # de transcription sont déployés dans deux projets Dokploy indépendants.
@@ -19,9 +19,9 @@ services:
       service: worker-automation
     environment:
       TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-openai_compatible}
-      LEGACY_TRANSCRIPTION_BASE_URL: ${LEGACY_TRANSCRIPTION_BASE_URL:-http://gta-staging-transcribe-ai:8080}
+      LEGACY_TRANSCRIPTION_BASE_URL: ${LEGACY_TRANSCRIPTION_BASE_URL:-http://mevo2glpi-staging-transcribe-ai:8080}
       LEGACY_TRANSCRIPTION_API_KEY: ${TRANSCRIBE_AI_SIMULATOR_API_KEY:?Set TRANSCRIBE_AI_SIMULATOR_API_KEY}
-      OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL: http://gta-staging-transcription:5092/v1
+      OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL: ${OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL:-http://mevo2glpi-staging-transcription:5092/v1}
       OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY: ${TRANSCRIPTION_API_KEY:?Set TRANSCRIPTION_API_KEY}
       OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL: parakeet-ultra
       OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE: fr
@@ -42,7 +42,7 @@ services:
       service: worker-publisher
     environment:
       PUBLISHER_GRAPH_AUTH_MODE: synthetic
-      PUBLISHER_GRAPH_BASE_URL: ${PUBLISHER_GRAPH_BASE_URL:-http://gta-staging-microsoft-graph:8080/v1.0}
+      PUBLISHER_GRAPH_BASE_URL: ${PUBLISHER_GRAPH_BASE_URL:-http://mevo2glpi-staging-microsoft-graph:8080/v1.0}
     networks:
       - simulators
 
@@ -61,18 +61,18 @@ services:
 
 networks:
   database:
-    name: ${DATABASE_NETWORK_NAME:-gta-staging-database-network}
+    name: ${DATABASE_NETWORK_NAME:-mevo2glpi-staging-database-network}
     external: true
   dokploy-network:
     name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
     external: true
   simulators:
-    name: ${SIMULATORS_NETWORK_NAME:-gta-staging-simulators-network}
+    name: ${SIMULATORS_NETWORK_NAME:-mevo2glpi-staging-simulators-network}
     external: true
   transcription:
-    name: ${TRANSCRIPTION_NETWORK_NAME:-gta-staging-transcription-network}
+    name: ${TRANSCRIPTION_NETWORK_NAME:-mevo2glpi-staging-transcription-network}
     external: true
 
 volumes:
   audio-data:
-    name: ${AUDIO_VOLUME_NAME:-gta-staging-audio-data}
+    name: ${AUDIO_VOLUME_NAME:-mevo2glpi-staging-audio-data}

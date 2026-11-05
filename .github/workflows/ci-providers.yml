@@ -13,6 +13,7 @@ on:
       - infra/docker/providers/**
       - providers/**
       - pyproject.toml
+      - tests/deployment/test_staging_simulator_runtime.py
       - uv.lock
   push:
     branches:
@@ -26,6 +27,7 @@ on:
       - infra/docker/providers/**
       - providers/**
       - pyproject.toml
+      - tests/deployment/test_staging_simulator_runtime.py
       - uv.lock
   workflow_dispatch:
 
@@ -45,7 +47,7 @@ jobs:
   validate:
     name: Qualité et providers de test
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Récupérer le dépôt
@@ -78,3 +80,9 @@ jobs:
 
       - name: Exécuter les tests des providers de test
         run: uv run pytest providers --maxfail=1
+
+      - name: Exécuter les contrats conteneurisés des simulateurs
+        run: >-
+          uv run pytest
+          tests/deployment/test_staging_simulator_runtime.py
+          --maxfail=1

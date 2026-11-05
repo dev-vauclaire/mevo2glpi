@@ -21,10 +21,12 @@ SIMULATORS_ENV_FILE = SIMULATORS_DOCKER_ROOT / "staging.env.example"
 
 SIMULATOR_SERVICES = {
     "microsoft-graph-simulator",
+    "openai-transcription-simulator",
     "transcribe-ai-simulator",
 }
 DOCUMENTED_SECRET_NAMES = {
     "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN",
+    "OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY",
     "TRANSCRIBE_AI_SIMULATOR_API_KEY",
 }
 
@@ -42,6 +44,7 @@ def _clean_environment(documented_names: set[str]) -> dict[str, str]:
         if name not in documented_names
         and not name.startswith("COMPOSE_")
         and not name.startswith("GTA_")
+        and not name.startswith("MEVO2GLPI_")
     }
 
 
@@ -98,13 +101,16 @@ def test_simulators_environment_documents_every_interpolated_variable() -> None:
     documented_values = _example_environment()
 
     assert set(documented_values) == interpolated_names
-    assert documented_values["COMPOSE_PROJECT_NAME"] == "gta-staging-simulators"
+    assert documented_values["COMPOSE_PROJECT_NAME"] == ("mevo2glpi-staging-simulators")
     assert documented_values["SIMULATORS_NETWORK_NAME"] == (
-        "gta-staging-simulators-network"
+        "mevo2glpi-staging-simulators-network"
     )
     assert (
         documented_values["MICROSOFT_GRAPH_SIMULATOR_AUDIO_FIXTURES_HOST_PATH"]
-        == "/srv/gta-staging/audio-fixtures"
+        == "/srv/mevo2glpi-staging/audio-fixtures"
+    )
+    assert documented_values["OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES"] == (
+        "26214400"
     )
     assert {
         name: documented_values[name] for name in DOCUMENTED_SECRET_NAMES
@@ -118,7 +124,7 @@ def test_simulators_environment_documents_every_interpolated_variable() -> None:
 def test_simulators_manifest_contains_only_the_active_staging_simulators(
     simulators_compose_config: dict[str, object],
 ) -> None:
-    assert simulators_compose_config["name"] == "gta-staging-simulators"
+    assert simulators_compose_config["name"] == "mevo2glpi-staging-simulators"
     assert set(_services(simulators_compose_config)) == SIMULATOR_SERVICES
 
 
@@ -127,11 +133,13 @@ def test_simulator_services_are_isolated_and_have_stable_network_aliases(
 ) -> None:
     services = _services(simulators_compose_config)
     expected_aliases = {
-        "microsoft-graph-simulator": "gta-staging-microsoft-graph",
-        "transcribe-ai-simulator": "gta-staging-transcribe-ai",
+        "microsoft-graph-simulator": "mevo2glpi-staging-microsoft-graph",
+        "openai-transcription-simulator": ("mevo2glpi-staging-openai-transcription"),
+        "transcribe-ai-simulator": "mevo2glpi-staging-transcribe-ai",
     }
     expected_ports = {
         "microsoft-graph-simulator": "8080",
+        "openai-transcription-simulator": "8080",
         "transcribe-ai-simulator": "8080",
     }
 
@@ -155,7 +163,7 @@ def test_graph_simulator_mounts_only_operator_audio_fixtures_read_only(
     assert len(graph_volumes) == 1
     audio_fixtures = graph_volumes[0]
     assert audio_fixtures["type"] == "bind"
-    assert audio_fixtures["source"] == "/srv/gta-staging/audio-fixtures"
+    assert audio_fixtures["source"] == "/srv/mevo2glpi-staging/audio-fixtures"
     assert audio_fixtures["target"] == "/fixtures/audio"
     assert audio_fixtures["read_only"] is True
     bind_options = audio_fixtures.get("bind")
@@ -179,13 +187,27 @@ def test_graph_simulator_mounts_only_operator_audio_fixtures_read_only(
         graph_service_source,
     )
     assert services["transcribe-ai-simulator"].get("volumes", []) == []
+    assert services["openai-transcription-simulator"].get("volumes", []) == []
+
+
+def test_openai_simulator_receives_the_bounded_staging_contract(
+    simulators_compose_config: dict[str, object],
+) -> None:
+    service = _services(simulators_compose_config)["openai-transcription-simulator"]
+
+    assert service["environment"] == {
+        "OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY": "CHANGE_ME",
+        "OPENAI_TRANSCRIPTION_SIMULATOR_HOST": "0.0.0.0",
+        "OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES": "26214400",
+        "OPENAI_TRANSCRIPTION_SIMULATOR_PORT": "8080",
+    }
 
 
 def test_simulators_manifest_uses_only_the_shared_simulator_network(
     simulators_compose_config: dict[str, object],
 ) -> None:
     assert simulators_compose_config["networks"]["simulators"] == {
-        "name": "gta-staging-simulators-network",
+        "name": "mevo2glpi-staging-simulators-network",
         "ipam": {},
         "external": True,
     }
@@ -231,6 +253,8 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
             "/usr/share/licenses/mevo2glpi/"
         ) in dockerfile
         assert 'org.opencontainers.image.licenses="EUPL-1.2"' in dockerfile
+        assert "USER 10001:10001" in dockerfile
+        assert "EXPOSE 8080" in dockerfile
         assert "/app/providers/.venv" not in dockerfile
         assert "providers/uv.lock" not in dockerfile
         assert "providers/pyproject.toml" not in dockerfile
