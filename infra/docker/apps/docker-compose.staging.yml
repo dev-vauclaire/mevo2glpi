@@ -31,7 +31,7 @@ services:
       GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
       GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
       GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
-      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
+      SSL_CERT_FILE: /etc/ssl/certs/mevo2glpi-ca-bundle.pem
     networks:
       - simulators
       - transcription
@@ -57,7 +57,7 @@ services:
       GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
       GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
       GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
-      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
+      SSL_CERT_FILE: /etc/ssl/certs/mevo2glpi-ca-bundle.pem
 
 networks:
   database:

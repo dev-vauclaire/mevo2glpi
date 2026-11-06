@@ -8,8 +8,8 @@ from unittest.mock import create_autospec
 import pytest
 from sqlalchemy.orm import Session
 
-import glpi_ticketing_database as database_api
-from glpi_ticketing_database import (
+import mevo2glpi_database as database_api
+from mevo2glpi_database import (
     AlertAggregate,
     AudioRetentionRepository,
     JobAlertSummary,

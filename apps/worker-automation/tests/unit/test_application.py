@@ -9,8 +9,8 @@ from threading import Event
 
 import pytest
 
-from glpi_ticketing_common import DeploymentEnvironment
-from glpi_ticketing_worker_automation.application import (
+from mevo2glpi_common import DeploymentEnvironment
+from mevo2glpi_worker_automation.application import (
     WorkerAlreadyRunningError,
     WorkerConfigurationError,
     WorkerExitCode,
@@ -18,8 +18,8 @@ from glpi_ticketing_worker_automation.application import (
     run_application,
     run_cli,
 )
-from glpi_ticketing_worker_automation.settings import WorkerLogLevel, WorkerSettings
-from glpi_ticketing_worker_automation.worker import IdleOutcome
+from mevo2glpi_worker_automation.settings import WorkerLogLevel, WorkerSettings
+from mevo2glpi_worker_automation.worker import IdleOutcome
 
 SYNTHETIC_SECRET = "never-log-this-secret"
 COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
@@ -211,8 +211,8 @@ def test_run_cli_applies_the_validated_worker_log_level(
 
 
 def test_configure_worker_logging_does_not_enable_dependency_debug_logs() -> None:
-    automation_logger = logging.getLogger("glpi_ticketing_worker_automation")
-    glpi_logger = logging.getLogger("glpi_ticketing_glpi")
+    automation_logger = logging.getLogger("mevo2glpi_worker_automation")
+    glpi_logger = logging.getLogger("mevo2glpi_glpi")
     httpx_logger = logging.getLogger("httpx")
     httpcore_logger = logging.getLogger("httpcore")
     root_logger = logging.getLogger()

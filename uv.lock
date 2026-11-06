@@ -5,18 +5,18 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "mevo2glpi-workspace",
-    "glpi-ticketing-common",
-    "glpi-ticketing-database",
-    "glpi-ticketing-database-migrations",
-    "glpi-ticketing-glpi",
-    "glpi-ticketing-microsoft-graph-simulator",
-    "glpi-ticketing-openai-transcription-simulator",
-    "glpi-ticketing-transcribe-ai-simulator",
-    "glpi-ticketing-transcription-api",
-    "glpi-ticketing-web",
-    "glpi-ticketing-worker-automation",
-    "glpi-ticketing-worker-publisher",
-    "glpi-ticketing-worker-retention",
+    "mevo2glpi-common",
+    "mevo2glpi-database",
+    "mevo2glpi-database-migrations",
+    "mevo2glpi-glpi",
+    "mevo2glpi-microsoft-graph-simulator",
+    "mevo2glpi-openai-transcription-simulator",
+    "mevo2glpi-transcribe-ai-simulator",
+    "mevo2glpi-transcription-api",
+    "mevo2glpi-web",
+    "mevo2glpi-worker-automation",
+    "mevo2glpi-worker-publisher",
+    "mevo2glpi-worker-retention",
 ]
 
 [[package]]
@@ -422,7 +422,7 @@ dev = [
 ]
 
 [[package]]
-name = "glpi-ticketing-common"
+name = "mevo2glpi-common"
 version = "0.1.0"
 source = { editable = "packages/common" }
 dependencies = [
@@ -433,7 +433,7 @@ dependencies = [
 requires-dist = [{ name = "cryptography", specifier = ">=50,<51" }]
 
 [[package]]
-name = "glpi-ticketing-database"
+name = "mevo2glpi-database"
 version = "0.1.0"
 source = { editable = "packages/database" }
 dependencies = [
@@ -448,13 +448,13 @@ requires-dist = [
 ]
 
 [[package]]
-name = "glpi-ticketing-database-migrations"
+name = "mevo2glpi-database-migrations"
 version = "0.1.0"
 source = { editable = "apps/database-migrations" }
 dependencies = [
     { name = "alembic" },
-    { name = "glpi-ticketing-common" },
-    { name = "glpi-ticketing-database" },
+    { name = "mevo2glpi-common" },
+    { name = "mevo2glpi-database" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
 ]
@@ -462,14 +462,14 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.16,<2" },
-    { name = "glpi-ticketing-common", editable = "packages/common" },
-    { name = "glpi-ticketing-database", editable = "packages/database" },
+    { name = "mevo2glpi-common", editable = "packages/common" },
+    { name = "mevo2glpi-database", editable = "packages/database" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
 ]
 
 [[package]]
-name = "glpi-ticketing-glpi"
+name = "mevo2glpi-glpi"
 version = "0.1.0"
 source = { editable = "packages/glpi-client" }
 dependencies = [
@@ -486,7 +486,7 @@ requires-dist = [
 ]
 
 [[package]]
-name = "glpi-ticketing-microsoft-graph-simulator"
+name = "mevo2glpi-microsoft-graph-simulator"
 version = "0.1.0"
 source = { editable = "providers/simulators/microsoft-graph-simulator" }
 dependencies = [
@@ -503,7 +503,7 @@ requires-dist = [
 ]
 
 [[package]]
-name = "glpi-ticketing-openai-transcription-simulator"
+name = "mevo2glpi-openai-transcription-simulator"
 version = "0.1.0"
 source = { editable = "providers/simulators/openai-transcription-simulator" }
 dependencies = [
@@ -522,7 +522,7 @@ requires-dist = [
 ]
 
 [[package]]
-name = "glpi-ticketing-transcribe-ai-simulator"
+name = "mevo2glpi-transcribe-ai-simulator"
 version = "0.1.0"
 source = { editable = "providers/simulators/transcribe-ai-simulator" }
 dependencies = [
@@ -539,7 +539,7 @@ requires-dist = [
 ]
 
 [[package]]
-name = "glpi-ticketing-transcription-api"
+name = "mevo2glpi-transcription-api"
 version = "0.1.0"
 source = { editable = "apps/transcription-api" }
 dependencies = [
@@ -562,13 +562,13 @@ requires-dist = [
 ]
 
 [[package]]
-name = "glpi-ticketing-web"
+name = "mevo2glpi-web"
 version = "0.1.0"
 source = { editable = "apps/web" }
 dependencies = [
     { name = "fastapi" },
-    { name = "glpi-ticketing-common" },
-    { name = "glpi-ticketing-database" },
+    { name = "mevo2glpi-common" },
+    { name = "mevo2glpi-database" },
     { name = "jinja2" },
     { name = "pydantic-settings" },
     { name = "uvicorn" },
@@ -577,21 +577,21 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.116,<1" },
-    { name = "glpi-ticketing-common", editable = "packages/common" },
-    { name = "glpi-ticketing-database", editable = "packages/database" },
+    { name = "mevo2glpi-common", editable = "packages/common" },
+    { name = "mevo2glpi-database", editable = "packages/database" },
     { name = "jinja2", specifier = ">=3.1,<4" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "uvicorn", specifier = ">=0.35,<1" },
 ]
 
 [[package]]
-name = "glpi-ticketing-worker-automation"
+name = "mevo2glpi-worker-automation"
 version = "0.1.0"
 source = { editable = "apps/worker-automation" }
 dependencies = [
-    { name = "glpi-ticketing-common" },
-    { name = "glpi-ticketing-database" },
-    { name = "glpi-ticketing-glpi" },
+    { name = "mevo2glpi-common" },
+    { name = "mevo2glpi-database" },
+    { name = "mevo2glpi-glpi" },
     { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
@@ -599,21 +599,21 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "glpi-ticketing-common", editable = "packages/common" },
-    { name = "glpi-ticketing-database", editable = "packages/database" },
-    { name = "glpi-ticketing-glpi", editable = "packages/glpi-client" },
+    { name = "mevo2glpi-common", editable = "packages/common" },
+    { name = "mevo2glpi-database", editable = "packages/database" },
+    { name = "mevo2glpi-glpi", editable = "packages/glpi-client" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
 ]
 
 [[package]]
-name = "glpi-ticketing-worker-publisher"
+name = "mevo2glpi-worker-publisher"
 version = "0.1.0"
 source = { editable = "apps/worker-publisher" }
 dependencies = [
-    { name = "glpi-ticketing-common" },
-    { name = "glpi-ticketing-database" },
+    { name = "mevo2glpi-common" },
+    { name = "mevo2glpi-database" },
     { name = "httpx2" },
     { name = "msal" },
     { name = "pydantic-settings" },
@@ -622,8 +622,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "glpi-ticketing-common", editable = "packages/common" },
-    { name = "glpi-ticketing-database", editable = "packages/database" },
+    { name = "mevo2glpi-common", editable = "packages/common" },
+    { name = "mevo2glpi-database", editable = "packages/database" },
     { name = "httpx2", specifier = ">=2,<3" },
     { name = "msal", specifier = ">=1.35,<2" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
@@ -631,13 +631,13 @@ requires-dist = [
 ]
 
 [[package]]
-name = "glpi-ticketing-worker-retention"
+name = "mevo2glpi-worker-retention"
 version = "0.1.0"
 source = { editable = "apps/worker-retention" }
 dependencies = [
-    { name = "glpi-ticketing-common" },
-    { name = "glpi-ticketing-database" },
-    { name = "glpi-ticketing-glpi" },
+    { name = "mevo2glpi-common" },
+    { name = "mevo2glpi-database" },
+    { name = "mevo2glpi-glpi" },
     { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
@@ -645,9 +645,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "glpi-ticketing-common", editable = "packages/common" },
-    { name = "glpi-ticketing-database", editable = "packages/database" },
-    { name = "glpi-ticketing-glpi", editable = "packages/glpi-client" },
+    { name = "mevo2glpi-common", editable = "packages/common" },
+    { name = "mevo2glpi-database", editable = "packages/database" },
+    { name = "mevo2glpi-glpi", editable = "packages/glpi-client" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },

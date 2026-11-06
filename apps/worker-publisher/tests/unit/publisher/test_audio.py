@@ -7,13 +7,13 @@ from uuid import uuid4
 
 import pytest
 
-from glpi_ticketing_database import AudioExtension, MailIngestionErrorScope
-from glpi_ticketing_worker_publisher.graph import (
+from mevo2glpi_database import AudioExtension, MailIngestionErrorScope
+from mevo2glpi_worker_publisher.graph import (
     AttachmentId,
     GraphAttachment,
     GraphAttachmentKind,
 )
-from glpi_ticketing_worker_publisher.publisher.audio import (
+from mevo2glpi_worker_publisher.publisher.audio import (
     AudioPublicationError,
     inspect_audio_structure,
     inspect_ogg_structure,

@@ -5,8 +5,8 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_common import audio_files
-from glpi_ticketing_common.audio_files import (
+from mevo2glpi_common import audio_files
+from mevo2glpi_common.audio_files import (
     InvalidAudioFilenameError,
     InvalidAudioStorageKeyError,
     UnsupportedAudioExtensionError,

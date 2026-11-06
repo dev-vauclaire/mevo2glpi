@@ -43,7 +43,6 @@ def _clean_environment(documented_names: set[str]) -> dict[str, str]:
         for name, value in os.environ.items()
         if name not in documented_names
         and not name.startswith("COMPOSE_")
-        and not name.startswith("GTA_")
         and not name.startswith("MEVO2GLPI_")
     }
 
@@ -253,6 +252,10 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
             "/usr/share/licenses/mevo2glpi/"
         ) in dockerfile
         assert 'org.opencontainers.image.licenses="EUPL-1.2"' in dockerfile
+        assert (
+            'org.opencontainers.image.source="https://github.com/dev-vauclaire/mevo2glpi"'
+            in dockerfile
+        )
         assert "USER 10001:10001" in dockerfile
         assert "EXPOSE 8080" in dockerfile
         assert "/app/providers/.venv" not in dockerfile

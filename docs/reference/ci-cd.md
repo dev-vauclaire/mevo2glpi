@@ -86,11 +86,11 @@ Le processus courant n'utilise pas de Pull Request. Après les validations
 locales, fusionner la branche localement puis pousser `main` :
 
 ```bash
-GTA_CHANGE_BRANCH=feat/description-courte
+MEVO2GLPI_CHANGE_BRANCH=feat/description-courte
 
 git switch main
 git pull --ff-only
-git merge --ff-only "$GTA_CHANGE_BRANCH"
+git merge --ff-only "$MEVO2GLPI_CHANGE_BRANCH"
 git push origin main
 ```
 
@@ -234,13 +234,13 @@ git fetch origin --tags
 git switch main
 git pull --ff-only
 
-GTA_RELEASE_TAG=vX.Y.Z
-GTA_STAGING_SHA=<SHA_COMPLET_VALIDE_EN_STAGING>
+MEVO2GLPI_RELEASE_TAG=vX.Y.Z
+MEVO2GLPI_STAGING_SHA=<SHA_COMPLET_VALIDE_EN_STAGING>
 
-test "$(git rev-parse HEAD)" = "$GTA_STAGING_SHA"
-git tag -a "$GTA_RELEASE_TAG" "$GTA_STAGING_SHA" -m "release: $GTA_RELEASE_TAG"
-git rev-parse "$GTA_RELEASE_TAG^{commit}"
-git push origin "$GTA_RELEASE_TAG"
+test "$(git rev-parse HEAD)" = "$MEVO2GLPI_STAGING_SHA"
+git tag -a "$MEVO2GLPI_RELEASE_TAG" "$MEVO2GLPI_STAGING_SHA" -m "release: $MEVO2GLPI_RELEASE_TAG"
+git rev-parse "$MEVO2GLPI_RELEASE_TAG^{commit}"
+git push origin "$MEVO2GLPI_RELEASE_TAG"
 ```
 
 La commande `git rev-parse` doit retourner le SHA validé en staging. Le tag :

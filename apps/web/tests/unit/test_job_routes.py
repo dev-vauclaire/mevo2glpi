@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from glpi_ticketing_web.routes.jobs import create_jobs_router
+from mevo2glpi_web.routes.jobs import create_jobs_router
 
 
 def test_job_routes_expose_read_only_collection_and_operator_retry() -> None:

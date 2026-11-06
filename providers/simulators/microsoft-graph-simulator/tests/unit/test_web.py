@@ -6,11 +6,11 @@ from uuid import UUID, uuid4
 import pytest
 from httpx2 import ASGITransport, AsyncClient
 
-from glpi_ticketing_microsoft_graph_simulator.scenarios import MAX_SEED_AUDIO_BYTES
-from glpi_ticketing_microsoft_graph_simulator.settings import (
+from mevo2glpi_microsoft_graph_simulator.scenarios import MAX_SEED_AUDIO_BYTES
+from mevo2glpi_microsoft_graph_simulator.settings import (
     MicrosoftGraphSimulatorSettings,
 )
-from glpi_ticketing_microsoft_graph_simulator.web import create_app
+from mevo2glpi_microsoft_graph_simulator.web import create_app
 
 MAILBOX_ID = UUID("10000000-0000-4000-8000-000000000001")
 ADMIN_TOKEN = "synthetic-admin-token"

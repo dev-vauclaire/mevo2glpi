@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from glpi_ticketing_common import DeploymentEnvironment
-from glpi_ticketing_glpi import TicketLevel, TicketType
-from glpi_ticketing_worker_automation.settings import WorkerLogLevel, WorkerSettings
+from mevo2glpi_common import DeploymentEnvironment
+from mevo2glpi_glpi import TicketLevel, TicketType
+from mevo2glpi_worker_automation.settings import WorkerLogLevel, WorkerSettings
 
 TRANSCRIPTION_BASE_URL = "https://transcription.example.test"
 TRANSCRIPTION_API_KEY = "synthetic-api-key"

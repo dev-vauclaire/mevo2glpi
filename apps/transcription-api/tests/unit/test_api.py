@@ -9,13 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from glpi_ticketing_transcription_api.api import create_app
-from glpi_ticketing_transcription_api.audio import (
+from mevo2glpi_transcription_api.api import create_app
+from mevo2glpi_transcription_api.audio import (
     AudioDurationExceeded,
     AudioNormalizationError,
     NormalizedAudio,
 )
-from glpi_ticketing_transcription_api.engines import (
+from mevo2glpi_transcription_api.engines import (
     EngineInferenceError,
     EngineLoadError,
     TranscriptionOutput,

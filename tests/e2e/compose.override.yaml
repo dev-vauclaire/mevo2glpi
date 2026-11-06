@@ -11,7 +11,7 @@ services:
 networks:
   glpi-e2e:
     external: true
-    name: ${GTA_E2E_GLPI_NETWORK:?GTA_E2E_GLPI_NETWORK must be set}
+    name: ${MEVO2GLPI_E2E_GLPI_NETWORK:?MEVO2GLPI_E2E_GLPI_NETWORK must be set}
   transcribe-ai-e2e:
     external: true
-    name: ${GTA_E2E_TRANSCRIBE_AI_NETWORK:?GTA_E2E_TRANSCRIBE_AI_NETWORK must be set}
+    name: ${MEVO2GLPI_E2E_TRANSCRIBE_AI_NETWORK:?MEVO2GLPI_E2E_TRANSCRIBE_AI_NETWORK must be set}

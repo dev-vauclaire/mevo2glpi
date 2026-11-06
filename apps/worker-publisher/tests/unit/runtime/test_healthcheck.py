@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-import glpi_ticketing_worker_publisher.runtime.healthcheck as healthcheck_module
-from glpi_ticketing_common.runtime_healthcheck import (
+import mevo2glpi_worker_publisher.runtime.healthcheck as healthcheck_module
+from mevo2glpi_common.runtime_healthcheck import (
     AudioAccessMode,
     HealthcheckSettings,
 )

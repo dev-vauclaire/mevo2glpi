@@ -1,6 +1,6 @@
 # Application web
 
-`glpi-ticketing-web` expose le tableau de bord interne du MVP. L'ingestion des
+`mevo2glpi-web` expose le tableau de bord interne du MVP. L'ingestion des
 messages Exchange et la publication des audios appartiennent au
 `worker-publisher` : le web ne crée plus de job par upload. PostgreSQL est
 l'unique source de vérité et le web ne déduit jamais l'état d'un job en
@@ -139,7 +139,7 @@ ni FastAPI ni les contrats HTTP, peuvent exécuter `flush()`, mais ne font jamai
 
 ```text
 apps/web/
-├── src/glpi_ticketing_web/
+├── src/mevo2glpi_web/
 │   ├── application.py       # moteur, sessions, services et Uvicorn
 │   ├── web.py               # assemblage FastAPI, controllers et routers
 │   ├── settings.py          # configuration typée et secrets masqués
@@ -216,7 +216,7 @@ Depuis la racine :
 
 ```bash
 uv sync --all-packages --all-groups
-uv run --package glpi-ticketing-web glpi-ticketing-web
+uv run --package mevo2glpi-web mevo2glpi-web
 ```
 
 Tests sans service externe :

@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AdvisoryLockConnectionLostError,
     AudioExtension,
     ErrorScope,

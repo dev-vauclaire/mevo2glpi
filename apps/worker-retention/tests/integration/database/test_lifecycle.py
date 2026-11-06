@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioExtension,
     AudioRetention,
     AudioRetentionRepository,
@@ -29,14 +29,14 @@ from glpi_ticketing_database import (
     TicketCreationJobRepository,
     create_session_factory,
 )
-from glpi_ticketing_glpi import TicketStatus
-from glpi_ticketing_worker_retention.retention.lifecycle import (
+from mevo2glpi_glpi import TicketStatus
+from mevo2glpi_worker_retention.retention.lifecycle import (
     RetentionJobLifecycleService,
     StaleRetentionCandidateError,
 )
-from glpi_ticketing_worker_retention.retention.outcomes import RetentionFailure
-from glpi_ticketing_worker_retention.retention.policies import RetentionCheckPolicy
-from glpi_ticketing_worker_retention.retention.ports import (
+from mevo2glpi_worker_retention.retention.outcomes import RetentionFailure
+from mevo2glpi_worker_retention.retention.policies import RetentionCheckPolicy
+from mevo2glpi_worker_retention.retention.ports import (
     AudioPurgeWork,
     CheckRecoveryWork,
     GlpiCheckWork,

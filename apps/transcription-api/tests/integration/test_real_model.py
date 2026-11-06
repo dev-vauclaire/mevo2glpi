@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from glpi_ticketing_transcription_api.audio import FFmpegNormalizer
-from glpi_ticketing_transcription_api.engines import TranscribeCppEngine
+from mevo2glpi_transcription_api.audio import FFmpegNormalizer
+from mevo2glpi_transcription_api.engines import TranscribeCppEngine
 
 pytestmark = pytest.mark.transcription_model
 
@@ -21,7 +21,7 @@ FIXTURE = (
     / "simulators"
     / "microsoft-graph-simulator"
     / "src"
-    / "glpi_ticketing_microsoft_graph_simulator"
+    / "mevo2glpi_microsoft_graph_simulator"
     / "fixtures"
     / "valid-speech.wav.gz.b64"
 )

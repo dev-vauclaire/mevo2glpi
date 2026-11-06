@@ -1,7 +1,7 @@
 x-ca-bundle: &ca-bundle
   type: bind
   source: ${CA_BUNDLE_HOST_PATH:-/etc/ssl/certs/ca-certificates.crt}
-  target: /etc/ssl/certs/gta-ca-bundle.pem
+  target: /etc/ssl/certs/mevo2glpi-ca-bundle.pem
   read_only: true
   bind:
     create_host_path: false
@@ -36,7 +36,7 @@ x-release-build-args: &release-build-args
 x-shared-environment: &shared-environment
   APP_ENVIRONMENT: ${APP_ENVIRONMENT:?Set APP_ENVIRONMENT}
   DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the Dokploy PostgreSQL database}
-  PGSSLROOTCERT: /etc/ssl/certs/gta-ca-bundle.pem
+  PGSSLROOTCERT: /etc/ssl/certs/mevo2glpi-ca-bundle.pem
 
 services:
   database-migrations:
@@ -161,8 +161,8 @@ services:
       PUBLISHER_RETRY_INITIAL_SECONDS: ${PUBLISHER_RETRY_INITIAL_SECONDS:-5}
       PUBLISHER_RETRY_MAX_SECONDS: ${PUBLISHER_RETRY_MAX_SECONDS:-300}
       PUBLISHER_SYSTEM_PROBE_INTERVAL_SECONDS: ${PUBLISHER_SYSTEM_PROBE_INTERVAL_SECONDS:-60}
-      REQUESTS_CA_BUNDLE: /etc/ssl/certs/gta-ca-bundle.pem
-      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/mevo2glpi-ca-bundle.pem
+      SSL_CERT_FILE: /etc/ssl/certs/mevo2glpi-ca-bundle.pem
     depends_on:
       database-migrations:
         condition: service_completed_successfully
@@ -208,7 +208,7 @@ services:
 
 networks:
   database:
-    name: ${DATABASE_NETWORK_NAME:-gta-database-network}
+    name: ${DATABASE_NETWORK_NAME:-mevo2glpi-prod-database-network}
     external: true
   dokploy-network:
     name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
@@ -216,4 +216,4 @@ networks:
 
 volumes:
   audio-data:
-    name: ${AUDIO_VOLUME_NAME:-gta-prod-audio-data}
+    name: ${AUDIO_VOLUME_NAME:-mevo2glpi-prod-audio-data}

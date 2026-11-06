@@ -12,8 +12,8 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, MetaData, Table, func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
-from glpi_ticketing_database import create_database_engine
-from glpi_ticketing_database_migrations.application import (
+from mevo2glpi_database import create_database_engine
+from mevo2glpi_database_migrations.application import (
     build_alembic_config,
     upgrade_to_head,
 )

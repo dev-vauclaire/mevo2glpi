@@ -125,7 +125,7 @@ def clean_environment() -> dict[str, str]:
         for name, value in os.environ.items()
         if name not in DEPLOYMENT_ENVIRONMENT_NAMES
         and not name.startswith("COMPOSE_")
-        and not name.startswith("GTA_")
+        and not name.startswith("MEVO2GLPI_")
     }
 
 
@@ -418,18 +418,18 @@ class MvpComposeEnvironment:
     def psycopg_database_url(self) -> str:
         """Build the private libpq URL used by direct E2E probes."""
         return (
-            "postgresql://gta:"
+            "postgresql://mevo2glpi:"
             f"{self._database_password}@127.0.0.1:{self.postgres_port}/"
-            "glpi_ticketing_automation"
+            "mevo2glpi"
         )
 
     @property
     def sqlalchemy_database_url(self) -> str:
         """Build the host-side SQLAlchemy URL used by repository fixtures in 8B."""
         return (
-            "postgresql+psycopg://gta:"
+            "postgresql+psycopg://mevo2glpi:"
             f"{self._database_password}@127.0.0.1:{self.postgres_port}/"
-            "glpi_ticketing_automation"
+            "mevo2glpi"
         )
 
     def build(self, timeout_seconds: float = 10 * 60) -> None:
@@ -549,7 +549,7 @@ def create_mvp_compose_environment(
     runtime_root: Path,
     *,
     providers: ProviderConfiguration | None = None,
-    project_prefix: str = "gtamvp",
+    project_prefix: str = "mevo2glpi",
     extra_compose_files: Sequence[Path] = (),
     extra_compose_environment: Mapping[str, str] | None = None,
     database_host: str = "mvp-postgres",
@@ -583,8 +583,8 @@ def create_mvp_compose_environment(
     postgres_port = int(port_reservations[1].getsockname()[1])
     effective_public_base_url = public_base_url or f"http://127.0.0.1:{web_port}"
     database_url = (
-        "postgresql+psycopg://gta:"
-        f"{database_password}@{database_host}:5432/glpi_ticketing_automation"
+        "postgresql+psycopg://mevo2glpi:"
+        f"{database_password}@{database_host}:5432/mevo2glpi"
     )
     test_override = _write_test_compose_override(runtime_root)
 
@@ -658,12 +658,12 @@ def create_mvp_compose_environment(
         "DASHBOARD_PENDING_ALERT_AFTER_SECONDS": "900",
         "DASHBOARD_RETRY_OVERDUE_GRACE_SECONDS": "60",
         "DASHBOARD_RETENTION_DEADLINE_GRACE_SECONDS": "120",
-        "GTA_POSTGRES_DB": "glpi_ticketing_automation",
-        "GTA_POSTGRES_USER": "gta",
-        "GTA_POSTGRES_PASSWORD_FILE": str(postgres_password),
-        "GTA_POSTGRES_SECRET_GID": str(os.getgid()),
-        "GTA_TEST_WEB_PORT": str(web_port),
-        "GTA_E2E_POSTGRES_PORT": str(postgres_port),
+        "MEVO2GLPI_POSTGRES_DB": "mevo2glpi",
+        "MEVO2GLPI_POSTGRES_USER": "mevo2glpi",
+        "MEVO2GLPI_POSTGRES_PASSWORD_FILE": str(postgres_password),
+        "MEVO2GLPI_POSTGRES_SECRET_GID": str(os.getgid()),
+        "MEVO2GLPI_TEST_WEB_PORT": str(web_port),
+        "MEVO2GLPI_E2E_POSTGRES_PORT": str(postgres_port),
         **(extra_compose_environment or {}),
     }
     try:
@@ -741,13 +741,13 @@ def _write_test_compose_override(runtime_root: Path) -> Path:
     image: postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
     user: "70:70"
     group_add:
-      - ${GTA_POSTGRES_SECRET_GID}
+      - ${MEVO2GLPI_POSTGRES_SECRET_GID}
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
-      POSTGRES_DB: ${GTA_POSTGRES_DB}
-      POSTGRES_USER: ${GTA_POSTGRES_USER}
+      POSTGRES_DB: ${MEVO2GLPI_POSTGRES_DB}
+      POSTGRES_USER: ${MEVO2GLPI_POSTGRES_USER}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     secrets: [postgres_password]
     volumes:
@@ -765,7 +765,7 @@ def _write_test_compose_override(runtime_root: Path) -> Path:
       retries: 30
     ports:
       - target: 5432
-        published: ${GTA_E2E_POSTGRES_PORT}
+        published: ${MEVO2GLPI_E2E_POSTGRES_PORT}
         host_ip: 127.0.0.1
     networks:
       database:
@@ -776,7 +776,7 @@ def _write_test_compose_override(runtime_root: Path) -> Path:
   web:
     ports:
       - target: 8000
-        published: ${GTA_TEST_WEB_PORT}
+        published: ${MEVO2GLPI_TEST_WEB_PORT}
         host_ip: 127.0.0.1
 
 networks:
@@ -787,7 +787,7 @@ volumes:
 
 secrets:
   postgres_password:
-    file: ${GTA_POSTGRES_PASSWORD_FILE}
+    file: ${MEVO2GLPI_POSTGRES_PASSWORD_FILE}
 """,
         encoding="utf-8",
     )

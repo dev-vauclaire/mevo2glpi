@@ -12,8 +12,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex, CreateTable
 
-import glpi_ticketing_database as database_api
-from glpi_ticketing_database.models import (
+import mevo2glpi_database as database_api
+from mevo2glpi_database.models import (
     AudioExtension,
     AudioRetention,
     Base,

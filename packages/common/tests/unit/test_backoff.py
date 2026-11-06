@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from glpi_ticketing_common.backoff import ExponentialBackoffPolicy
+from mevo2glpi_common.backoff import ExponentialBackoffPolicy
 
 
 def test_exponential_backoff_is_capped() -> None:

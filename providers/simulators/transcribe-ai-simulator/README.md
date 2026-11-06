@@ -16,5 +16,5 @@ TRANSCRIBE_AI_SIMULATOR_API_KEY=<clé synthétique>
 Depuis le conteneur, la recette opérateur ne journalise pas la transcription :
 
 ```bash
-glpi-ticketing-transcribe-ai-simulator-smoke
+mevo2glpi-transcribe-ai-simulator-smoke
 ```

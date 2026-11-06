@@ -5,12 +5,12 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_microsoft_graph_simulator.application import (
+from mevo2glpi_microsoft_graph_simulator.application import (
     MicrosoftGraphSimulatorExitCode,
     build_server,
     run_cli,
 )
-from glpi_ticketing_microsoft_graph_simulator.settings import (
+from mevo2glpi_microsoft_graph_simulator.settings import (
     MicrosoftGraphSimulatorSettings,
 )
 

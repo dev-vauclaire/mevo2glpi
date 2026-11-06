@@ -8,8 +8,8 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.orm import Session
 
-import glpi_ticketing_database as database_api
-from glpi_ticketing_database import (
+import mevo2glpi_database as database_api
+from mevo2glpi_database import (
     AudioExtension,
     ErrorScope,
     InvalidJobTransitionError,

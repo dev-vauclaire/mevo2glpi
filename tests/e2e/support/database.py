@@ -12,7 +12,7 @@ from sqlalchemy import update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioRetention,
     AudioRetentionRepository,
     AudioRetentionSnapshot,
@@ -22,7 +22,7 @@ from glpi_ticketing_database import (
     create_database_engine,
     create_session_factory,
 )
-from glpi_ticketing_worker_automation.worker import AutomationJobLifecycleService
+from mevo2glpi_worker_automation.worker import AutomationJobLifecycleService
 
 
 @dataclass(slots=True)

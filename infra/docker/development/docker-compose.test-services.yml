@@ -1,4 +1,4 @@
-name: gta-development-test-services
+name: mevo2glpi-development-test-services
 
 x-simulator-runtime: &simulator-runtime
   init: true
@@ -20,7 +20,7 @@ x-simulator-runtime: &simulator-runtime
 services:
   microsoft-graph-simulator:
     <<: *simulator-runtime
-    image: gta-development-microsoft-graph-simulator:0.1.0
+    image: mevo2glpi-development-microsoft-graph-simulator:0.1.0
     build:
       context: ../../..
       dockerfile: infra/docker/providers/microsoft-graph-simulator/Dockerfile
@@ -31,7 +31,7 @@ services:
       MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN: ${MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN:?Set MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN}
     ports:
       - target: 8080
-        published: "${GTA_DEV_MICROSOFT_GRAPH_PORT:-18080}"
+        published: "${MEVO2GLPI_DEV_MICROSOFT_GRAPH_PORT:-18080}"
         host_ip: 127.0.0.1
         protocol: tcp
     networks:
@@ -39,7 +39,7 @@ services:
 
   transcribe-ai-simulator:
     <<: *simulator-runtime
-    image: gta-development-transcribe-ai-simulator:0.1.0
+    image: mevo2glpi-development-transcribe-ai-simulator:0.1.0
     build:
       context: ../../..
       dockerfile: infra/docker/providers/transcribe-ai-simulator/Dockerfile
@@ -49,7 +49,7 @@ services:
       TRANSCRIBE_AI_SIMULATOR_API_KEY: ${LEGACY_TRANSCRIPTION_API_KEY:?Set LEGACY_TRANSCRIPTION_API_KEY}
     ports:
       - target: 8080
-        published: "${GTA_DEV_TRANSCRIBE_AI_PORT:-18081}"
+        published: "${MEVO2GLPI_DEV_TRANSCRIBE_AI_PORT:-18081}"
         host_ip: 127.0.0.1
         protocol: tcp
     networks:
@@ -57,7 +57,7 @@ services:
 
   openai-transcription-simulator:
     <<: *simulator-runtime
-    image: gta-development-openai-transcription-simulator:0.1.0
+    image: mevo2glpi-development-openai-transcription-simulator:0.1.0
     build:
       context: ../../..
       dockerfile: infra/docker/providers/openai-transcription-simulator/Dockerfile
@@ -68,7 +68,7 @@ services:
       OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES: ${OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES:-26214400}
     ports:
       - target: 8080
-        published: "${GTA_DEV_OPENAI_TRANSCRIPTION_PORT:-18082}"
+        published: "${MEVO2GLPI_DEV_OPENAI_TRANSCRIPTION_PORT:-18082}"
         host_ip: 127.0.0.1
         protocol: tcp
     networks:
@@ -105,7 +105,7 @@ services:
         max-file: "3"
 
   glpi-test:
-    image: gta-development-glpi-test:11.0.7
+    image: mevo2glpi-development-glpi-test:11.0.7
     build:
       context: ../providers/glpi-test
       dockerfile: Dockerfile
@@ -139,7 +139,7 @@ services:
       start_period: 20s
     ports:
       - target: 80
-        published: "${GTA_DEV_GLPI_PORT:-18083}"
+        published: "${MEVO2GLPI_DEV_GLPI_PORT:-18083}"
         host_ip: 127.0.0.1
         protocol: tcp
     volumes:
@@ -157,7 +157,7 @@ services:
         max-file: "3"
 
   glpi-bootstrap:
-    image: gta-development-glpi-test:11.0.7
+    image: mevo2glpi-development-glpi-test:11.0.7
     depends_on:
       glpi-db:
         condition: service_healthy
@@ -203,13 +203,13 @@ services:
 
 networks:
   test-services:
-    name: gta-development-test-services-network
+    name: mevo2glpi-development-test-services-network
   glpi-database:
-    name: gta-development-glpi-database-network
+    name: mevo2glpi-development-glpi-database-network
     internal: true
 
 volumes:
   glpi-data:
-    name: gta-development-glpi-data
+    name: mevo2glpi-development-glpi-data
   glpi-database-data:
-    name: gta-development-glpi-database-data
+    name: mevo2glpi-development-glpi-database-data

@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from glpi_ticketing_web.application import (
+from mevo2glpi_web.application import (
     WebExitCode,
     build_application,
     build_server,
     run_application,
     run_cli,
 )
-from glpi_ticketing_web.settings import WebSettings
+from mevo2glpi_web.settings import WebSettings
 
 DATABASE_URL = "postgresql+psycopg://web:password@127.0.0.1:5432/jobs"
 

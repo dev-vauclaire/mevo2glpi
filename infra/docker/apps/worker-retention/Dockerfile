@@ -31,7 +31,7 @@ COPY providers/simulators/transcribe-ai-simulator/pyproject.toml providers/simul
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
-      --package glpi-ticketing-worker-retention --no-install-workspace
+      --package mevo2glpi-worker-retention --no-install-workspace
 
 COPY apps/worker-retention/src apps/worker-retention/src
 COPY packages/common/src packages/common/src
@@ -40,23 +40,23 @@ COPY packages/glpi-client/src packages/glpi-client/src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
-      --package glpi-ticketing-worker-retention
+      --package mevo2glpi-worker-retention
 
 FROM ${PYTHON_IMAGE} AS runtime
 
 ARG IMAGE_VERSION
 ARG VCS_REF
 
-LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-ticketing-automation" \
+LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/mevo2glpi" \
       org.opencontainers.image.title="mevo2glpi audio-retention worker" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.licenses="EUPL-1.2"
 
-RUN groupadd --gid 10001 gta \
+RUN groupadd --gid 10001 mevo2glpi \
     && useradd --uid 10001 --gid 10001 \
       --no-create-home --no-log-init --home-dir /nonexistent \
-      --shell /usr/sbin/nologin gta \
+      --shell /usr/sbin/nologin mevo2glpi \
     && install -d -m 0750 -o 10001 -g 10001 /data/audios
 
 ENV APP_RELEASE=${IMAGE_VERSION} \
@@ -79,6 +79,6 @@ USER 10001:10001
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=8s --start-period=20s --retries=3 \
     --start-interval=2s \
-    CMD ["python", "-m", "glpi_ticketing_worker_retention.runtime.healthcheck"]
+    CMD ["python", "-m", "mevo2glpi_worker_retention.runtime.healthcheck"]
 
-CMD ["glpi-ticketing-worker-retention"]
+CMD ["mevo2glpi-worker-retention"]

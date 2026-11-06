@@ -43,5 +43,5 @@ def test_migration_runtime_is_locked_one_shot_and_non_root() -> None:
     assert "/usr/local/bin/uv" not in runtime
     assert "COPY apps/" not in runtime
     assert "COPY packages/" not in runtime
-    assert 'CMD ["glpi-ticketing-database-migrations"]' in runtime
+    assert 'CMD ["mevo2glpi-database-migrations"]' in runtime
     assert "HEALTHCHECK" not in runtime

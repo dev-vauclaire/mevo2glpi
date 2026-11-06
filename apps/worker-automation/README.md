@@ -250,7 +250,7 @@ gardée uniquement en mémoire le temps de construire le ticket GLPI.
 
 ## GLPI
 
-Le package partage `glpi-ticketing-glpi` adapte l'API GLPI V2.3.0.
+Le package partage `mevo2glpi-glpi` adapte l'API GLPI V2.3.0.
 `GlpiClient.ensure_ticket()` cherche
 d'abord l'UUID audio dans `external_id`, puis crée le ticket uniquement si
 aucun résultat exact n'existe. Le titre et les niveaux du ticket proviennent de
@@ -331,7 +331,7 @@ périmé signifie « aucun checkpoint récent, processus potentiellement non
 réactif » et non une preuve d'arrêt ; le dashboard expose cette distinction.
 
 L'image exécute également le module
-`glpi_ticketing_worker_automation.runtime.healthcheck`. Cette sonde vérifie
+`mevo2glpi_worker_automation.runtime.healthcheck`. Cette sonde vérifie
 PostgreSQL, exige un heartbeat `worker_automation` présent, non `stopped` et
 récent, puis confirme que `/data/audios` est lisible mais réellement non
 inscriptible. Un état `blocked` ou `degraded` encore frais reste healthy : une
@@ -367,7 +367,7 @@ frontière du processus avec le code `1`.
 apps/worker-automation/
 ├── pyproject.toml
 ├── README.md
-├── src/glpi_ticketing_worker_automation/
+├── src/mevo2glpi_worker_automation/
 │   ├── __main__.py          # forme python -m
 │   ├── application.py       # CLI, codes de sortie et lancement de la boucle
 │   ├── composition.py       # assemblage des adaptateurs et services
@@ -492,15 +492,15 @@ complète, ni transcription. Revenir à `INFO` après l'investigation.
 La base doit être migrée et la racine audio doit exister avant le démarrage :
 
 ```bash
-uv run --package glpi-ticketing-worker-automation \
-  glpi-ticketing-worker
+uv run --package mevo2glpi-worker-automation \
+  mevo2glpi-worker-automation
 ```
 
 La forme module est équivalente :
 
 ```bash
-uv run --package glpi-ticketing-worker-automation \
-  python -m glpi_ticketing_worker_automation
+uv run --package mevo2glpi-worker-automation \
+  python -m mevo2glpi_worker_automation
 ```
 
 Le [Dockerfile du worker](../../infra/docker/apps/worker-automation/Dockerfile)
@@ -540,7 +540,7 @@ uv run pytest -m transcribe_ai \
 Contrat GLPI et pipeline E2E :
 
 ```bash
-uv run --package glpi-ticketing-glpi pytest -m glpi \
+uv run --package mevo2glpi-glpi pytest -m glpi \
   packages/glpi-client/tests/integration/glpi -vv --maxfail=1
 
 uv run pytest -m e2e \

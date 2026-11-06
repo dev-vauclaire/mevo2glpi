@@ -4,8 +4,8 @@ from datetime import timedelta
 
 import pytest
 
-from glpi_ticketing_database import DeletionReason, JobStatus
-from glpi_ticketing_worker_retention.retention.policies import RetentionCheckPolicy
+from mevo2glpi_database import DeletionReason, JobStatus
+from mevo2glpi_worker_retention.retention.policies import RetentionCheckPolicy
 
 from ._fakes import HARD_DELETE_AT, NOW
 

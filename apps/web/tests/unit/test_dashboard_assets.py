@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-ASSET_ROOT = Path(__file__).resolve().parents[2] / "src" / "glpi_ticketing_web"
+ASSET_ROOT = Path(__file__).resolve().parents[2] / "src" / "mevo2glpi_web"
 TEMPLATE_ROOT = ASSET_ROOT / "templates"
 JAVASCRIPT_ROOT = ASSET_ROOT / "static" / "js"
 

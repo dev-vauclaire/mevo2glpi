@@ -7,8 +7,8 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_common import audio_purge
-from glpi_ticketing_common.audio_purge import (
+from mevo2glpi_common import audio_purge
+from mevo2glpi_common.audio_purge import (
     AmbiguousAudioPurgeStateError,
     AudioPurgeDisposition,
     AudioPurgeErrorCode,

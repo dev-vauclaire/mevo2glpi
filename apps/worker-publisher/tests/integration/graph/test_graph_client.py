@@ -9,9 +9,9 @@ import httpx2 as httpx
 import pytest
 from pydantic import SecretStr
 
-from glpi_ticketing_worker_publisher.graph.client import GraphClient
-from glpi_ticketing_worker_publisher.graph.contracts import GraphOutcomeUnknownError
-from glpi_ticketing_worker_publisher.graph.models import (
+from mevo2glpi_worker_publisher.graph.client import GraphClient
+from mevo2glpi_worker_publisher.graph.contracts import GraphOutcomeUnknownError
+from mevo2glpi_worker_publisher.graph.models import (
     GraphAccessToken,
     GraphOperation,
     MoveOutcome,

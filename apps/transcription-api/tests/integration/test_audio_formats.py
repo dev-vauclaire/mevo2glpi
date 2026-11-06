@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from glpi_ticketing_transcription_api.audio import (
+from mevo2glpi_transcription_api.audio import (
     AudioNormalizationError,
     FFmpegNormalizer,
 )
@@ -20,7 +20,7 @@ FIXTURES_ROOT = (
     / "simulators"
     / "microsoft-graph-simulator"
     / "src"
-    / "glpi_ticketing_microsoft_graph_simulator"
+    / "mevo2glpi_microsoft_graph_simulator"
     / "fixtures"
 )
 FFMPEG = shutil.which("ffmpeg")

@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from glpi_ticketing_common import DeploymentEnvironment
-from glpi_ticketing_database_migrations.settings import MigrationSettings
+from mevo2glpi_common import DeploymentEnvironment
+from mevo2glpi_database_migrations.settings import MigrationSettings
 
 DATABASE_URL = "postgresql+psycopg://migration:secret@database/mvp"
 COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"

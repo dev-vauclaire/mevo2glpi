@@ -28,8 +28,8 @@ from tests.e2e.support import (
 from tests.integration.glpi.plugin import GlpiTestEnvironment
 from tests.support.mvp_compose import MvpComposeEnvironment
 
-from glpi_ticketing_database import JobEventType, JobStage, JobStatus
-from glpi_ticketing_glpi import (
+from mevo2glpi_database import JobEventType, JobStage, JobStatus
+from mevo2glpi_glpi import (
     GlpiClient,
     GlpiTicketCreateCommand,
     GlpiTicketDefaults,

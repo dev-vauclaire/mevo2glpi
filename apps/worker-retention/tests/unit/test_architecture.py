@@ -6,7 +6,7 @@ import ast
 from pathlib import Path
 
 PACKAGE_ROOT = (
-    Path(__file__).resolve().parents[2] / "src" / "glpi_ticketing_worker_retention"
+    Path(__file__).resolve().parents[2] / "src" / "mevo2glpi_worker_retention"
 )
 RETENTION_ROOT = PACKAGE_ROOT / "retention"
 
@@ -49,9 +49,9 @@ def test_application_remains_a_process_boundary() -> None:
         {
             "httpx",
             "sqlalchemy",
-            "glpi_ticketing_common",
-            "glpi_ticketing_database",
-            "glpi_ticketing_glpi",
+            "mevo2glpi_common",
+            "mevo2glpi_database",
+            "mevo2glpi_glpi",
             "retention.lifecycle",
             "retention.service",
             "retention.stages",
@@ -105,8 +105,8 @@ def test_runtime_context_alone_owns_process_resources() -> None:
 def test_retention_worker_never_imports_automation_application() -> None:
     for path in PACKAGE_ROOT.rglob("*.py"):
         assert not any(
-            module == "glpi_ticketing_worker_automation"
-            or module.startswith("glpi_ticketing_worker_automation.")
+            module == "mevo2glpi_worker_automation"
+            or module.startswith("mevo2glpi_worker_automation.")
             for module in _imported_modules(path)
         ), path
 

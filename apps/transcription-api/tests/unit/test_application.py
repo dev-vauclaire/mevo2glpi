@@ -4,13 +4,13 @@ import logging
 
 import pytest
 
-from glpi_ticketing_transcription_api.application import (
+from mevo2glpi_transcription_api.application import (
     TranscriptionApiExitCode,
     build_server,
     run_application,
     run_cli,
 )
-from glpi_ticketing_transcription_api.settings import TranscriptionSettings
+from mevo2glpi_transcription_api.settings import TranscriptionSettings
 
 API_KEY = "synthetic-transcription-key"
 

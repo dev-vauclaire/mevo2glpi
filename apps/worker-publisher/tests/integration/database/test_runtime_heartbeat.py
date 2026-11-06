@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy import Engine
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     DiscoveredMail,
     MailIngestionErrorScope,
     MailIngestionRepository,
@@ -19,12 +19,12 @@ from glpi_ticketing_database import (
     create_session_factory,
     try_acquire_advisory_lock,
 )
-from glpi_ticketing_worker_publisher.publisher import (
+from mevo2glpi_worker_publisher.publisher import (
     CompletedOutcome,
     PublisherFailure,
     RetryScheduledOutcome,
 )
-from glpi_ticketing_worker_publisher.runtime.heartbeat import (
+from mevo2glpi_worker_publisher.runtime.heartbeat import (
     PublisherRuntimeHeartbeatReporter,
 )
 

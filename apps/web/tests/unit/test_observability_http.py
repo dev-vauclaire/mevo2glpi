@@ -6,10 +6,10 @@ from uuid import UUID
 import pytest
 from fastapi import FastAPI, HTTPException
 
-from glpi_ticketing_database import WorkerRuntimeState, WorkerServiceName
-from glpi_ticketing_web.controllers import ObservabilityController
-from glpi_ticketing_web.routes import create_observability_router
-from glpi_ticketing_web.services import (
+from mevo2glpi_database import WorkerRuntimeState, WorkerServiceName
+from mevo2glpi_web.controllers import ObservabilityController
+from mevo2glpi_web.routes import create_observability_router
+from mevo2glpi_web.services import (
     AlertKind,
     AlertSeverity,
     HeartbeatStatus,

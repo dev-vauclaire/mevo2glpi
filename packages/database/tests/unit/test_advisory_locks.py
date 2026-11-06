@@ -5,7 +5,7 @@ from sqlalchemy import Engine
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AdvisoryLockConnectionLostError,
     AdvisoryLockReleasedError,
     WorkerServiceName,

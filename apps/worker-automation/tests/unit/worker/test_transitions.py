@@ -3,16 +3,16 @@
 from datetime import timedelta
 from pathlib import Path
 
-from glpi_ticketing_database import ErrorScope, JobStage
-from glpi_ticketing_glpi import (
+from mevo2glpi_database import ErrorScope, JobStage
+from mevo2glpi_glpi import (
     GlpiOperation,
     GlpiTransportError,
 )
-from glpi_ticketing_worker_automation.transcription import (
+from mevo2glpi_worker_automation.transcription import (
     TranscriptionRetryRequired,
     TranscriptionTerminalError,
 )
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.worker import (
     CompletedOutcome,
     RetryOutcome,
 )

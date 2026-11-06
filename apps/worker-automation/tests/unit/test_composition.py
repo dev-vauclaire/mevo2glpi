@@ -11,15 +11,15 @@ from uuid import UUID
 import httpx
 import pytest
 
-import glpi_ticketing_worker_automation.composition as composition_module
-from glpi_ticketing_common import OriginatingPhoneNumberCipher
-from glpi_ticketing_worker_automation.composition import (
+import mevo2glpi_worker_automation.composition as composition_module
+from mevo2glpi_common import OriginatingPhoneNumberCipher
+from mevo2glpi_worker_automation.composition import (
     WorkerConfigurationError,
     build_automation_worker,
     build_public_audio_url,
 )
-from glpi_ticketing_worker_automation.settings import WorkerSettings
-from glpi_ticketing_worker_automation.transcription import JobUuid
+from mevo2glpi_worker_automation.settings import WorkerSettings
+from mevo2glpi_worker_automation.transcription import JobUuid
 
 AUDIO_UUID = UUID("123e4567-e89b-42d3-a456-426614174000")
 PROVIDER_JOB_ID = JobUuid("provider-job-42")

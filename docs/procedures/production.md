@@ -41,7 +41,7 @@ flowchart LR
                 TRANSCRIBER["transcription-api<br/>Parakeet Ultra CPU"]
             end
 
-            subgraph GTA_APP["Application mevo2glpi"]
+            subgraph MEVO_APP["Application mevo2glpi"]
                 direction LR
                 WEB["web"]
                 MIGRATIONS["database-migrations<br/>one-shot"]
@@ -55,7 +55,7 @@ flowchart LR
             end
         end
 
-        AUDIO["Volume Docker nommé<br/>gta-prod-audio-data"]
+        AUDIO["Volume Docker nommé<br/>mevo2glpi-prod-audio-data"]
     end
 
     ENTRA["Microsoft Entra ID<br/>Identité applicative réelle"]
@@ -121,7 +121,7 @@ flowchart LR
     style VM fill:#f1f5f9,stroke:#334155,color:#111827,stroke-width:2px
     style DOKPLOY fill:#fffbeb,stroke:#b45309,color:#111827,stroke-width:2px
     style TRANSCRIPTION_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
-    style GTA_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
+    style MEVO_APP fill:#f5f3ff,stroke:#6d28d9,color:#111827,stroke-width:2px
     style POSTGRES_APP fill:#f0fdf4,stroke:#15803d,color:#111827,stroke-width:2px
     style LEGEND fill:#ffffff,stroke:#64748b,color:#111827,stroke-dasharray:4 4
 ```
@@ -296,7 +296,7 @@ serveur GLPI. Le bundle système doit conserver les autorités publiques requise
 pour Microsoft, GitHub, les registres et Hugging Face.
 
 ```bash
-sudo install -m 0644 /chemin/ca-interne.pem /usr/local/share/ca-certificates/gta-internal-ca.crt
+sudo install -m 0644 /chemin/ca-interne.pem /usr/local/share/ca-certificates/mevo2glpi-internal-ca.crt
 sudo update-ca-certificates
 ```
 
@@ -338,19 +338,19 @@ Créer un répertoire non accessible aux utilisateurs ordinaires, puis installer
 les fichiers fournis par le responsable de l'application Entra :
 
 ```bash
-sudo install -d -o root -g 10001 -m 0750 /etc/gta/secrets
-sudo install -o root -g 10001 -m 0640 /chemin/publisher-private-key.pem /etc/gta/secrets/publisher-private-key.pem
-sudo install -o root -g 10001 -m 0640 /chemin/publisher-certificate.pem /etc/gta/secrets/publisher-certificate.pem
+sudo install -d -o root -g 10001 -m 0750 /etc/mevo2glpi/secrets
+sudo install -o root -g 10001 -m 0640 /chemin/publisher-private-key.pem /etc/mevo2glpi/secrets/publisher-private-key.pem
+sudo install -o root -g 10001 -m 0640 /chemin/publisher-certificate.pem /etc/mevo2glpi/secrets/publisher-certificate.pem
 ```
 
 Vérifier les métadonnées et la validité sans afficher les clés :
 
 ```bash
-sudo stat -c '%n uid=%u gid=%g mode=%a' /etc/gta/secrets/publisher-private-key.pem /etc/gta/secrets/publisher-certificate.pem
-sudo openssl pkey -in /etc/gta/secrets/publisher-private-key.pem -check -noout
-sudo openssl x509 -in /etc/gta/secrets/publisher-certificate.pem -noout -subject -issuer -dates -fingerprint -sha256
-sudo openssl pkey -in /etc/gta/secrets/publisher-private-key.pem -pubout -outform DER | sha256sum
-sudo openssl x509 -in /etc/gta/secrets/publisher-certificate.pem -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum
+sudo stat -c '%n uid=%u gid=%g mode=%a' /etc/mevo2glpi/secrets/publisher-private-key.pem /etc/mevo2glpi/secrets/publisher-certificate.pem
+sudo openssl pkey -in /etc/mevo2glpi/secrets/publisher-private-key.pem -check -noout
+sudo openssl x509 -in /etc/mevo2glpi/secrets/publisher-certificate.pem -noout -subject -issuer -dates -fingerprint -sha256
+sudo openssl pkey -in /etc/mevo2glpi/secrets/publisher-private-key.pem -pubout -outform DER | sha256sum
+sudo openssl x509 -in /etc/mevo2glpi/secrets/publisher-certificate.pem -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum
 ```
 
 Le certificat doit contenir `BEGIN CERTIFICATE`, et non uniquement
@@ -364,10 +364,10 @@ enregistrer la clé privée ni sa passphrase.
 Créer une clé dédiée, distincte des clés Entra et des autres secrets :
 
 ```bash
-sudo sh -c 'umask 027; openssl rand -base64 32 > /etc/gta/secrets/originating-phone-number.key'
-sudo chown root:10001 /etc/gta/secrets/originating-phone-number.key
-sudo chmod 0640 /etc/gta/secrets/originating-phone-number.key
-sudo stat -c '%n uid=%u gid=%g mode=%a' /etc/gta/secrets/originating-phone-number.key
+sudo sh -c 'umask 027; openssl rand -base64 32 > /etc/mevo2glpi/secrets/originating-phone-number.key'
+sudo chown root:10001 /etc/mevo2glpi/secrets/originating-phone-number.key
+sudo chmod 0640 /etc/mevo2glpi/secrets/originating-phone-number.key
+sudo stat -c '%n uid=%u gid=%g mode=%a' /etc/mevo2glpi/secrets/originating-phone-number.key
 ```
 
 Ne jamais afficher ni committer son contenu. Publisher et automation montent
@@ -380,8 +380,8 @@ métadonnée d'origine indéchiffrable.
 Créer les réseaux partagés une seule fois, depuis Dokploy ou sur la VM :
 
 ```bash
-sudo docker network create --driver bridge gta-database-network
-sudo docker network create --driver bridge --internal gta-prod-transcription-network
+sudo docker network create --driver bridge mevo2glpi-prod-database-network
+sudo docker network create --driver bridge --internal mevo2glpi-prod-transcription-network
 ```
 
 `dokploy-network` est créé et géré par Dokploy. Le réseau database est partagé
@@ -428,7 +428,7 @@ Get-Mailbox -Identity "BOITE_DEDIEE_UPN" |
   Format-List PrimarySmtpAddress,CustomAttribute15
 
 Get-Recipient `
-  -RecipientPreviewFilter "CustomAttribute15 -eq 'GTA-PUBLISHER'"
+  -RecipientPreviewFilter "CustomAttribute15 -eq 'MEVO2GLPI-PUBLISHER'"
 ```
 
 Après validation de ces contrôles par l'administrateur Exchange, appliquer la
@@ -436,11 +436,11 @@ configuration :
 
 ```powershell
 
-Set-Mailbox -Identity "BOITE_DEDIEE_UPN" -CustomAttribute15 "GTA-PUBLISHER"
+Set-Mailbox -Identity "BOITE_DEDIEE_UPN" -CustomAttribute15 "MEVO2GLPI-PUBLISHER"
 
 New-ManagementScope `
-  -Name "GTA Publisher Mailbox" `
-  -RecipientRestrictionFilter "CustomAttribute15 -eq 'GTA-PUBLISHER'"
+  -Name "mevo2glpi Publisher Mailbox" `
+  -RecipientRestrictionFilter "CustomAttribute15 -eq 'MEVO2GLPI-PUBLISHER'"
 
 New-ServicePrincipal `
   -AppId "APPLICATION_CLIENT_ID" `
@@ -448,10 +448,10 @@ New-ServicePrincipal `
   -DisplayName "mevo2glpi Publisher"
 
 New-ManagementRoleAssignment `
-  -Name "GTA Publisher Mail.ReadWrite" `
+  -Name "mevo2glpi Publisher Mail.ReadWrite" `
   -Role "Application Mail.ReadWrite" `
   -App "ENTERPRISE_APPLICATION_OBJECT_ID" `
-  -CustomResourceScope "GTA Publisher Mailbox"
+  -CustomResourceScope "mevo2glpi Publisher Mailbox"
 ```
 
 Pour `New-ServicePrincipal`, utiliser l'Object ID de l'**Enterprise
@@ -520,8 +520,7 @@ résultat des contrôles sans enregistrer de secret.
 ### Créer la GitHub App
 
 Dans Dokploy, ouvrir **Git**, choisir GitHub, puis utiliser **Create GitHub
-App**. Installer l'application uniquement sur le dépôt
-`glpi-ticketing-automation`.
+App**. Installer l'application uniquement sur le dépôt `mevo2glpi`.
 
 Vérifier que Dokploy peut lister le dépôt privé, le tag retenu et son SHA sans
 utiliser de Personal Access Token dans le Compose ou l'environnement.
@@ -529,8 +528,8 @@ utiliser de Personal Access Token dans le Compose ou l'environnement.
 ### Créer le service PostgreSQL
 
 Créer PostgreSQL comme une application **Database** dans Dokploy, puis
-rattacher son service à `gta-database-network`. Aucun domaine ni port public ne
-doit lui être associé.
+rattacher son service à `mevo2glpi-prod-database-network`. Aucun domaine ni
+port public ne doit lui être associé.
 
 Reporter les paramètres de connexion internes fournis par Dokploy dans
 `DATABASE_URL`. Le hostname dépend du nom interne réellement attribué au
@@ -562,11 +561,11 @@ le SHA réellement extraits correspondent avant chaque build.
 Reprendre le modèle de transcription et adapter au minimum :
 
 ```dotenv
-COMPOSE_PROJECT_NAME=gta-prod-transcription
+COMPOSE_PROJECT_NAME=mevo2glpi-prod-transcription
 APP_RELEASE=vX.Y.Z
 APP_COMMIT_SHA=SHA_COMPLET_DU_TAG
-TRANSCRIPTION_NETWORK_NAME=gta-prod-transcription-network
-TRANSCRIPTION_NETWORK_ALIAS=gta-prod-transcription
+TRANSCRIPTION_NETWORK_NAME=mevo2glpi-prod-transcription-network
+TRANSCRIPTION_NETWORK_ALIAS=mevo2glpi-prod-transcription
 TRANSCRIPTION_API_KEY=SECRET_PROPRE_A_LA_PRODUCTION
 ```
 
@@ -583,14 +582,14 @@ prévalent. Contrôler notamment :
 
 - `APP_ENVIRONMENT=production` ;
 - `APP_RELEASE=vX.Y.Z` et `APP_COMMIT_SHA` contient le SHA complet du tag ;
-- `DATABASE_NETWORK_NAME=gta-database-network` ;
-- `TRANSCRIPTION_NETWORK_NAME=gta-prod-transcription-network` ;
-- `AUDIO_VOLUME_NAME=gta-prod-audio-data` ;
+- `DATABASE_NETWORK_NAME=mevo2glpi-prod-database-network` ;
+- `TRANSCRIPTION_NETWORK_NAME=mevo2glpi-prod-transcription-network` ;
+- `AUDIO_VOLUME_NAME=mevo2glpi-prod-audio-data` ;
 - `DATABASE_URL` cible exclusivement la Database de production ;
 - `CA_BUNDLE_HOST_PATH=/etc/ssl/certs/ca-certificates.crt` ;
 - `PUBLIC_BASE_URL` contient le domaine HTTPS interne du dashboard ;
 - `TRANSCRIPTION_PROVIDER=openai_compatible` ;
-- `OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL=http://gta-prod-transcription:5092/v1` ;
+- `OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL=http://mevo2glpi-prod-transcription:5092/v1` ;
 - `OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY` est identique à
   `TRANSCRIPTION_API_KEY` dans le projet Transcription ;
 - `OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL=parakeet-ultra` ;
@@ -601,7 +600,7 @@ prévalent. Contrôler notamment :
 - `PUBLISHER_ENTRA_CLIENT_ID` contient l'Application (client) ID ;
 - `PUBLISHER_MAILBOX_ID` contient l'Object ID Entra de l'utilisateur de la
   boîte, pas son Exchange GUID ;
-- les deux chemins hôte PEM pointent vers `/etc/gta/secrets` ;
+- les deux chemins hôte PEM pointent vers `/etc/mevo2glpi/secrets` ;
 - `GLPI_BASE_URL` et les identifiants ciblent exclusivement la production ;
 - `GLPI_TICKET_REQUEST_SOURCE_ID` correspond à la source `MEVO` de cette
   instance.

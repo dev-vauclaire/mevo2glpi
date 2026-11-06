@@ -4,12 +4,12 @@ import logging
 
 import pytest
 
-from glpi_ticketing_openai_transcription_simulator.application import (
+from mevo2glpi_openai_transcription_simulator.application import (
     OpenAiTranscriptionSimulatorExitCode,
     build_server,
     run_cli,
 )
-from glpi_ticketing_openai_transcription_simulator.settings import (
+from mevo2glpi_openai_transcription_simulator.settings import (
     OpenAiTranscriptionSimulatorSettings,
 )
 

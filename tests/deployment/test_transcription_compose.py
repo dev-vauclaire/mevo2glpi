@@ -22,7 +22,7 @@ STAGING_TRANSCRIPTION_ENV_FILE = TRANSCRIPTION_DOCKER_ROOT / "staging.env.exampl
 PRODUCTION_TRANSCRIPTION_ENV_FILE = TRANSCRIPTION_DOCKER_ROOT / "production.env.example"
 TRANSCRIPTION_APP_ROOT = REPOSITORY_ROOT / "apps" / "transcription-api"
 TRANSCRIPTION_DOCKERFILE = TRANSCRIPTION_APP_ROOT / "Dockerfile"
-TRANSCRIPTION_IMAGE = "glpi-ticketing-transcription-api:parakeet-ultra-q8"
+TRANSCRIPTION_IMAGE = "mevo2glpi-transcription-api:parakeet-ultra-q8"
 TRANSCRIBE_CPP_VERSION = "0.4.1"
 PARAKEET_ULTRA_MODEL_URL = (
     "https://huggingface.co/handy-computer/parakeet-ultra-gguf/resolve/"
@@ -49,7 +49,7 @@ def _clean_environment(documented_names: set[str]) -> dict[str, str]:
         for name, value in os.environ.items()
         if name not in documented_names
         and not name.startswith("COMPOSE_")
-        and not name.startswith("GTA_")
+        and not name.startswith("MEVO2GLPI_")
     }
 
 
@@ -146,14 +146,14 @@ def test_production_environment_uses_the_production_identity_and_network() -> No
     production_values = _example_environment(PRODUCTION_TRANSCRIPTION_ENV_FILE)
 
     assert set(production_values) == interpolated_names
-    assert production_values["COMPOSE_PROJECT_NAME"] == "gta-prod-transcription"
+    assert production_values["COMPOSE_PROJECT_NAME"] == ("mevo2glpi-prod-transcription")
     assert production_values["APP_RELEASE"] == "CHANGE_ME"
     assert production_values["APP_COMMIT_SHA"] == "CHANGE_ME"
     assert production_values["TRANSCRIPTION_NETWORK_NAME"] == (
-        "gta-prod-transcription-network"
+        "mevo2glpi-prod-transcription-network"
     )
     assert production_values["TRANSCRIPTION_NETWORK_ALIAS"] == (
-        "gta-prod-transcription"
+        "mevo2glpi-prod-transcription"
     )
     assert production_values["TRANSCRIPTION_API_KEY"] == "CHANGE_ME"
 
@@ -183,10 +183,12 @@ def test_production_environment_renders_the_private_production_network() -> None
     config = _render_compose(PRODUCTION_TRANSCRIPTION_ENV_FILE)
     service = _services(config)["transcription-api"]
 
-    assert config["name"] == "gta-prod-transcription"
-    assert service["networks"]["transcription"]["aliases"] == ["gta-prod-transcription"]
+    assert config["name"] == "mevo2glpi-prod-transcription"
+    assert service["networks"]["transcription"]["aliases"] == [
+        "mevo2glpi-prod-transcription"
+    ]
     assert config["networks"]["transcription"] == {
-        "name": "gta-prod-transcription-network",
+        "name": "mevo2glpi-prod-transcription-network",
         "ipam": {},
         "external": True,
     }

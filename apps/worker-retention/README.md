@@ -137,7 +137,7 @@ checkpoint récent, potentiellement non réactifs — est exposée dans le
 dashboard sans affirmer que le processus est arrêté.
 
 L'image exécute aussi le module
-`glpi_ticketing_worker_retention.runtime.healthcheck`. Cette sonde vérifie
+`mevo2glpi_worker_retention.runtime.healthcheck`. Cette sonde vérifie
 PostgreSQL, exige un heartbeat `worker_retention` présent, non `stopped` et
 récent, puis crée et supprime un fichier de sonde sous `/data/audios` afin de
 confirmer l'accès en lecture-écriture nécessaire aux purges. Un état `blocked`
@@ -166,7 +166,7 @@ et observable ; il ne devient pas un code de sortie `3`.
 ## Organisation du code
 
 ```text
-src/glpi_ticketing_worker_retention/
+src/mevo2glpi_worker_retention/
 ├── application.py          # frontière CLI et codes de sortie
 ├── composition.py          # construction des adaptateurs
 ├── settings.py             # contrat d'environnement Pydantic
@@ -224,15 +224,15 @@ son plafond. L'ancien nom `RETENTION_FIRST_CHECK_HOURS` n'est plus interprété.
 Depuis la racine, après migration de PostgreSQL et création de la racine audio :
 
 ```bash
-uv run --package glpi-ticketing-worker-retention \
-  glpi-ticketing-worker-retention
+uv run --package mevo2glpi-worker-retention \
+  mevo2glpi-worker-retention
 ```
 
 L'entrée module équivalente est :
 
 ```bash
-uv run --package glpi-ticketing-worker-retention \
-  python -m glpi_ticketing_worker_retention
+uv run --package mevo2glpi-worker-retention \
+  python -m mevo2glpi_worker_retention
 ```
 
 Le [Dockerfile du worker](../../infra/docker/apps/worker-retention/Dockerfile)

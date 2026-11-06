@@ -31,7 +31,7 @@ COPY providers/simulators/transcribe-ai-simulator/pyproject.toml providers/simul
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
-      --package glpi-ticketing-database-migrations --no-install-workspace
+      --package mevo2glpi-database-migrations --no-install-workspace
 
 COPY apps/database-migrations/src apps/database-migrations/src
 COPY packages/common/src packages/common/src
@@ -39,23 +39,23 @@ COPY packages/database/src packages/database/src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
-      --package glpi-ticketing-database-migrations
+      --package mevo2glpi-database-migrations
 
 FROM ${PYTHON_IMAGE} AS runtime
 
 ARG IMAGE_VERSION
 ARG VCS_REF
 
-LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-ticketing-automation" \
+LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/mevo2glpi" \
       org.opencontainers.image.title="mevo2glpi database migrations" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.licenses="EUPL-1.2"
 
-RUN groupadd --gid 10001 gta \
+RUN groupadd --gid 10001 mevo2glpi \
     && useradd --uid 10001 --gid 10001 \
       --no-create-home --no-log-init --home-dir /nonexistent \
-      --shell /usr/sbin/nologin gta
+      --shell /usr/sbin/nologin mevo2glpi
 
 ENV APP_RELEASE=${IMAGE_VERSION} \
     APP_COMMIT_SHA=${VCS_REF} \
@@ -74,4 +74,4 @@ USER 10001:10001
 
 STOPSIGNAL SIGTERM
 
-CMD ["glpi-ticketing-database-migrations"]
+CMD ["mevo2glpi-database-migrations"]

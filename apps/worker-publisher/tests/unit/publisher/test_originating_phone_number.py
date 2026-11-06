@@ -2,7 +2,7 @@
 
 import pytest
 
-from glpi_ticketing_worker_publisher.publisher.originating_phone_number import (
+from mevo2glpi_worker_publisher.publisher.originating_phone_number import (
     extract_originating_phone_number,
 )
 

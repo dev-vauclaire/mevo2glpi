@@ -8,16 +8,16 @@ import httpx2
 import pytest
 from pydantic import SecretStr
 
-from glpi_ticketing_worker_publisher.composition import (
+from mevo2glpi_worker_publisher.composition import (
     PublisherConfigurationError,
     build_publisher_worker,
 )
-from glpi_ticketing_worker_publisher.graph import (
+from mevo2glpi_worker_publisher.graph import (
     GraphClient,
     SyntheticGraphTokenProvider,
 )
-from glpi_ticketing_worker_publisher.publisher import PublisherWorker
-from glpi_ticketing_worker_publisher.settings import (
+from mevo2glpi_worker_publisher.publisher import PublisherWorker
+from mevo2glpi_worker_publisher.settings import (
     PublisherGraphAuthMode,
     PublisherSettings,
 )

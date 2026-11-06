@@ -9,8 +9,8 @@ from uuid import UUID
 import pytest
 from sqlalchemy.engine import Engine
 
-from glpi_ticketing_common.cooperative_wait import wait_with_periodic_checkpoint
-from glpi_ticketing_database import (
+from mevo2glpi_common.cooperative_wait import wait_with_periodic_checkpoint
+from mevo2glpi_database import (
     AdvisoryLockReleasedError,
     ErrorScope,
     JobStage,
@@ -20,8 +20,8 @@ from glpi_ticketing_database import (
     create_session_factory,
     try_acquire_advisory_lock,
 )
-from glpi_ticketing_worker_automation.runtime import RuntimeHeartbeatReporter
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.runtime import RuntimeHeartbeatReporter
+from mevo2glpi_worker_automation.worker import (
     FailureDetails,
     RetryOutcome,
 )

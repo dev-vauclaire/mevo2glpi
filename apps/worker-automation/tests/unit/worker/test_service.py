@@ -8,14 +8,14 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_common import OriginatingPhoneNumberCipher
-from glpi_ticketing_database import ErrorScope, JobStage, JobStatus
-from glpi_ticketing_glpi import (
+from mevo2glpi_common import OriginatingPhoneNumberCipher
+from mevo2glpi_database import ErrorScope, JobStage, JobStatus
+from mevo2glpi_glpi import (
     GlpiOperation,
     GlpiTicketCreateCommand,
     GlpiTransportError,
 )
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.worker import (
     BlockedOutcome,
     CompletedOutcome,
     IdleOutcome,

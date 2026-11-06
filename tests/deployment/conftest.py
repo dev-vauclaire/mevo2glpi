@@ -40,17 +40,16 @@ def render_compose() -> Callable[[], dict[str, object]]:
         providers = ProviderConfiguration.synthetic()
         environment = {
             **clean_environment(),
-            "COMPOSE_PROJECT_NAME": "gta-contract",
+            "COMPOSE_PROJECT_NAME": "mevo2glpi-contract",
             "APP_ENVIRONMENT": "production",
             "APP_RELEASE": SYNTHETIC_APP_RELEASE,
             "APP_COMMIT_SHA": SYNTHETIC_APP_COMMIT_SHA,
-            "DOKPLOY_NETWORK_NAME": "gta-contract-dokploy",
-            "DATABASE_NETWORK_NAME": "gta-contract-database",
-            "TRANSCRIPTION_NETWORK_NAME": "gta-contract-transcription",
-            "AUDIO_VOLUME_NAME": "gta-contract-audio",
+            "DOKPLOY_NETWORK_NAME": "mevo2glpi-contract-dokploy",
+            "DATABASE_NETWORK_NAME": "mevo2glpi-contract-database",
+            "TRANSCRIPTION_NETWORK_NAME": "mevo2glpi-contract-transcription",
+            "AUDIO_VOLUME_NAME": "mevo2glpi-contract-audio",
             "DATABASE_URL": (
-                "postgresql+psycopg://gta:synthetic@postgres:5432/"
-                "glpi_ticketing_automation"
+                "postgresql+psycopg://mevo2glpi:synthetic@postgres:5432/mevo2glpi"
             ),
             "PUBLIC_BASE_URL": "https://tickets.example.invalid",
             "LEGACY_TRANSCRIPTION_BASE_URL": providers.transcription_base_url,
@@ -135,7 +134,7 @@ def deployment_environment(
     if os.environ.get("PYTEST_XDIST_WORKER") is not None:
         pytest.fail("Deployment tests must not be parallelized")
 
-    runtime_root = tmp_path_factory.mktemp("gta-mvp-deployment")
+    runtime_root = tmp_path_factory.mktemp("mevo2glpi-deployment")
     environment = create_mvp_compose_environment(runtime_root)
     primary_error: BaseException | None = None
     try:

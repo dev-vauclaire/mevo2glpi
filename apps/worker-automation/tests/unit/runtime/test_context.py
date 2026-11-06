@@ -8,18 +8,18 @@ from uuid import UUID
 
 import pytest
 
-import glpi_ticketing_worker_automation.runtime.context as context_module
-from glpi_ticketing_database import (
+import mevo2glpi_worker_automation.runtime.context as context_module
+from mevo2glpi_database import (
     AdvisoryLockConnectionLostError,
     WorkerRuntimeState,
     WorkerServiceName,
 )
-from glpi_ticketing_worker_automation.runtime.context import (
+from mevo2glpi_worker_automation.runtime.context import (
     WorkerAlreadyRunningError,
     worker_runtime,
 )
-from glpi_ticketing_worker_automation.settings import WorkerSettings
-from glpi_ticketing_worker_automation.worker import IdleOutcome, RunOutcome
+from mevo2glpi_worker_automation.settings import WorkerSettings
+from mevo2glpi_worker_automation.worker import IdleOutcome, RunOutcome
 
 AUDIO_UUID = UUID("123e4567-e89b-42d3-a456-426614174000")
 

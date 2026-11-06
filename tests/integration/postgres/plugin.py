@@ -70,10 +70,10 @@ class PostgresTestEnvironment:
 def _new_environment() -> dict[str, str]:
     suffix = secrets.token_hex(6)
     return {
-        "COMPOSE_PROJECT_NAME": f"gta-db-test-{suffix}",
-        "DB_ADMIN_USER": f"gta_admin_{suffix}",
+        "COMPOSE_PROJECT_NAME": f"mevo2glpi-db-test-{suffix}",
+        "DB_ADMIN_USER": f"mevo2glpi_admin_{suffix}",
         "DB_ADMIN_PASSWORD": secrets.token_urlsafe(32),
-        "DB_ADMIN_NAME": "gta_admin",
+        "DB_ADMIN_NAME": "mevo2glpi_admin",
     }
 
 
@@ -197,7 +197,7 @@ def postgres_environment() -> Iterator[PostgresTestEnvironment]:
 @pytest.fixture
 def database_url(postgres_environment: PostgresTestEnvironment) -> Iterator[str]:
     """Create an isolated empty database and drop it after one test."""
-    database_name = f"gta_test_{secrets.token_hex(8)}"
+    database_name = f"mevo2glpi_test_{secrets.token_hex(8)}"
     with psycopg.connect(
         postgres_environment.admin_psycopg_url,
         autocommit=True,
@@ -227,8 +227,8 @@ def database_url(postgres_environment: PostgresTestEnvironment) -> Iterator[str]
 @pytest.fixture
 def migrated_database_url(database_url: str) -> str:
     """Apply the workspace Alembic head to an isolated database."""
-    from glpi_ticketing_database import create_database_engine
-    from glpi_ticketing_database_migrations.application import upgrade_to_head
+    from mevo2glpi_database import create_database_engine
+    from mevo2glpi_database_migrations.application import upgrade_to_head
 
     engine = create_database_engine(database_url, connect_timeout_seconds=5)
     try:
@@ -241,7 +241,7 @@ def migrated_database_url(database_url: str) -> str:
 @pytest.fixture
 def migrated_engine(migrated_database_url: str) -> Iterator[Engine]:
     """Yield an engine connected to an isolated database at Alembic head."""
-    from glpi_ticketing_database import create_database_engine
+    from mevo2glpi_database import create_database_engine
 
     engine = create_database_engine(
         migrated_database_url,

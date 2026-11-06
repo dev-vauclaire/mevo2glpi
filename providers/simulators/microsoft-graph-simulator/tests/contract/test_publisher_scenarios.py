@@ -6,16 +6,16 @@ from io import BytesIO
 
 import pytest
 
-from glpi_ticketing_microsoft_graph_simulator.scenarios import (
+from mevo2glpi_microsoft_graph_simulator.scenarios import (
     SeedScenario,
     build_scenario_attachments,
 )
-from glpi_ticketing_worker_publisher.graph import (
+from mevo2glpi_worker_publisher.graph import (
     AttachmentId,
     GraphAttachment,
     GraphAttachmentKind,
 )
-from glpi_ticketing_worker_publisher.publisher.audio import (
+from mevo2glpi_worker_publisher.publisher.audio import (
     inspect_audio_structure,
     select_audio_attachment,
 )

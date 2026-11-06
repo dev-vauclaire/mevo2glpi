@@ -1,4 +1,4 @@
-name: ${COMPOSE_PROJECT_NAME:-gta-prod}
+name: ${COMPOSE_PROJECT_NAME:-mevo2glpi-prod}
 
 # Les services sont déclarés directement pour rester visibles dans Dokploy.
 # `extends` fusionne chaque définition avec le socle commun sans créer les
@@ -32,7 +32,7 @@ services:
       GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
       GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
       GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
-      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
+      SSL_CERT_FILE: /etc/ssl/certs/mevo2glpi-ca-bundle.pem
     networks:
       - database
       - transcription
@@ -74,19 +74,19 @@ services:
       GLPI_CLIENT_ID: ${GLPI_CLIENT_ID:?Set GLPI_CLIENT_ID}
       GLPI_CLIENT_SECRET: ${GLPI_CLIENT_SECRET:?Set GLPI_CLIENT_SECRET}
       GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
-      SSL_CERT_FILE: /etc/ssl/certs/gta-ca-bundle.pem
+      SSL_CERT_FILE: /etc/ssl/certs/mevo2glpi-ca-bundle.pem
 
 networks:
   database:
-    name: ${DATABASE_NETWORK_NAME:-gta-database-network}
+    name: ${DATABASE_NETWORK_NAME:-mevo2glpi-prod-database-network}
     external: true
   dokploy-network:
     name: ${DOKPLOY_NETWORK_NAME:-dokploy-network}
     external: true
   transcription:
-    name: ${TRANSCRIPTION_NETWORK_NAME:-gta-prod-transcription-network}
+    name: ${TRANSCRIPTION_NETWORK_NAME:-mevo2glpi-prod-transcription-network}
     external: true
 
 volumes:
   audio-data:
-    name: ${AUDIO_VOLUME_NAME:-gta-prod-audio-data}
+    name: ${AUDIO_VOLUME_NAME:-mevo2glpi-prod-audio-data}

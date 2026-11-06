@@ -36,7 +36,7 @@ def _clean_environment() -> dict[str, str]:
     controlled_prefixes = (
         "COMPOSE_",
         "GLPI_",
-        "GTA_DEV_",
+        "MEVO2GLPI_DEV_",
         "LEGACY_TRANSCRIPTION_",
         "MICROSOFT_GRAPH_",
         "OPENAI_",
@@ -103,7 +103,7 @@ def _services(config: dict[str, object]) -> dict[str, dict[str, Any]]:
 def test_development_manifest_contains_only_expected_test_services(
     test_services_config: dict[str, object],
 ) -> None:
-    assert test_services_config["name"] == "gta-development-test-services"
+    assert test_services_config["name"] == "mevo2glpi-development-test-services"
     assert set(_services(test_services_config)) == EXPECTED_SERVICES
 
 
@@ -134,10 +134,10 @@ def test_development_http_services_are_bound_only_to_loopback(
 
 def test_development_http_ports_are_configurable() -> None:
     config = _render_compose(
-        GTA_DEV_MICROSOFT_GRAPH_PORT="28080",
-        GTA_DEV_TRANSCRIBE_AI_PORT="28081",
-        GTA_DEV_OPENAI_TRANSCRIPTION_PORT="28082",
-        GTA_DEV_GLPI_PORT="28083",
+        MEVO2GLPI_DEV_MICROSOFT_GRAPH_PORT="28080",
+        MEVO2GLPI_DEV_TRANSCRIBE_AI_PORT="28081",
+        MEVO2GLPI_DEV_OPENAI_TRANSCRIPTION_PORT="28082",
+        MEVO2GLPI_DEV_GLPI_PORT="28083",
     )
     services = _services(config)
 
@@ -191,8 +191,8 @@ def test_glpi_database_is_private_and_persistent(
         }
     ]
     assert test_services_config["volumes"] == {
-        "glpi-data": {"name": "gta-development-glpi-data"},
-        "glpi-database-data": {"name": "gta-development-glpi-database-data"},
+        "glpi-data": {"name": "mevo2glpi-development-glpi-data"},
+        "glpi-database-data": {"name": "mevo2glpi-development-glpi-database-data"},
     }
 
 

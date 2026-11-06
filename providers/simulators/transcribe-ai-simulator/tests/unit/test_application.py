@@ -4,12 +4,12 @@ import logging
 
 import pytest
 
-from glpi_ticketing_transcribe_ai_simulator.application import (
+from mevo2glpi_transcribe_ai_simulator.application import (
     TranscribeAiSimulatorExitCode,
     build_server,
     run_cli,
 )
-from glpi_ticketing_transcribe_ai_simulator.settings import (
+from mevo2glpi_transcribe_ai_simulator.settings import (
     TranscribeAiSimulatorSettings,
 )
 

@@ -65,7 +65,7 @@ interrogée sans afficher de clé ni de transcription :
 python -c 'import httpx; print(httpx.get("http://mevo2glpi-staging-transcription:5092/health/ready", timeout=5).json())'
 ```
 
-En production, utiliser l'alias `gta-prod-transcription` à la place de l'alias
+En production, utiliser l'alias `mevo2glpi-prod-transcription` à la place de l'alias
 de staging.
 
 Le résultat attendu indique que le modèle est prêt. Les erreurs de décodage

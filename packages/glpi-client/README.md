@@ -39,7 +39,7 @@ Le niveau est configuré par l'application appelante.
 Depuis la racine du workspace :
 
 ```bash
-uv run --package glpi-ticketing-glpi pytest packages/glpi-client/tests/unit
-uv run --package glpi-ticketing-glpi pytest -m glpi \
+uv run --package mevo2glpi-glpi pytest packages/glpi-client/tests/unit
+uv run --package mevo2glpi-glpi pytest -m glpi \
   packages/glpi-client/tests/integration/glpi -vv --maxfail=1
 ```

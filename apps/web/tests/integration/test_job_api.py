@@ -13,18 +13,18 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from glpi_ticketing_common.release_identity import (
+from mevo2glpi_common.release_identity import (
     DeploymentEnvironment,
     ReleaseIdentity,
 )
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioRetention,
     JobStatus,
     TicketCreationJob,
     TicketCreationJobEvent,
     create_session_factory,
 )
-from glpi_ticketing_web.services import (
+from mevo2glpi_web.services import (
     GetAudioJob,
     GetDownloadableAudio,
     GetObservability,
@@ -33,7 +33,7 @@ from glpi_ticketing_web.services import (
     ObservabilityThresholds,
     RetryAudioJob,
 )
-from glpi_ticketing_web.web import create_app
+from mevo2glpi_web.web import create_app
 
 pytestmark = pytest.mark.database
 

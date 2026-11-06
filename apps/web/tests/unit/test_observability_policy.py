@@ -5,7 +5,7 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AlertAggregate,
     JobAlertSummary,
     RetentionAlertSummary,
@@ -13,7 +13,7 @@ from glpi_ticketing_database import (
     WorkerRuntimeState,
     WorkerServiceName,
 )
-from glpi_ticketing_web.services import (
+from mevo2glpi_web.services import (
     AlertKind,
     AlertSeverity,
     HeartbeatStatus,

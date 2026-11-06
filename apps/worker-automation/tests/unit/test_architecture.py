@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 PACKAGE_ROOT = (
-    Path(__file__).resolve().parents[2] / "src" / "glpi_ticketing_worker_automation"
+    Path(__file__).resolve().parents[2] / "src" / "mevo2glpi_worker_automation"
 )
 WORKER_ROOT = PACKAGE_ROOT / "worker"
 
@@ -51,7 +51,7 @@ def test_application_remains_a_process_boundary() -> None:
         {
             "httpx",
             "sqlalchemy",
-            "glpi_ticketing_database",
+            "mevo2glpi_database",
             "glpi",
             "transcription",
         }

@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from glpi_ticketing_common import DeploymentEnvironment
-from glpi_ticketing_worker_retention.settings import RetentionWorkerSettings
+from mevo2glpi_common import DeploymentEnvironment
+from mevo2glpi_worker_retention.settings import RetentionWorkerSettings
 
 DATABASE_URL = "postgresql+psycopg://retention:password@database:5432/jobs"
 GLPI_REQUIRED_ENVIRONMENT = {

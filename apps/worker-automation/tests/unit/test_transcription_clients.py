@@ -5,7 +5,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from glpi_ticketing_worker_automation.transcription import (
+from mevo2glpi_worker_automation.transcription import (
     JobStatus,
     JobUuid,
     LegacyTranscriptionClient,

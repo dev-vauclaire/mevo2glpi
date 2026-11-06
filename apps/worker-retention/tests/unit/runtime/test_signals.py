@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 
-from glpi_ticketing_worker_retention.runtime.signals import (
+from mevo2glpi_worker_retention.runtime.signals import (
     shutdown_signal_handlers,
 )
 

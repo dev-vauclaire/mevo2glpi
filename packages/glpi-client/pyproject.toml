@@ -1,5 +1,5 @@
 [project]
-name = "glpi-ticketing-glpi"
+name = "mevo2glpi-glpi"
 version = "0.1.0"
 description = "Client HTTP partagé pour le contrat GLPI API V2"
 license = "EUPL-1.2"

@@ -2,8 +2,8 @@ import pytest
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from glpi_ticketing_database import engine as engine_module
-from glpi_ticketing_database.engine import (
+from mevo2glpi_database import engine as engine_module
+from mevo2glpi_database.engine import (
     DatabaseConfigurationError,
     create_database_engine,
     create_session_factory,

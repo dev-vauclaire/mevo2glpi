@@ -6,7 +6,7 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioRetentionSnapshot,
     DeletionReason,
     RetentionCandidate,
@@ -14,12 +14,12 @@ from glpi_ticketing_database import (
     RetentionPolicy,
     RetentionStatus,
 )
-from glpi_ticketing_glpi import GlpiTicketSnapshot, TicketId, TicketStatus
-from glpi_ticketing_worker_retention.retention.outcomes import (
+from mevo2glpi_glpi import GlpiTicketSnapshot, TicketId, TicketStatus
+from mevo2glpi_worker_retention.retention.outcomes import (
     RetentionFailure,
     RetentionRunOutcome,
 )
-from glpi_ticketing_worker_retention.retention.ports import (
+from mevo2glpi_worker_retention.retention.ports import (
     AudioPurgeWork,
     ExternalRetentionWork,
     GlpiCheckWork,

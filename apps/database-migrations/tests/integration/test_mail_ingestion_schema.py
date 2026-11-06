@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import Engine, Table, inspect, select
 from sqlalchemy.exc import IntegrityError
 
-from glpi_ticketing_database.models import (
+from mevo2glpi_database.models import (
     MailIngestion,
     MailIngestionEvent,
     TicketCreationJob,

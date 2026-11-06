@@ -9,16 +9,16 @@ from threading import Event
 
 import pytest
 
-from glpi_ticketing_common import DeploymentEnvironment
-from glpi_ticketing_worker_retention.application import (
+from mevo2glpi_common import DeploymentEnvironment
+from mevo2glpi_worker_retention.application import (
     RetentionWorkerAlreadyRunningError,
     RetentionWorkerConfigurationError,
     RetentionWorkerExitCode,
     run_application,
     run_cli,
 )
-from glpi_ticketing_worker_retention.retention import IdleOutcome
-from glpi_ticketing_worker_retention.settings import RetentionWorkerSettings
+from mevo2glpi_worker_retention.retention import IdleOutcome
+from mevo2glpi_worker_retention.settings import RetentionWorkerSettings
 
 SYNTHETIC_SECRET = "never-log-this-retention-secret"
 COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"

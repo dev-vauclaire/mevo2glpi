@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 REPOSITORY_ROOT = (
-    Path(__file__).parents[2] / "src" / "glpi_ticketing_database" / "repositories"
+    Path(__file__).parents[2] / "src" / "mevo2glpi_database" / "repositories"
 )
 ORM_MODELS = {
     "AudioRetention",

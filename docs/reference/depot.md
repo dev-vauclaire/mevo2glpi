@@ -47,19 +47,21 @@ Le dossier `infra/docker/` est organisé par périmètre de déploiement :
 - `transcription/` déploie indépendamment le service local de transcription
   CPU.
 
-## Identifiants techniques historiques
+## Identifiants internes stables
 
-Le nom visible du projet est `mevo2glpi`. Les namespaces et commandes Python
-`glpi_ticketing_*` et `glpi-ticketing-*` restent toutefois inchangés pour
-préserver la compatibilité avec les images et les scripts existants.
+Le nom du projet et de ses ressources d'exploitation est `mevo2glpi`. Les
+namespaces et commandes Python `mevo2glpi_*` et `mevo2glpi-*` constituent
+désormais les identifiants techniques internes stables, utilisés par les
+imports, les scripts console et les images.
 
-La même règle s'applique aux variables `GTA_*`, aux ressources Docker et
-PostgreSQL qui n'ont pas encore fait l'objet d'une migration validée, aux
-identifiants Entra, aux verrous PostgreSQL et au contexte cryptographique des
-données déjà chiffrées. Ils ne doivent pas faire l'objet d'un remplacement
-textuel global. Le staging constitue une migration opérationnelle documentée ;
-les identifiants internes historiques et les ressources de production restent
-inchangés jusqu'à leur propre procédure de transition et de retour arrière.
+Deux autres catégories d'identifiants ne doivent jamais être renommées par une
+substitution textuelle :
 
-L'URL du dépôt GitHub reste également inchangée tant que le dépôt distant n'a
-pas été renommé.
+- le contexte cryptographique associé aux numéros d'origine déjà chiffrés, car
+  sa modification rendrait ces valeurs indéchiffrables ;
+- les valeurs numériques des verrous PostgreSQL, car elles coordonnent les
+  instances d'un même worker.
+
+Les révisions Alembic et les objets de schéma existants restent également
+stables. Ces identifiants relèvent de la compatibilité des données et du code,
+pas de l'identité visible du projet.

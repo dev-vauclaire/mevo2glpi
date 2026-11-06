@@ -23,7 +23,7 @@ from tests.e2e.support import (
 from tests.integration.glpi.plugin import GlpiTestEnvironment
 from tests.support.mvp_compose import MvpComposeEnvironment
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioRetentionSnapshot,
     DeletionReason,
     JobEventActor,
@@ -31,7 +31,7 @@ from glpi_ticketing_database import (
     JobStatus,
     RetentionStatus,
 )
-from glpi_ticketing_glpi import TicketStatus
+from mevo2glpi_glpi import TicketStatus
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(45 * 60)]
 

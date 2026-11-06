@@ -12,7 +12,7 @@ from uuid import UUID
 import httpx
 from pydantic import SecretStr
 
-from glpi_ticketing_glpi import (
+from mevo2glpi_glpi import (
     GLPI_API_VERSION,
     GlpiClient,
     TicketId,

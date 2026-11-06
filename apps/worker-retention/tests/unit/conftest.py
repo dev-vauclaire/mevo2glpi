@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from glpi_ticketing_worker_retention.settings import RetentionWorkerSettings
+from mevo2glpi_worker_retention.settings import RetentionWorkerSettings
 
 
 @pytest.fixture

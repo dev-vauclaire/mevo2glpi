@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import httpx
 import pytest
 
-from glpi_ticketing_glpi import GLPI_API_VERSION
+from mevo2glpi_glpi import GLPI_API_VERSION
 
 pytestmark = pytest.mark.glpi
 

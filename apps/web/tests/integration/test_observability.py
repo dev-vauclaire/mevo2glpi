@@ -13,16 +13,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioRetention,
     MailIngestion,
     TicketCreationJob,
     WorkerRuntimeStatus,
     create_session_factory,
 )
-from glpi_ticketing_web.controllers import ObservabilityController
-from glpi_ticketing_web.routes import create_observability_router
-from glpi_ticketing_web.services import GetObservability, ObservabilityThresholds
+from mevo2glpi_web.controllers import ObservabilityController
+from mevo2glpi_web.routes import create_observability_router
+from mevo2glpi_web.services import GetObservability, ObservabilityThresholds
 
 pytestmark = pytest.mark.database
 

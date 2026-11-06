@@ -10,7 +10,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy.orm import Session
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioExtension,
     AudioRetentionSnapshot,
     DeletionReason,
@@ -26,15 +26,15 @@ from glpi_ticketing_database import (
     RetentionPolicy,
     RetentionStatus,
 )
-from glpi_ticketing_glpi import TicketStatus
-from glpi_ticketing_worker_retention.retention.lifecycle import (
+from mevo2glpi_glpi import TicketStatus
+from mevo2glpi_worker_retention.retention.lifecycle import (
     RetentionJobInvariantError,
     RetentionJobLifecycleService,
     StaleRetentionCandidateError,
 )
-from glpi_ticketing_worker_retention.retention.outcomes import RetentionFailure
-from glpi_ticketing_worker_retention.retention.policies import RetentionCheckPolicy
-from glpi_ticketing_worker_retention.retention.ports import (
+from mevo2glpi_worker_retention.retention.outcomes import RetentionFailure
+from mevo2glpi_worker_retention.retention.policies import RetentionCheckPolicy
+from mevo2glpi_worker_retention.retention.ports import (
     AudioPurgeWork,
     CheckRecoveryWork,
     GlpiCheckWork,

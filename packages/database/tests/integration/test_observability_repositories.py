@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy import Engine
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioRetention,
     AudioRetentionRepository,
     JobStatus,

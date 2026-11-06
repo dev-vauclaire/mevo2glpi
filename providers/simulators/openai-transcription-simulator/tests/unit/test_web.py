@@ -5,10 +5,10 @@ import logging
 import pytest
 from httpx2 import ASGITransport, AsyncClient
 
-from glpi_ticketing_openai_transcription_simulator.settings import (
+from mevo2glpi_openai_transcription_simulator.settings import (
     OpenAiTranscriptionSimulatorSettings,
 )
-from glpi_ticketing_openai_transcription_simulator.web import (
+from mevo2glpi_openai_transcription_simulator.web import (
     SYNTHETIC_TRANSCRIPTION,
     create_app,
 )

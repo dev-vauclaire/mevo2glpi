@@ -16,8 +16,8 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import select
 
-from glpi_ticketing_common.audio_files import publish_audio
-from glpi_ticketing_database import (
+from mevo2glpi_common.audio_files import publish_audio
+from mevo2glpi_database import (
     AudioExtension,
     AudioRetention,
     DiscoveredMail,
@@ -35,15 +35,15 @@ from glpi_ticketing_database import (
     create_database_engine,
     create_session_factory,
 )
-from glpi_ticketing_glpi import (
+from mevo2glpi_glpi import (
     GLPI_API_VERSION,
     GlpiClient,
     TicketLevel,
     TicketType,
 )
-from glpi_ticketing_worker_automation.runtime import worker_runtime
-from glpi_ticketing_worker_automation.settings import WorkerSettings
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.runtime import worker_runtime
+from mevo2glpi_worker_automation.settings import WorkerSettings
+from mevo2glpi_worker_automation.worker import (
     CompletedOutcome,
     IdleOutcome,
     RetryOutcome,

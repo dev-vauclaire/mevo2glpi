@@ -13,19 +13,19 @@ import httpx2 as httpx
 import pytest
 from pydantic import SecretStr
 
-from glpi_ticketing_worker_publisher.graph.client import (
+from mevo2glpi_worker_publisher.graph.client import (
     DEFAULT_MAX_ATTACHMENT_BYTES,
     DOWNLOAD_CHUNK_SIZE,
     GraphClient,
 )
-from glpi_ticketing_worker_publisher.graph.contracts import (
+from mevo2glpi_worker_publisher.graph.contracts import (
     GraphHttpError,
     GraphOutcomeUnknownError,
     GraphPayloadTooLargeError,
     GraphProtocolError,
     GraphTransportError,
 )
-from glpi_ticketing_worker_publisher.graph.models import (
+from mevo2glpi_worker_publisher.graph.models import (
     AttachmentId,
     FolderId,
     GraphAccessToken,
@@ -325,7 +325,7 @@ def test_request_correlation_id_is_sent_and_logged_without_remote_identifiers(
     with (
         caplog.at_level(
             logging.DEBUG,
-            logger="glpi_ticketing_worker_publisher.graph.client",
+            logger="mevo2glpi_worker_publisher.graph.client",
         ),
         http_client,
     ):
@@ -718,7 +718,7 @@ def test_transport_diagnostic_never_logs_token_or_exception_text(
     with (
         caplog.at_level(
             logging.DEBUG,
-            logger="glpi_ticketing_worker_publisher.graph.client",
+            logger="mevo2glpi_worker_publisher.graph.client",
         ),
         http_client,
         pytest.raises(GraphTransportError),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from glpi_ticketing_common.release_identity import (
+from mevo2glpi_common.release_identity import (
     DeploymentEnvironment,
     ReleaseIdentity,
 )

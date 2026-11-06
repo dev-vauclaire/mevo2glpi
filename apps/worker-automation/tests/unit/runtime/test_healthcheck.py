@@ -9,14 +9,14 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import OperationalError
 
-import glpi_ticketing_worker_automation.runtime.healthcheck as healthcheck_module
-from glpi_ticketing_common.runtime_healthcheck import (
+import mevo2glpi_worker_automation.runtime.healthcheck as healthcheck_module
+from mevo2glpi_common.runtime_healthcheck import (
     AudioAccessMode,
     HealthcheckCode,
     HealthcheckFailure,
     HealthcheckSettings,
 )
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     WorkerRuntimeSnapshot,
     WorkerRuntimeState,
     WorkerServiceName,

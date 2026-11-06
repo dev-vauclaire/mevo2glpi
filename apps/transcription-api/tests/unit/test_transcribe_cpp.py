@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from glpi_ticketing_transcription_api.engines import (
+from mevo2glpi_transcription_api.engines import (
     EngineInferenceError,
     EngineLoadError,
     TranscribeCppEngine,

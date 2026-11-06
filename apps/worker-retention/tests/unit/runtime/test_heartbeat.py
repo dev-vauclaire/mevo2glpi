@@ -9,15 +9,15 @@ from uuid import UUID
 
 import pytest
 
-import glpi_ticketing_worker_retention.runtime.heartbeat as heartbeat_module
-from glpi_ticketing_database import (
+import mevo2glpi_worker_retention.runtime.heartbeat as heartbeat_module
+from mevo2glpi_database import (
     DeletionReason,
     ErrorScope,
     WorkerRuntimeState,
     WorkerServiceName,
 )
-from glpi_ticketing_glpi import TicketStatus
-from glpi_ticketing_worker_retention.retention import (
+from mevo2glpi_glpi import TicketStatus
+from mevo2glpi_worker_retention.retention import (
     AudioDeletedOutcome,
     DependencyCondition,
     DependencyWaitingOutcome,
@@ -30,7 +30,7 @@ from glpi_ticketing_worker_retention.retention import (
     StaleCandidateOutcome,
     SystemBlockedOutcome,
 )
-from glpi_ticketing_worker_retention.runtime.heartbeat import (
+from mevo2glpi_worker_retention.runtime.heartbeat import (
     RetentionRuntimeHeartbeatReporter,
 )
 

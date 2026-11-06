@@ -5,9 +5,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from glpi_ticketing_web.schemas import JobStage, JobState
+from mevo2glpi_web.schemas import JobStage, JobState
 
-WEB_PACKAGE = Path(__file__).resolve().parents[2] / "src" / "glpi_ticketing_web"
+WEB_PACKAGE = Path(__file__).resolve().parents[2] / "src" / "mevo2glpi_web"
 
 
 def test_flat_http_and_service_modules_were_removed() -> None:
@@ -19,9 +19,9 @@ def test_routes_only_depend_on_http_contracts_and_controllers() -> None:
     _assert_no_import_prefix(
         WEB_PACKAGE / "routes",
         {
-            "glpi_ticketing_common",
-            "glpi_ticketing_database",
-            "glpi_ticketing_web.services",
+            "mevo2glpi_common",
+            "mevo2glpi_database",
+            "mevo2glpi_web.services",
             "services",
             "sqlalchemy",
         },
@@ -32,8 +32,8 @@ def test_controllers_do_not_depend_on_persistence_or_storage() -> None:
     _assert_no_import_prefix(
         WEB_PACKAGE / "controllers",
         {
-            "glpi_ticketing_common",
-            "glpi_ticketing_database",
+            "mevo2glpi_common",
+            "mevo2glpi_database",
             "sqlalchemy",
         },
     )
@@ -46,9 +46,9 @@ def test_services_are_independent_from_the_http_framework() -> None:
             "fastapi",
             "jinja2",
             "starlette",
-            "glpi_ticketing_web.controllers",
-            "glpi_ticketing_web.routes",
-            "glpi_ticketing_web.schemas",
+            "mevo2glpi_web.controllers",
+            "mevo2glpi_web.routes",
+            "mevo2glpi_web.schemas",
             "controllers",
             "routes",
             "schemas",
@@ -60,11 +60,11 @@ def test_schemas_contain_no_orm_dependency() -> None:
     _assert_no_import_prefix(
         WEB_PACKAGE / "schemas",
         {
-            "glpi_ticketing_database",
+            "mevo2glpi_database",
             "sqlalchemy",
-            "glpi_ticketing_web.controllers",
-            "glpi_ticketing_web.routes",
-            "glpi_ticketing_web.services",
+            "mevo2glpi_web.controllers",
+            "mevo2glpi_web.routes",
+            "mevo2glpi_web.services",
             "controllers",
             "routes",
             "services",

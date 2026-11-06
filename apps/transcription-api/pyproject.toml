@@ -1,5 +1,5 @@
 [project]
-name = "glpi-ticketing-transcription-api"
+name = "mevo2glpi-transcription-api"
 version = "0.1.0"
 description = "API de transcription CPU OpenAI-compatible"
 license = "EUPL-1.2"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-glpi-ticketing-transcription-api = "glpi_ticketing_transcription_api.application:main"
+mevo2glpi-transcription-api = "mevo2glpi_transcription_api.application:main"
 
 [build-system]
 requires = ["uv_build>=0.10.11,<0.11.0"]

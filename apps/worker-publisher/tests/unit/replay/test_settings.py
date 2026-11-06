@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from glpi_ticketing_worker_publisher.replay.settings import ReplaySettings
+from mevo2glpi_worker_publisher.replay.settings import ReplaySettings
 
 
 def test_replay_settings_require_only_database_configuration() -> None:

@@ -9,18 +9,18 @@ from uuid import UUID
 
 import pytest
 
-import glpi_ticketing_worker_retention.runtime.context as context_module
-from glpi_ticketing_database import (
+import mevo2glpi_worker_retention.runtime.context as context_module
+from mevo2glpi_database import (
     AdvisoryLockConnectionLostError,
     WorkerRuntimeState,
     WorkerServiceName,
 )
-from glpi_ticketing_worker_retention.retention import IdleOutcome
-from glpi_ticketing_worker_retention.runtime.context import (
+from mevo2glpi_worker_retention.retention import IdleOutcome
+from mevo2glpi_worker_retention.runtime.context import (
     RetentionWorkerAlreadyRunningError,
     retention_worker_runtime,
 )
-from glpi_ticketing_worker_retention.settings import RetentionWorkerSettings
+from mevo2glpi_worker_retention.settings import RetentionWorkerSettings
 
 SYNTHETIC_SECRET = "never-log-runtime-secret"
 

@@ -4,9 +4,9 @@ from datetime import timedelta
 
 import pytest
 
-from glpi_ticketing_database import DeletionReason, ErrorScope
-from glpi_ticketing_glpi import TicketStatus
-from glpi_ticketing_worker_retention.retention.outcomes import (
+from mevo2glpi_database import DeletionReason, ErrorScope
+from mevo2glpi_glpi import TicketStatus
+from mevo2glpi_worker_retention.retention.outcomes import (
     AudioDeletedOutcome,
     DependencyCondition,
     DependencyWaitingOutcome,

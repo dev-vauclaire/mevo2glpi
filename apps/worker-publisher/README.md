@@ -1,6 +1,6 @@
 # Worker publisher
 
-`glpi-ticketing-worker-publisher` ingère les messages vocaux d'une boîte
+`mevo2glpi-worker-publisher` ingère les messages vocaux d'une boîte
 Exchange Online dédiée. Il remplace la création HTTP de jobs : un message
 contenant exactement une pièce jointe WAV ou OGG valide produit un audio
 canonique et un job `pending` consommable par le worker d'automatisation.
@@ -180,7 +180,7 @@ jobs contenant une métadonnée d'origine sont en cours.
 apps/worker-publisher/
 ├── pyproject.toml
 ├── README.md
-├── src/glpi_ticketing_worker_publisher/
+├── src/mevo2glpi_worker_publisher/
 │   ├── __main__.py            entrée `python -m`
 │   ├── application.py         cycle de vie du processus et signaux
 │   ├── composition.py         assemblage des adaptateurs
@@ -220,24 +220,24 @@ adaptateurs, tandis que la transaction reste dans la couche de cycle de vie.
 Depuis la racine, après migration de la base et configuration de `.env` :
 
 ```bash
-uv run --package glpi-ticketing-worker-publisher \
-  glpi-ticketing-publisher
+uv run --package mevo2glpi-worker-publisher \
+  mevo2glpi-worker-publisher
 ```
 
 La forme module est également disponible :
 
 ```bash
-uv run --package glpi-ticketing-worker-publisher \
-  python -m glpi_ticketing_worker_publisher
+uv run --package mevo2glpi-worker-publisher \
+  python -m mevo2glpi_worker_publisher
 ```
 
 Tests ciblés :
 
 ```bash
-uv run --package glpi-ticketing-worker-publisher pytest \
+uv run --package mevo2glpi-worker-publisher pytest \
   apps/worker-publisher/tests/unit -q
 
-uv run --package glpi-ticketing-worker-publisher pytest \
+uv run --package mevo2glpi-worker-publisher pytest \
   apps/worker-publisher/tests/integration/graph -q
 ```
 
@@ -247,7 +247,7 @@ réconciliation d'une réponse perdue sans contacter Microsoft 365.
 
 ## Rejouer des ingestions rejetées
 
-`glpi-ticketing-publisher-replay` est une commande d'exploitation générique et
+`mevo2glpi-worker-publisher-replay` est une commande d'exploitation générique et
 limitée à PostgreSQL. Elle ne contacte ni Microsoft Graph ni le volume audio.
 Elle sélectionne des ingestions `failed/rejected` par catégorie, code et fenêtre
 UTC, exige l'absence de job et peut exiger la présence d'un identifiant de pièce
@@ -282,7 +282,7 @@ réarmées du filtre, ce qui permet d'avancer sans doublon jusqu'au lot vide.
 Exemple pour le reliquat OGG rejeté par l'ancienne version :
 
 ```bash
-glpi-ticketing-publisher-replay \
+mevo2glpi-worker-publisher-replay \
   --status failed \
   --disposition rejected \
   --rejection-category invalid_attachment \
@@ -307,7 +307,7 @@ docker compose \
   --env-file infra/docker/apps/.env \
   -f infra/docker/apps/docker-compose.prod.yml \
   run --rm --no-deps worker-publisher \
-  glpi-ticketing-publisher-replay --help
+  mevo2glpi-worker-publisher-replay --help
 ```
 
 Remplacez `--help` par les arguments complets de l'exemple précédent.

@@ -244,7 +244,7 @@ def test_staging_glpi_is_external_https_and_uses_the_ca_bundle(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:
     services = _services(render_staging_compose())
-    ca_target = "/etc/ssl/certs/gta-ca-bundle.pem"
+    ca_target = "/etc/ssl/certs/mevo2glpi-ca-bundle.pem"
     automation = services["worker-automation"]
     retention = services["worker-retention"]
 

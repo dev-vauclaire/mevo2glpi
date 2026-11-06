@@ -12,26 +12,26 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException, Response
 
-import glpi_ticketing_web.controllers.jobs as jobs_controller_module
-from glpi_ticketing_common.release_identity import (
+import mevo2glpi_web.controllers.jobs as jobs_controller_module
+from mevo2glpi_common.release_identity import (
     DeploymentEnvironment,
     ReleaseIdentity,
 )
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioExtension,
     JobEventActor,
     JobEventType,
     JobStage,
     JobStatus,
 )
-from glpi_ticketing_web.controllers import (
+from mevo2glpi_web.controllers import (
     JobController,
     ManagedStreamingResponse,
     PageController,
     VersionController,
 )
-from glpi_ticketing_web.schemas import VersionResponse
-from glpi_ticketing_web.services import (
+from mevo2glpi_web.schemas import VersionResponse
+from mevo2glpi_web.services import (
     AudioStorageUnavailableError,
     DownloadableAudio,
     InvalidCursorError,

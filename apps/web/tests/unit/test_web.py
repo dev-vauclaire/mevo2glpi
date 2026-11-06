@@ -11,18 +11,18 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-import glpi_ticketing_web.services.jobs.downloads as jobs_module
-from glpi_ticketing_common.release_identity import (
+import mevo2glpi_web.services.jobs.downloads as jobs_module
+from mevo2glpi_common.release_identity import (
     DeploymentEnvironment,
     ReleaseIdentity,
 )
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioExtension,
     JobStage,
     JobStatus,
     RetentionStatus,
 )
-from glpi_ticketing_web.services import (
+from mevo2glpi_web.services import (
     GetDownloadableAudio,
     JobEventListPage,
     JobListPage,
@@ -31,7 +31,7 @@ from glpi_ticketing_web.services import (
     ObservabilitySnapshot,
     RetriedJob,
 )
-from glpi_ticketing_web.web import create_app
+from mevo2glpi_web.web import create_app
 
 SYNTHETIC_AUDIO = b"RIFF\x10\x00\x00\x00WAVEfmt \x00\x00\x00\x00data"
 RELEASE_IDENTITY = ReleaseIdentity(

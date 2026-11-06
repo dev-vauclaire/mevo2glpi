@@ -10,15 +10,15 @@ from uuid import UUID
 import pytest
 from pydantic import SecretStr
 
-from glpi_ticketing_worker_publisher.graph.auth import (
+from mevo2glpi_worker_publisher.graph.auth import (
     ENTRA_AUTHORITY_ROOT,
     GRAPH_DEFAULT_SCOPE,
     SYNTHETIC_GRAPH_ACCESS_TOKEN,
     MsalCertificateTokenProvider,
     SyntheticGraphTokenProvider,
 )
-from glpi_ticketing_worker_publisher.graph.contracts import GraphAuthenticationError
-from glpi_ticketing_worker_publisher.graph.models import GraphErrorCategory
+from mevo2glpi_worker_publisher.graph.contracts import GraphAuthenticationError
+from mevo2glpi_worker_publisher.graph.models import GraphErrorCategory
 
 TENANT_ID = UUID("6b16a39f-72ca-4f20-9eb2-55e984eaab0f")
 CLIENT_ID = UUID("550ff65d-cec5-45d8-af03-9a51af8feb17")
@@ -267,7 +267,7 @@ def test_msal_transport_failure_logs_only_exception_type(
     with (
         caplog.at_level(
             logging.DEBUG,
-            logger="glpi_ticketing_worker_publisher.graph.auth",
+            logger="mevo2glpi_worker_publisher.graph.auth",
         ),
         pytest.raises(GraphAuthenticationError) as captured_error,
     ):
@@ -364,7 +364,7 @@ def test_msal_initialization_transport_failure_is_sanitized(
     with (
         caplog.at_level(
             logging.DEBUG,
-            logger="glpi_ticketing_worker_publisher.graph.auth",
+            logger="mevo2glpi_worker_publisher.graph.auth",
         ),
         pytest.raises(GraphAuthenticationError) as captured_error,
     ):

@@ -1,4 +1,4 @@
-name: gta-development-postgres
+name: mevo2glpi-development-postgres
 
 # Ces identifiants sont fictifs et strictement réservés au développement local.
 # Ils ne doivent jamais être réutilisés dans un autre environnement.
@@ -10,9 +10,9 @@ services:
       - -c
       - timezone=UTC
     environment:
-      POSTGRES_DB: glpi_ticketing_dev
-      POSTGRES_USER: gta_dev
-      POSTGRES_PASSWORD: gta_dev_only
+      POSTGRES_DB: mevo2glpi_dev
+      POSTGRES_USER: mevo2glpi_dev
+      POSTGRES_PASSWORD: mevo2glpi_dev_only
     healthcheck:
       test:
         - CMD-SHELL
@@ -23,7 +23,7 @@ services:
       start_period: 2s
     ports:
       - target: 5432
-        published: "${GTA_DEV_POSTGRES_PORT:-5432}"
+        published: "${MEVO2GLPI_DEV_POSTGRES_PORT:-5432}"
         host_ip: 127.0.0.1
         protocol: tcp
     volumes:
@@ -39,4 +39,4 @@ services:
 
 volumes:
   postgres-data:
-    name: gta-development-postgres18-data
+    name: mevo2glpi-development-postgres18-data

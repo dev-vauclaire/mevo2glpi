@@ -4,8 +4,8 @@ from datetime import timedelta
 
 import pytest
 
-from glpi_ticketing_database import DeletionReason, ErrorScope
-from glpi_ticketing_worker_retention.retention.outcomes import (
+from mevo2glpi_database import DeletionReason, ErrorScope
+from mevo2glpi_worker_retention.retention.outcomes import (
     AudioDeletedOutcome,
     DependencyCondition,
     DependencyWaitingOutcome,
@@ -14,7 +14,7 @@ from glpi_ticketing_worker_retention.retention.outcomes import (
     RetentionOperation,
     RetryScheduledOutcome,
 )
-from glpi_ticketing_worker_retention.retention.runner import run_forever
+from mevo2glpi_worker_retention.retention.runner import run_forever
 
 from ._fakes import JOB_UUID, NOW, ScriptedWorker
 

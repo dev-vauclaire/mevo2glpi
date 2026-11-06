@@ -5,14 +5,14 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import UUID
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     MailIngestionDisposition,
     MailIngestionEventType,
     MailIngestionReplayFilter,
     MailIngestionStage,
     MailIngestionStatus,
 )
-from glpi_ticketing_worker_publisher.replay import (
+from mevo2glpi_worker_publisher.replay import (
     PublisherReplayService,
     ReplayMode,
     ReplayRequest,

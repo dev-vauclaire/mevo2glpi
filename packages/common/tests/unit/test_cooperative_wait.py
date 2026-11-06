@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from glpi_ticketing_common.cooperative_wait import (
+from mevo2glpi_common.cooperative_wait import (
     wait_with_periodic_checkpoint,
 )
 

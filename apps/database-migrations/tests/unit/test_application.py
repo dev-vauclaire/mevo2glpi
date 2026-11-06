@@ -14,10 +14,10 @@ from pydantic import ValidationError
 from sqlalchemy import Engine
 from sqlalchemy.exc import OperationalError
 
-from glpi_ticketing_common import DeploymentEnvironment
-from glpi_ticketing_database.engine import DatabaseConfigurationError
-from glpi_ticketing_database.models import Base
-from glpi_ticketing_database_migrations.application import (
+from mevo2glpi_common import DeploymentEnvironment
+from mevo2glpi_database.engine import DatabaseConfigurationError
+from mevo2glpi_database.models import Base
+from mevo2glpi_database_migrations.application import (
     ALEMBIC_INI_PATH,
     DatabaseUnavailableError,
     MigrationExitCode,
@@ -26,7 +26,7 @@ from glpi_ticketing_database_migrations.application import (
     run_cli,
     wait_for_database,
 )
-from glpi_ticketing_database_migrations.settings import MigrationSettings
+from mevo2glpi_database_migrations.settings import MigrationSettings
 
 DATABASE_URL = "postgresql+psycopg://migration:secret@database/mvp"
 COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
@@ -128,7 +128,7 @@ def test_run_application_waits_then_upgrades_and_disposes(
         events.append("upgrade")
 
     monkeypatch.setattr(
-        "glpi_ticketing_database_migrations.application.wait_for_database",
+        "mevo2glpi_database_migrations.application.wait_for_database",
         wait_stub,
     )
     engine.dispose.side_effect = lambda: events.append("dispose")
@@ -151,7 +151,7 @@ def test_run_application_disposes_engine_after_failure(
         raise DatabaseUnavailableError
 
     monkeypatch.setattr(
-        "glpi_ticketing_database_migrations.application.wait_for_database",
+        "mevo2glpi_database_migrations.application.wait_for_database",
         fail_wait,
     )
 

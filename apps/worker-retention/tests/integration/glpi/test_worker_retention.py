@@ -13,8 +13,8 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from tests.integration.glpi.plugin import GlpiTestEnvironment
 
-from glpi_ticketing_common.backoff import ExponentialBackoffPolicy
-from glpi_ticketing_database import (
+from mevo2glpi_common.backoff import ExponentialBackoffPolicy
+from mevo2glpi_database import (
     AudioExtension,
     AudioRetention,
     AudioRetentionRepository,
@@ -30,7 +30,7 @@ from glpi_ticketing_database import (
     TicketCreationJobRepository,
     create_session_factory,
 )
-from glpi_ticketing_glpi import (
+from mevo2glpi_glpi import (
     GlpiClient,
     GlpiTicketCreateCommand,
     GlpiTicketDefaults,
@@ -38,7 +38,7 @@ from glpi_ticketing_glpi import (
     TicketStatus,
     TicketType,
 )
-from glpi_ticketing_worker_retention.retention import (
+from mevo2glpi_worker_retention.retention import (
     AudioDeletedOutcome,
     GlpiCheckRescheduledOutcome,
     RetentionBlockedOutcome,
@@ -46,7 +46,7 @@ from glpi_ticketing_worker_retention.retention import (
     RetentionJobLifecycleService,
     RetentionWorker,
 )
-from glpi_ticketing_worker_retention.retention.stages import (
+from mevo2glpi_worker_retention.retention.stages import (
     CrashSafeAudioPurger,
     GlpiCheckStage,
 )

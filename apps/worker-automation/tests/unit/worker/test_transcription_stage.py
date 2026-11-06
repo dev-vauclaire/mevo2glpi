@@ -5,8 +5,8 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_database import ErrorScope, JobStage
-from glpi_ticketing_worker_automation.transcription import (
+from mevo2glpi_database import ErrorScope, JobStage
+from mevo2glpi_worker_automation.transcription import (
     TranscriptionBlockedError,
     TranscriptionErrorCategory,
     TranscriptionResult,
@@ -14,12 +14,12 @@ from glpi_ticketing_worker_automation.transcription import (
     TranscriptionSubmissionCallbackError,
     TranscriptionTerminalError,
 )
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.worker import (
     CompletedOutcome,
     InterruptedOutcome,
     SystemBlockedOutcome,
 )
-from glpi_ticketing_worker_automation.worker.stages import TranscriptionSuccess
+from mevo2glpi_worker_automation.worker.stages import TranscriptionSuccess
 
 from ._pipeline_fakes import (
     AUDIO_UUID,

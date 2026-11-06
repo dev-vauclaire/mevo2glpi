@@ -52,13 +52,13 @@ COPY providers/simulators/transcribe-ai-simulator/pyproject.toml providers/simul
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
-      --package glpi-ticketing-transcription-api --no-install-workspace
+      --package mevo2glpi-transcription-api --no-install-workspace
 
 COPY apps/transcription-api/src apps/transcription-api/src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
-      --package glpi-ticketing-transcription-api \
+      --package mevo2glpi-transcription-api \
     && test "$(/app/.venv/bin/python -c 'import transcribe_cpp; print(transcribe_cpp.__version__)')" = "${TRANSCRIBE_CPP_VERSION}"
 
 FROM ${PYTHON_IMAGE} AS runtime
@@ -67,7 +67,7 @@ ARG IMAGE_VERSION
 ARG VCS_REF
 ARG TRANSCRIBE_CPP_VERSION
 
-LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-ticketing-automation" \
+LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/mevo2glpi" \
       org.opencontainers.image.title="mevo2glpi transcription API" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
@@ -77,10 +77,10 @@ LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-tic
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 gta \
+    && groupadd --gid 10001 mevo2glpi \
     && useradd --uid 10001 --gid 10001 \
       --no-create-home --no-log-init --home-dir /nonexistent \
-      --shell /usr/sbin/nologin gta \
+      --shell /usr/sbin/nologin mevo2glpi \
     && install -d -m 0755 -o 10001 -g 10001 /models
 
 ENV APP_RELEASE=${IMAGE_VERSION} \
@@ -111,4 +111,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=90s --retries=3 \
     --start-interval=2s \
     CMD ["python", "-c", "import os, urllib.request; port = int(os.environ.get('TRANSCRIPTION_PORT', '5092')); urllib.request.urlopen(f'http://127.0.0.1:{port}/health/ready', timeout=2).close()"]
 
-CMD ["glpi-ticketing-transcription-api"]
+CMD ["mevo2glpi-transcription-api"]

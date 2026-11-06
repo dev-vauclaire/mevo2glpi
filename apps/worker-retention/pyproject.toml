@@ -1,20 +1,20 @@
 [project]
-name = "glpi-ticketing-worker-retention"
+name = "mevo2glpi-worker-retention"
 version = "0.1.0"
 description = "Application worker de rétention des audios liés aux tickets GLPI"
 license = "EUPL-1.2"
 requires-python = ">=3.12"
 dependencies = [
-    "glpi-ticketing-common>=0.1,<0.2",
-    "glpi-ticketing-database>=0.1,<0.2",
-    "glpi-ticketing-glpi>=0.1,<0.2",
+    "mevo2glpi-common>=0.1,<0.2",
+    "mevo2glpi-database>=0.1,<0.2",
+    "mevo2glpi-glpi>=0.1,<0.2",
     "httpx>=0.28,<1",
     "pydantic-settings>=2.10,<3",
     "sqlalchemy>=2.0,<3",
 ]
 
 [project.scripts]
-glpi-ticketing-worker-retention = "glpi_ticketing_worker_retention.application:main"
+mevo2glpi-worker-retention = "mevo2glpi_worker_retention.application:main"
 
 [build-system]
 requires = ["uv_build>=0.10.11,<0.11.0"]

@@ -27,9 +27,9 @@ members = [
 ]
 
 [tool.uv.sources]
-glpi-ticketing-common = { workspace = true }
-glpi-ticketing-database = { workspace = true }
-glpi-ticketing-glpi = { workspace = true }
+mevo2glpi-common = { workspace = true }
+mevo2glpi-database = { workspace = true }
+mevo2glpi-glpi = { workspace = true }
 
 [dependency-groups]
 dev = [

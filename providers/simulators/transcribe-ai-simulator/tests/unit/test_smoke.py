@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from glpi_ticketing_transcribe_ai_simulator import smoke
+from mevo2glpi_transcribe_ai_simulator import smoke
 
 API_KEY = "synthetic-transcription-key"
 

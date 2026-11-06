@@ -1,5 +1,5 @@
 [project]
-name = "glpi-ticketing-database"
+name = "mevo2glpi-database"
 version = "0.1.0"
 description = "Modèles et configuration SQLAlchemy partagés du cycle de vie des jobs"
 license = "EUPL-1.2"

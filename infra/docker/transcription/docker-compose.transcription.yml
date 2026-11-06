@@ -1,4 +1,4 @@
-name: ${COMPOSE_PROJECT_NAME:-gta-transcription}
+name: ${COMPOSE_PROJECT_NAME:-mevo2glpi-transcription}
 
 x-inference-runtime: &inference-runtime
   init: true
@@ -28,7 +28,7 @@ services:
         VCS_REF: ${APP_COMMIT_SHA:?Set APP_COMMIT_SHA to the deployed full Git SHA}
         PARAKEET_ULTRA_MODEL_URL: ${PARAKEET_ULTRA_MODEL_URL:-https://huggingface.co/handy-computer/parakeet-ultra-gguf/resolve/a1539be1b849ea7463b88343e5277b373d0c4ea9/parakeet-ultra-Q8_0.gguf}
         PARAKEET_ULTRA_MODEL_SHA256: ${PARAKEET_ULTRA_MODEL_SHA256:-007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59}
-    image: glpi-ticketing-transcription-api:parakeet-ultra-q8
+    image: mevo2glpi-transcription-api:parakeet-ultra-q8
     pull_policy: build
     environment:
       TRANSCRIPTION_API_KEY: ${TRANSCRIPTION_API_KEY:?Set TRANSCRIPTION_API_KEY}
@@ -61,10 +61,10 @@ services:
     networks:
       transcription:
         aliases:
-          - ${TRANSCRIPTION_NETWORK_ALIAS:-gta-transcription}
+          - ${TRANSCRIPTION_NETWORK_ALIAS:-mevo2glpi-transcription}
     stop_grace_period: 45s
 
 networks:
   transcription:
-    name: ${TRANSCRIPTION_NETWORK_NAME:-gta-transcription-network}
+    name: ${TRANSCRIPTION_NETWORK_NAME:-mevo2glpi-transcription-network}
     external: true

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from glpi_ticketing_worker_automation.worker import BlockedOutcome
+from mevo2glpi_worker_automation.worker import BlockedOutcome
 
 from ._pipeline_fakes import (
     SYNTHETIC_AUDIO,

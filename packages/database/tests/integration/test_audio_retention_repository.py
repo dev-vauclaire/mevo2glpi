@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioExtension,
     AudioRetentionRepository,
     AudioRetentionSnapshot,

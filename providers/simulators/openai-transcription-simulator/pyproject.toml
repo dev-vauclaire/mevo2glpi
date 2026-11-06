@@ -1,5 +1,5 @@
 [project]
-name = "glpi-ticketing-openai-transcription-simulator"
+name = "mevo2glpi-openai-transcription-simulator"
 version = "0.1.0"
 description = "Simulateur de transcription synchrone compatible OpenAI"
 license = "EUPL-1.2"
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-glpi-ticketing-openai-transcription-simulator = "glpi_ticketing_openai_transcription_simulator.application:main"
+mevo2glpi-openai-transcription-simulator = "mevo2glpi_openai_transcription_simulator.application:main"
 
 [build-system]
 requires = ["uv_build>=0.10.11,<0.11.0"]

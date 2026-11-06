@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from glpi_ticketing_common.release_identity import DeploymentEnvironment
-from glpi_ticketing_web.settings import WebSettings
+from mevo2glpi_common.release_identity import DeploymentEnvironment
+from mevo2glpi_web.settings import WebSettings
 
 DATABASE_URL = "postgresql+psycopg://web:password@database:5432/jobs"
 

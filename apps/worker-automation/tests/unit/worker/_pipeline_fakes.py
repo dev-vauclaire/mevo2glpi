@@ -11,19 +11,19 @@ from pathlib import Path
 from types import TracebackType
 from uuid import UUID
 
-from glpi_ticketing_common import OriginatingPhoneNumberCipher
-from glpi_ticketing_database import (
+from mevo2glpi_common import OriginatingPhoneNumberCipher
+from mevo2glpi_database import (
     ErrorScope,
     JobStage,
     JobStatus,
     MailIngestionDisposition,
 )
-from glpi_ticketing_glpi import GlpiTicketDefaults, TicketLevel, TicketType
-from glpi_ticketing_worker_automation.title_generation import DefaultTitleGenerator
-from glpi_ticketing_worker_automation.transcription import (
+from mevo2glpi_glpi import GlpiTicketDefaults, TicketLevel, TicketType
+from mevo2glpi_worker_automation.title_generation import DefaultTitleGenerator
+from mevo2glpi_worker_automation.transcription import (
     TranscriptionResult,
 )
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.worker import (
     AudioInspector,
     AutomationJobLifecycleService,
     AutomationWorker,

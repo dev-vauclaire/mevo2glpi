@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import Engine, Table, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioRetention,
     JobEventType,
     TicketCreationJob,

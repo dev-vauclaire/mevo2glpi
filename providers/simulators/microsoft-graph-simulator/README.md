@@ -23,13 +23,13 @@ scénarios intégrés décrits dans la procédure locale.
 Depuis le conteneur :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
-glpi-ticketing-microsoft-graph-simulator-admin seed-suite
-glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
-glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
-glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav-mulaw
-glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
-glpi-ticketing-microsoft-graph-simulator-admin reset
+mevo2glpi-microsoft-graph-simulator-admin list-scenarios
+mevo2glpi-microsoft-graph-simulator-admin seed-suite
+mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-wav
+mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-ogg
+mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-wav-mulaw
+mevo2glpi-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
+mevo2glpi-microsoft-graph-simulator-admin reset
 ```
 
 `seed-suite` injecte une fois chaque scénario dans l'ordre du catalogue et

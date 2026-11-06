@@ -8,8 +8,8 @@ from time import monotonic
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from glpi_ticketing_web.application import build_server
-from glpi_ticketing_web.settings import WebSettings
+from mevo2glpi_web.application import build_server
+from mevo2glpi_web.settings import WebSettings
 
 STARTUP_TIMEOUT_SECONDS = 5.0
 SHUTDOWN_TIMEOUT_SECONDS = 5.0

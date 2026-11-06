@@ -5,8 +5,8 @@ from uuid import UUID
 
 import pytest
 
-import glpi_ticketing_web.services.observability.queries as query_module
-from glpi_ticketing_database import (
+import mevo2glpi_web.services.observability.queries as query_module
+from mevo2glpi_database import (
     AlertAggregate,
     JobAlertSummary,
     RetentionAlertSummary,
@@ -14,7 +14,7 @@ from glpi_ticketing_database import (
     WorkerRuntimeState,
     WorkerServiceName,
 )
-from glpi_ticketing_web.services import (
+from mevo2glpi_web.services import (
     GetObservability,
     ObservabilityThresholds,
     ObservabilityUnavailableError,

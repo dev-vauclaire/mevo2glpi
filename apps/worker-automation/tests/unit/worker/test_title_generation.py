@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from glpi_ticketing_worker_automation.title_generation import DefaultTitleGenerator
-from glpi_ticketing_worker_automation.worker import CompletedOutcome
+from mevo2glpi_worker_automation.title_generation import DefaultTitleGenerator
+from mevo2glpi_worker_automation.worker import CompletedOutcome
 
 from ._pipeline_fakes import (
     TRANSCRIPTION,

@@ -1,5 +1,5 @@
 [project]
-name = "glpi-ticketing-common"
+name = "mevo2glpi-common"
 version = "0.1.0"
 description = "Primitives partagées par les applications web et worker"
 license = "EUPL-1.2"

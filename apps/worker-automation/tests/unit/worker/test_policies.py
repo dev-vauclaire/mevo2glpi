@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.worker import (
     RetentionSchedulePolicy,
     RetryBackoffPolicy,
 )

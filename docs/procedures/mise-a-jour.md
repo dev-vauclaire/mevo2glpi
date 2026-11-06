@@ -129,11 +129,6 @@ Dans chaque projet concerné :
 3. ne modifier aucun secret ni aucune autre variable sans nécessité ;
 4. enregistrer la configuration avant de lancer le déploiement.
 
-Sur une installation existante, **Applications (mevo2glpi)** peut encore
-porter le libellé historique **Applications (GTA)** dans Dokploy. Ce nom
-d'affichage n'a pas besoin d'être modifié et ne change ni
-`COMPOSE_PROJECT_NAME` ni les ressources Docker existantes.
-
 Dans **Transcription** et **Applications (mevo2glpi)**, renseigner également :
 
 - `APP_RELEASE` avec `main` ou le tag ;

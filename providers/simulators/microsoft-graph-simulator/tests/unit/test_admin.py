@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from glpi_ticketing_microsoft_graph_simulator import admin
-from glpi_ticketing_microsoft_graph_simulator.audio import SyntheticAudioExtension
-from glpi_ticketing_microsoft_graph_simulator.scenarios import SeedScenario
+from mevo2glpi_microsoft_graph_simulator import admin
+from mevo2glpi_microsoft_graph_simulator.audio import SyntheticAudioExtension
+from mevo2glpi_microsoft_graph_simulator.scenarios import SeedScenario
 
 ADMIN_TOKEN = "synthetic-admin-token"
 

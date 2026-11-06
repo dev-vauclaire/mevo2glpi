@@ -122,12 +122,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from glpi_ticketing_common.audio_files import (
+from mevo2glpi_common.audio_files import (
     build_audio_storage_key,
     delete_audio,
     publish_audio,
 )
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioExtension,
     DiscoveredMail,
     JobEventActor,

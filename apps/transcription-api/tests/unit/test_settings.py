@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from glpi_ticketing_transcription_api.settings import TranscriptionSettings
+from mevo2glpi_transcription_api.settings import TranscriptionSettings
 
 API_KEY = "synthetic-transcription-key"
 

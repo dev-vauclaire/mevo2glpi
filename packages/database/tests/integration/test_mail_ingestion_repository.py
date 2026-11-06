@@ -7,8 +7,8 @@ import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.exc import IntegrityError
 
-from glpi_ticketing_database import create_session_factory
-from glpi_ticketing_database.models import (
+from mevo2glpi_database import create_session_factory
+from mevo2glpi_database.models import (
     AudioExtension,
     MailIngestion,
     MailIngestionDisposition,
@@ -16,7 +16,7 @@ from glpi_ticketing_database.models import (
     MailIngestionStage,
     MailIngestionStatus,
 )
-from glpi_ticketing_database.repositories import (
+from mevo2glpi_database.repositories import (
     DiscoveredMail,
     MailIngestionReplayFilter,
     MailIngestionRepository,

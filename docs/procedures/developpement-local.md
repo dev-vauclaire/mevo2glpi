@@ -48,17 +48,17 @@ docker compose --file infra/docker/development/docker-compose.postgres.yml up --
 ```
 
 PostgreSQL écoute uniquement sur `127.0.0.1:5432`. Si ce port est déjà utilisé,
-adapter ensemble `GTA_DEV_POSTGRES_PORT` dans l'environnement de la commande et
-le port de `DATABASE_URL` dans `.env`.
+adapter ensemble `MEVO2GLPI_DEV_POSTGRES_PORT` dans l'environnement de la
+commande et le port de `DATABASE_URL` dans `.env`.
 
 PostgreSQL 18 monte son volume sur `/var/lib/postgresql`. Le volume nommé
-`gta-development-postgres18-data` ne doit pas être remplacé par un ancien volume
-PostgreSQL 16 ou 17 sans migration explicite.
+`mevo2glpi-development-postgres18-data` ne doit pas être remplacé par un
+ancien volume PostgreSQL 16 ou 17 sans migration explicite.
 
 Exécuter ensuite la migration one-shot :
 
 ```bash
-uv run --package glpi-ticketing-database-migrations glpi-ticketing-database-migrations
+uv run --package mevo2glpi-database-migrations mevo2glpi-database-migrations
 ```
 
 La commande doit terminer avec le code `0` avant le lancement des applications.
@@ -89,7 +89,8 @@ Les services sont accessibles uniquement depuis la machine locale :
 | GLPI 11.0.7 | `http://127.0.0.1:18083` | API et interface de test |
 
 MySQL GLPI n'est jamais publié sur l'hôte. Les quatre ports HTTP peuvent être
-modifiés avec les variables `GTA_DEV_*_PORT` documentées dans `.env.example` ;
+modifiés avec les variables `MEVO2GLPI_DEV_*_PORT` documentées dans
+`.env.example` ;
 les URLs applicatives de `.env` doivent alors être adaptées.
 
 Vérifier les services :
@@ -113,13 +114,13 @@ Reporter la valeur JSON `id` dans `GLPI_TICKET_REQUEST_SOURCE_ID` du fichier
 Injecter un message audio synthétique dans la boîte Graph :
 
 ```bash
-docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml exec microsoft-graph-simulator glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml exec microsoft-graph-simulator mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-wav
 ```
 
 La liste des scénarios est disponible avec :
 
 ```bash
-docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml exec microsoft-graph-simulator glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml exec microsoft-graph-simulator mevo2glpi-microsoft-graph-simulator-admin list-scenarios
 ```
 
 ## Choisir le provider de transcription
@@ -156,10 +157,10 @@ script console déclaré par ce membre ; son nom peut donc différer de celui du
 package.
 
 ```bash
-uv run --package glpi-ticketing-web glpi-ticketing-web
-uv run --package glpi-ticketing-worker-publisher glpi-ticketing-publisher
-uv run --package glpi-ticketing-worker-automation glpi-ticketing-worker
-uv run --package glpi-ticketing-worker-retention glpi-ticketing-worker-retention
+uv run --package mevo2glpi-web mevo2glpi-web
+uv run --package mevo2glpi-worker-publisher mevo2glpi-worker-publisher
+uv run --package mevo2glpi-worker-automation mevo2glpi-worker-automation
+uv run --package mevo2glpi-worker-retention mevo2glpi-worker-retention
 ```
 
 Vérifier le web :

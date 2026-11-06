@@ -8,24 +8,24 @@ from uuid import UUID
 import pytest
 from pydantic import SecretStr
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     MailIngestionDisposition,
     MailIngestionStatus,
     WorkerServiceName,
 )
-from glpi_ticketing_worker_publisher.replay.application import (
+from mevo2glpi_worker_publisher.replay.application import (
     ReplayAlreadyRunningError,
     ReplayExitCode,
     parse_replay_request,
     run_cli,
     run_replay_application,
 )
-from glpi_ticketing_worker_publisher.replay.models import (
+from mevo2glpi_worker_publisher.replay.models import (
     ReplayMode,
     ReplayReport,
     ReplayRequest,
 )
-from glpi_ticketing_worker_publisher.replay.settings import ReplaySettings
+from mevo2glpi_worker_publisher.replay.settings import ReplaySettings
 
 INGESTION_UUID = UUID("00000000-0000-0000-0000-000000000203")
 SECRET = "never-log-replay-secret"

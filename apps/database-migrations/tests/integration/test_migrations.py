@@ -13,7 +13,7 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import CheckConstraint, Engine, MetaData, Table, inspect, select, text
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     AudioRetention,
     Base,
     TicketCreationJob,
@@ -21,13 +21,13 @@ from glpi_ticketing_database import (
     WorkerRuntimeStatus,
     create_database_engine,
 )
-from glpi_ticketing_database_migrations.application import (
+from mevo2glpi_database_migrations.application import (
     MigrationExitCode,
     build_alembic_config,
     run_cli,
     upgrade_to_head,
 )
-from glpi_ticketing_database_migrations.settings import MigrationSettings
+from mevo2glpi_database_migrations.settings import MigrationSettings
 
 pytestmark = pytest.mark.database
 

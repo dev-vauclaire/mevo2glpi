@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from glpi_ticketing_database import MailIngestionErrorScope
-from glpi_ticketing_worker_publisher.publisher import (
+from mevo2glpi_database import MailIngestionErrorScope
+from mevo2glpi_worker_publisher.publisher import (
     DiscoveryRetryOutcome,
     IdleOutcome,
     PublisherFailure,

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from glpi_ticketing_transcription_api.audio import (
+from mevo2glpi_transcription_api.audio import (
     AudioDurationExceeded,
     AudioNormalizationError,
     FFmpegNormalizer,

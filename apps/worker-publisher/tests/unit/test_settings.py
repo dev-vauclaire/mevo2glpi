@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-import glpi_ticketing_worker_publisher.settings as settings_module
-from glpi_ticketing_common import DeploymentEnvironment
-from glpi_ticketing_worker_publisher.settings import (
+import mevo2glpi_worker_publisher.settings as settings_module
+from mevo2glpi_common import DeploymentEnvironment
+from mevo2glpi_worker_publisher.settings import (
     MAX_ATTACHMENT_BYTES,
     OFFICIAL_GRAPH_BASE_URL,
     PublisherGraphAuthMode,
@@ -53,7 +53,7 @@ def publisher_environment(
         "PUBLISHER_MAILBOX_ID": "00000000-0000-4000-8000-000000000003",
         "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH": str(private_key),
         "PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH": str(certificate),
-        "DATABASE_URL": "postgresql+psycopg://gta:synthetic@db/gta",
+        "DATABASE_URL": ("postgresql+psycopg://mevo2glpi:synthetic@db/mevo2glpi"),
         "ORIGINATING_PHONE_NUMBER_KEY_PATH": str(originating_phone_number_key),
     }
     for name, value in values.items():
@@ -161,7 +161,7 @@ def test_pem_paths_must_be_distinct(
         PublisherSettings()
 
 
-@pytest.mark.parametrize("database_url", ["invalid", "postgresql://db/gta"])
+@pytest.mark.parametrize("database_url", ["invalid", "postgresql://db/mevo2glpi"])
 def test_database_url_requires_the_synchronous_psycopg_driver(
     publisher_environment: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,

@@ -10,12 +10,12 @@ from uuid import UUID
 import httpx
 import pytest
 
-import glpi_ticketing_worker_retention.composition as composition_module
-from glpi_ticketing_worker_retention.composition import (
+import mevo2glpi_worker_retention.composition as composition_module
+from mevo2glpi_worker_retention.composition import (
     RetentionWorkerConfigurationError,
     build_retention_worker,
 )
-from glpi_ticketing_worker_retention.settings import RetentionWorkerSettings
+from mevo2glpi_worker_retention.settings import RetentionWorkerSettings
 
 
 def test_build_retention_worker_wires_policies_adapters_and_fencing(

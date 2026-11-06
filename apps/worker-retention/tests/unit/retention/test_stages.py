@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from glpi_ticketing_common.audio_purge import (
+from mevo2glpi_common.audio_purge import (
     AudioPurgeDisposition,
     AudioPurgeErrorCode,
     AudioPurgeFilesystemError,
     AudioPurgeResult,
 )
-from glpi_ticketing_database import ErrorScope
-from glpi_ticketing_glpi import (
+from mevo2glpi_database import ErrorScope
+from mevo2glpi_glpi import (
     GlpiErrorCategory,
     GlpiHttpError,
     GlpiOperation,
@@ -19,7 +19,7 @@ from glpi_ticketing_glpi import (
     GlpiTransportError,
     TicketStatus,
 )
-from glpi_ticketing_worker_retention.retention.stages import (
+from mevo2glpi_worker_retention.retention.stages import (
     CrashSafeAudioPurger,
     GlpiCheckFailure,
     GlpiCheckFailureDisposition,

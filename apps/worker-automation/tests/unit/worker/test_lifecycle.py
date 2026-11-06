@@ -8,8 +8,8 @@ from uuid import UUID
 import pytest
 from sqlalchemy.orm import Session
 
-from glpi_ticketing_common import OriginatingPhoneNumberCipher
-from glpi_ticketing_database import (
+from mevo2glpi_common import OriginatingPhoneNumberCipher
+from mevo2glpi_database import (
     AudioExtension,
     ErrorScope,
     JobAcquisition,
@@ -22,7 +22,7 @@ from glpi_ticketing_database import (
     MailIngestionDisposition,
     RetentionPolicy,
 )
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.worker import (
     AutomationJobAcquisition,
     AutomationJobLifecycleService,
 )

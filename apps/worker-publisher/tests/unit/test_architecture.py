@@ -6,17 +6,17 @@ import ast
 from pathlib import Path
 
 PACKAGE_ROOT = (
-    Path(__file__).resolve().parents[2] / "src" / "glpi_ticketing_worker_publisher"
+    Path(__file__).resolve().parents[2] / "src" / "mevo2glpi_worker_publisher"
 )
 GRAPH_ROOT = PACKAGE_ROOT / "graph"
 
 _FORBIDDEN_GRAPH_DEPENDENCIES = {
-    "glpi_ticketing_common",
-    "glpi_ticketing_database",
-    "glpi_ticketing_glpi",
-    "glpi_ticketing_web",
-    "glpi_ticketing_worker_automation",
-    "glpi_ticketing_worker_retention",
+    "mevo2glpi_common",
+    "mevo2glpi_database",
+    "mevo2glpi_glpi",
+    "mevo2glpi_web",
+    "mevo2glpi_worker_automation",
+    "mevo2glpi_worker_retention",
     "sqlalchemy",
 }
 

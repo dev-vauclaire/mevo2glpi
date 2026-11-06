@@ -153,8 +153,7 @@ Les déploiements Dokploy sont séparés :
    bootstrap idempotent.
 
 PostgreSQL reste déployé séparément comme une application **Database** dans
-Dokploy ; la transition conserve cette base et son volume existants. Il ne
-constitue pas un projet Docker Compose supplémentaire.
+Dokploy. Il ne constitue pas un projet Docker Compose supplémentaire.
 
 Les contrats techniques restent décrits dans les README des
 [providers de test](../../infra/docker/providers/README.md), du
@@ -380,9 +379,7 @@ sudo docker network inspect --format '{{.Name}} {{.Driver}} {{.Internal}}' mevo2
 
 Les réseaux simulateurs et transcription doivent indiquer `bridge true`. Le
 réseau de base de données doit indiquer `bridge false`, car la sortie réseau
-des workers ne dépend pas de ce réseau. Pendant la transition, conserver les
-anciens réseaux `gta-staging-*` : ne jamais renommer ni supprimer en place un
-réseau utilisé par un conteneur.
+des workers ne dépend pas de ce réseau.
 
 Préparer le répertoire d'audios fictifs avant de déployer les simulateurs. Son
 existence est obligatoire, même s'il reste vide. Le groupe `10001` correspond
@@ -391,184 +388,6 @@ au groupe non privilégié des conteneurs :
 ```bash
 sudo install -d -o root -g 10001 -m 0750 /srv/mevo2glpi-staging/audio-fixtures
 ```
-
-### Migrer hors ligne le volume audio existant
-
-Cette section s'applique à la transition d'un staging existant. La base
-PostgreSQL applicative, son utilisateur, son nom de base et son volume sont
-conservés sans modification. Seuls son rattachement au nouveau réseau et le
-nom du volume audio partagé changent.
-
-Changer directement `AUDIO_VOLUME_NAME` ferait démarrer mevo2glpi avec un
-volume vide alors que PostgreSQL contient encore les `storage_key` existantes.
-La copie doit donc être réalisée hors ligne.
-
-Avant la fenêtre de maintenance :
-
-1. vérifier dans le dashboard qu'aucun job n'est `pending` ou `processing` ;
-2. relever le SHA déployé, le nom de la base et les noms exacts des deux
-   volumes ;
-3. conserver la configuration Dokploy historique permettant de redéployer
-   `gta-staging-audio-data` ;
-4. arrêter successivement `worker-publisher`, `worker-automation`, puis
-   `worker-retention` ;
-5. vérifier que le one-shot `database-migrations` n'est pas en cours ;
-6. laisser provisoirement `web` actif uniquement pour le contrôle suivant.
-
-Une fois les trois workers arrêtés, exécuter ce contrôle depuis le terminal
-Dokploy du service `web`. Il compare PostgreSQL au volume actuellement monté
-sans afficher de clé de stockage. Les audios dont la suppression est déjà
-engagée ou terminée sont exclus du contrôle :
-
-```bash
-python - <<'PY'
-import os
-from pathlib import Path
-
-from sqlalchemy import create_engine, text
-
-
-audio_root = Path(os.environ["AUDIO_ROOT"])
-engine = create_engine(os.environ["DATABASE_URL"])
-expected_files = 0
-missing_files = 0
-with engine.connect() as connection:
-    storage_keys = connection.execute(
-        text(
-            """
-            SELECT job.storage_key
-            FROM ticket_creation_jobs AS job
-            LEFT JOIN audio_retentions AS retention
-                ON retention.job_uuid = job.uuid
-            WHERE retention.status IS NULL
-               OR retention.status NOT IN ('deleting', 'deleted')
-            """
-        )
-    ).scalars()
-    for storage_key in storage_keys:
-        expected_files += 1
-        missing_files += int(not (audio_root / storage_key).is_file())
-engine.dispose()
-print(f"expected_files={expected_files} missing_files={missing_files}")
-raise SystemExit(1 if missing_files else 0)
-PY
-```
-
-Le résultat attendu contient `missing_files=0`. Un autre résultat signale une
-incohérence antérieure à la migration : ne pas effectuer la copie avant de
-l'avoir analysée. Après un contrôle réussi, arrêter également `web`.
-
-Dans une même session shell sur la VM, renseigner les noms effectivement
-relevés. Ils ne contiennent aucun secret :
-
-```bash
-export SOURCE_AUDIO_VOLUME=gta-staging-audio-data
-export TARGET_AUDIO_VOLUME=mevo2glpi-staging-audio-data
-```
-
-Confirmer qu'aucun conteneur en cours d'exécution n'utilise encore le volume
-source. La commande suivante doit produire une sortie vide :
-
-```bash
-sudo docker ps --filter "volume=${SOURCE_AUDIO_VOLUME}" --format '{{.ID}} {{.Names}}'
-```
-
-Contrôler le volume source, puis créer la cible sans supprimer la source :
-
-```bash
-sudo docker volume inspect "${SOURCE_AUDIO_VOLUME}" >/dev/null
-sudo docker volume create "${TARGET_AUDIO_VOLUME}"
-sudo docker volume inspect "${TARGET_AUDIO_VOLUME}" >/dev/null
-```
-
-La première commande doit réussir. Dans le cas contraire, arrêter
-immédiatement : un montage Docker par nom pourrait créer implicitement un
-volume source vide.
-
-La cible doit être vide. Un code de sortie non nul impose d'arrêter la
-procédure et d'identifier son contenu :
-
-```bash
-sudo docker volume inspect "${TARGET_AUDIO_VOLUME}" >/dev/null && sudo docker run --rm --network none --read-only --cap-drop ALL --mount "type=volume,src=${TARGET_AUDIO_VOLUME},dst=/target,readonly" python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 python -c 'import os, sys; sys.exit(0 if not os.listdir("/target") else 1)'
-```
-
-Cette image utilitaire et son digest sont déjà épinglés dans les Dockerfiles du
-dépôt. Copier les fichiers et leurs métadonnées avec le volume source monté en
-lecture seule :
-
-```bash
-sudo docker volume inspect "${SOURCE_AUDIO_VOLUME}" >/dev/null && sudo docker volume inspect "${TARGET_AUDIO_VOLUME}" >/dev/null && sudo docker run --rm --network none --read-only --mount "type=volume,src=${SOURCE_AUDIO_VOLUME},dst=/source,readonly" --mount "type=volume,src=${TARGET_AUDIO_VOLUME},dst=/target" python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 sh -c 'cp -a /source/. /target/'
-```
-
-Comparer ensuite les inventaires. Le contrôle ne révèle aucun nom de fichier :
-il affiche uniquement le nombre de fichiers, leur taille totale et une
-empreinte calculée à partir des chemins relatifs, des permissions, des
-propriétaires et du contenu. Les deux lignes JSON doivent avoir les mêmes
-valeurs `files`, `bytes` et `sha256`.
-
-```bash
-sudo docker volume inspect "${SOURCE_AUDIO_VOLUME}" >/dev/null && sudo docker volume inspect "${TARGET_AUDIO_VOLUME}" >/dev/null && sudo docker run --rm -i --network none --read-only --cap-drop ALL --mount "type=volume,src=${SOURCE_AUDIO_VOLUME},dst=/source,readonly" --mount "type=volume,src=${TARGET_AUDIO_VOLUME},dst=/target,readonly" python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 python - /source /target <<'PY'
-import hashlib
-import json
-import os
-import sys
-
-
-def inventory(root: str) -> dict[str, object]:
-    digest = hashlib.sha256()
-    file_count = 0
-    total_bytes = 0
-    for directory, directories, filenames in os.walk(root):
-        directories.sort()
-        for directory_name in directories:
-            path = os.path.join(directory, directory_name)
-            if os.path.islink(path) or not os.path.isdir(path):
-                raise RuntimeError("unsupported filesystem entry")
-            relative_path = os.path.relpath(path, root).encode()
-            directory_stat = os.stat(path, follow_symlinks=False)
-            digest.update(b"D")
-            digest.update(len(relative_path).to_bytes(8, "big"))
-            digest.update(relative_path)
-            digest.update((directory_stat.st_mode & 0o7777).to_bytes(4, "big"))
-            digest.update(directory_stat.st_uid.to_bytes(8, "big"))
-            digest.update(directory_stat.st_gid.to_bytes(8, "big"))
-        for filename in sorted(filenames):
-            path = os.path.join(directory, filename)
-            if os.path.islink(path) or not os.path.isfile(path):
-                raise RuntimeError("unsupported filesystem entry")
-            relative_path = os.path.relpath(path, root).encode()
-            file_stat = os.stat(path, follow_symlinks=False)
-            digest.update(b"F")
-            digest.update(len(relative_path).to_bytes(8, "big"))
-            digest.update(relative_path)
-            digest.update(file_stat.st_size.to_bytes(8, "big"))
-            digest.update((file_stat.st_mode & 0o7777).to_bytes(4, "big"))
-            digest.update(file_stat.st_uid.to_bytes(8, "big"))
-            digest.update(file_stat.st_gid.to_bytes(8, "big"))
-            with open(path, "rb") as audio_file:
-                while chunk := audio_file.read(1024 * 1024):
-                    digest.update(chunk)
-            total_bytes += file_stat.st_size
-            file_count += 1
-    return {"files": file_count, "bytes": total_bytes, "sha256": digest.hexdigest()}
-
-
-for volume_root in sys.argv[1:]:
-    print(json.dumps(inventory(volume_root), sort_keys=True))
-PY
-```
-
-Ne configurer `AUDIO_VOLUME_NAME=mevo2glpi-staging-audio-data` qu'après cette
-vérification. L'ancien volume `gta-staging-audio-data` est conservé intact et
-ne doit être supprimé ni pendant la migration, ni avant la validation
-fonctionnelle complète et l'expiration de la fenêtre de retour arrière.
-
-En cas d'échec avant toute nouvelle ingestion, arrêter les nouveaux services
-et redéployer l'ancienne configuration avec le volume source. Si de nouveaux
-jobs ont déjà été acceptés, ne pas basculer aveuglément : la base conservée
-peut référencer des audios présents uniquement dans le nouveau volume. Arrêter
-les writers et réaliser une réconciliation explicite ou restaurer ensemble un
-état PostgreSQL et audio cohérent.
 
 ## Porte de validation 1 — Socle VM
 
@@ -600,8 +419,8 @@ sans enregistrer de secret.
 ### Créer la GitHub App
 
 Dans Dokploy, ouvrir **Git**, choisir GitHub, puis utiliser **Create GitHub
-App**. Installer l'application uniquement sur le dépôt
-`glpi-ticketing-automation`, et non sur tous les dépôts de l'organisation.
+App**. Installer l'application uniquement sur le dépôt `mevo2glpi`, et non sur
+tous les dépôts de l'organisation.
 
 Suivre la
 [procédure GitHub officielle de Dokploy](https://docs.dokploy.com/docs/core/github).
@@ -618,35 +437,32 @@ Vérifier que Dokploy peut :
 La GitHub App doit être révoquée ou renouvelée si la VM est compromise ou si
 elle n'est plus utilisée.
 
-### Conserver le service PostgreSQL de staging
+### Créer le service PostgreSQL de staging
 
-La transition conserve l'application **Database** PostgreSQL existante, son
-volume, sa base, son rôle et ses identifiants. Rattacher son service à
-`mevo2glpi-staging-database-network` en plus du réseau historique pendant la
-fenêtre de retour arrière. Aucun domaine ni port public ne doit lui être
-associé.
+Créer PostgreSQL comme une application **Database** dans Dokploy, puis
+rattacher son service à `mevo2glpi-staging-database-network`. Aucun domaine ni
+port public ne doit lui être associé.
 
 La configuration se limite aux opérations suivantes :
 
-1. conserver l'application Database et ses données sans la recréer ;
-2. la rattacher à `mevo2glpi-staging-database-network` tout en gardant
-   temporairement l'ancien rattachement ;
-3. conserver dans `DATABASE_URL` le nom de base, le rôle et le mot de passe
-   existants ; seul le nom DNS interne change si l'alias réseau change ;
-4. vérifier la connexion depuis `database-migrations` avant de détacher
-   l'ancien réseau.
+1. créer l'application Database PostgreSQL dans Dokploy ;
+2. la rattacher à `mevo2glpi-staging-database-network` ;
+3. reporter les paramètres de connexion internes fournis par Dokploy dans
+   `DATABASE_URL` ;
+4. vérifier la connexion depuis `database-migrations` avant de lancer les
+   services persistants.
 
 Après le rattachement, valider depuis un conteneur jetable que l'alias utilisé
 dans `DATABASE_URL` est résolu et que PostgreSQL écoute. Cette commande ne
 transmet aucun identifiant :
 
 ```bash
-sudo docker run --rm --network mevo2glpi-staging-database-network --read-only --cap-drop ALL --security-opt no-new-privileges:true python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 python -c 'import socket; connection = socket.create_connection(("postgres-staging", 5432), timeout=5); connection.close(); print("PostgreSQL DNS/TCP OK")'
+sudo docker run --rm --network mevo2glpi-staging-database-network --read-only --cap-drop ALL --security-opt no-new-privileges:true python:3.12.14-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 python -c 'import socket; connection = socket.create_connection(("NOM_INTERNE_POSTGRES_STAGING", 5432), timeout=5); connection.close(); print("PostgreSQL DNS/TCP OK")'
 ```
 
-Si l'alias fourni par Dokploy n'est pas `postgres-staging`, reporter son vrai
-nom dans `DATABASE_URL` avant le déploiement. Ne pas modifier les autres
-composants de l'URL.
+Remplacer `NOM_INTERNE_POSTGRES_STAGING` par le nom ou l'alias réellement
+attribué par Dokploy, puis reporter cette même valeur dans `DATABASE_URL`. Ne
+pas modifier les autres composants de l'URL.
 
 ### Créer les projets et applications
 
@@ -742,10 +558,6 @@ Pour Microsoft Graph, ajouter également le bind mount en lecture seule :
 /srv/mevo2glpi-staging/audio-fixtures:/fixtures/audio:ro
 ```
 
-Ne pas déployer simultanément les anciennes applications Dockerfile
-individuelles : elles utiliseraient les mêmes alias DNS et dupliqueraient l'état
-simulé.
-
 ### Configurer le GLPI de staging optionnel
 
 Ignorer cette section lorsqu'une instance GLPI de test existante est
@@ -787,24 +599,7 @@ fichiers à déployer. Copier leur contenu dans l'onglet **Environment** du
 projet ou de l'application Dokploy correspondant, puis remplacer tous les
 placeholders.
 
-La base applicative conservée peut contenir des numéros d'origine chiffrés.
-La transition doit donc réutiliser **exactement la même clé** que l'ancien
-déploiement. Copier le fichier sans jamais afficher son contenu, puis vérifier
-que les deux fichiers sont identiques :
-
-```bash
-sudo install -d -o root -g 10001 -m 0750 /etc/mevo2glpi/secrets
-sudo install -o root -g 10001 -m 0640 /etc/gta/secrets/staging-originating-phone-number.key /etc/mevo2glpi/secrets/staging-originating-phone-number.key
-sudo cmp --silent /etc/gta/secrets/staging-originating-phone-number.key /etc/mevo2glpi/secrets/staging-originating-phone-number.key
-```
-
-La dernière commande doit terminer avec le code `0`. Conserver l'ancien
-fichier pendant toute la fenêtre de retour arrière. Une nouvelle clé rendrait
-les valeurs déjà chiffrées illisibles et ne doit donc pas être générée pendant
-cette migration.
-
-Pour une installation neuve uniquement, créer une clé synthétique propre au
-staging :
+Créer une clé synthétique propre au staging :
 
 ```bash
 sudo install -d -o root -g 10001 -m 0750 /etc/mevo2glpi/secrets
@@ -828,7 +623,7 @@ Contrôler les invariants suivants :
 - `TRANSCRIPTION_NETWORK_NAME=mevo2glpi-staging-transcription-network` ;
 - `TRANSCRIPTION_NETWORK_ALIAS=mevo2glpi-staging-transcription` ;
 - `DATABASE_NETWORK_NAME=mevo2glpi-staging-database-network` ;
-- `AUDIO_VOLUME_NAME=mevo2glpi-staging-audio-data` après la copie hors ligne ;
+- `AUDIO_VOLUME_NAME=mevo2glpi-staging-audio-data` ;
 - `TRANSCRIPTION_API_KEY` est identique dans les projets transcription et
   applications ;
 - `TRANSCRIBE_AI_SIMULATOR_API_KEY` est identique dans le service Transcribe AI
@@ -889,13 +684,13 @@ Déployer le projet Compose Simulateurs, qui contient
 Dans le terminal du mock Microsoft Graph :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
+mevo2glpi-microsoft-graph-simulator-admin list-scenarios
 ```
 
 Dans le terminal du mock Transcribe AI :
 
 ```bash
-glpi-ticketing-transcribe-ai-simulator-smoke
+mevo2glpi-transcribe-ai-simulator-smoke
 ```
 
 Dans le terminal du mock OpenAI-compatible :
@@ -964,7 +759,7 @@ La recette fonctionnelle peut commencer uniquement lorsque :
 Depuis le terminal du mock Microsoft Graph, injecter un WAV fictif :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-wav
+mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-wav
 ```
 
 Contrôler successivement :
@@ -980,7 +775,7 @@ Contrôler successivement :
 Rejouer le parcours avec OGG :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
+mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-ogg
 ```
 
 ### Rejets contrôlés
@@ -988,7 +783,7 @@ glpi-ticketing-microsoft-graph-simulator-admin seed --scenario valid-ogg
 Lister les scénarios :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin list-scenarios
+mevo2glpi-microsoft-graph-simulator-admin list-scenarios
 ```
 
 Au minimum, vérifier qu'un message sans audio, avec plusieurs audios, avec un
@@ -1000,7 +795,7 @@ son motif expurgé est persisté et que le publisher poursuit le traitement.
 Pour injecter une fois chacun des scénarios déterministes :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin seed-suite
+mevo2glpi-microsoft-graph-simulator-admin seed-suite
 ```
 
 La commande affiche un manifeste JSON avec le scénario, le `message_id`, les
@@ -1024,7 +819,7 @@ sudo install -o root -g 10001 -m 0640 ./test-vocal.wav /srv/mevo2glpi-staging/au
 Puis l'injecter depuis le terminal du mock :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
+mevo2glpi-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
 ```
 
 Cette recette qualifie la transcription en français de messages courts ou
@@ -1073,7 +868,7 @@ Limites connues :
 Réinitialiser uniquement la boîte synthétique avec :
 
 ```bash
-glpi-ticketing-microsoft-graph-simulator-admin reset
+mevo2glpi-microsoft-graph-simulator-admin reset
 ```
 
 Cette commande ne supprime pas les fixtures de la VM. Retirer manuellement les

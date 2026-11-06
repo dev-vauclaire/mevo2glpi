@@ -1,6 +1,6 @@
-# Package `glpi-ticketing-database`
+# Package `mevo2glpi-database`
 
-`glpi-ticketing-database` porte les contrats SQLAlchemy partagés par le web,
+`mevo2glpi-database` porte les contrats SQLAlchemy partagés par le web,
 les workers et l'application de migration du MVP. Il conserve le cycle de vie
 durable des messages Exchange sans dépendre du client Microsoft Graph ni de la
 validation WAV/OGG, qui appartiennent au worker publisher.
@@ -276,7 +276,7 @@ Une `Session` SQLAlchemy constitue l'unité de travail. Les applications ouvrent
 des transactions courtes avec la fabrique exposée :
 
 ```python
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     JobEventActor,
     JobEventType,
     TicketCreationJobEventRepository,
@@ -312,7 +312,7 @@ provider de transcription ou une attente de polling.
 L'URL doit utiliser explicitement le pilote synchrone Psycopg 3 :
 
 ```text
-postgresql+psycopg://user:password@postgres:5432/glpi_ticketing
+postgresql+psycopg://user:password@postgres:5432/mevo2glpi
 ```
 
 La fonction de création n'inclut jamais l'URL reçue dans ses erreurs de
@@ -327,7 +327,7 @@ migration le renseigne afin que chaque tentative de readiness reste bornée.
 packages/database/
 ├── pyproject.toml
 ├── README.md
-├── src/glpi_ticketing_database/
+├── src/mevo2glpi_database/
 │   ├── __init__.py
 │   ├── advisory_locks.py
 │   ├── engine.py

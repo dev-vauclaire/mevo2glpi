@@ -10,8 +10,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from glpi_ticketing_common.backoff import ExponentialBackoffPolicy
-from glpi_ticketing_database import (
+from mevo2glpi_common.backoff import ExponentialBackoffPolicy
+from mevo2glpi_database import (
     AudioExtension,
     MailIngestionAcquisition,
     MailIngestionDisposition,
@@ -20,7 +20,7 @@ from glpi_ticketing_database import (
     MailIngestionStage,
     MailIngestionStatus,
 )
-from glpi_ticketing_worker_publisher.graph import (
+from mevo2glpi_worker_publisher.graph import (
     AttachmentDownload,
     AttachmentId,
     FolderId,
@@ -34,14 +34,14 @@ from glpi_ticketing_worker_publisher.graph import (
     MessageMoveResult,
     MoveOutcome,
 )
-from glpi_ticketing_worker_publisher.publisher import (
+from mevo2glpi_worker_publisher.publisher import (
     CompletedOutcome,
     IdleOutcome,
     RejectedOutcome,
     RetryScheduledOutcome,
     SystemBlockedOutcome,
 )
-from glpi_ticketing_worker_publisher.publisher.service import PublisherWorker
+from mevo2glpi_worker_publisher.publisher.service import PublisherWorker
 
 NOW = datetime(2026, 9, 8, 8, tzinfo=UTC)
 MAILBOX_ID = UUID("10000000-0000-4000-8000-000000000001")
@@ -587,7 +587,7 @@ def test_logs_never_include_graph_identifiers_or_attachment_names(
     graph = FakeGraph(content=b"corrupt")
     caplog.set_level(
         logging.INFO,
-        logger="glpi_ticketing_worker_publisher.publisher.service",
+        logger="mevo2glpi_worker_publisher.publisher.service",
     )
 
     _worker(tmp_path, lifecycle, graph).run_once()

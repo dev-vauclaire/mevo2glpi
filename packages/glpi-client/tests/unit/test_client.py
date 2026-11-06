@@ -12,7 +12,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from glpi_ticketing_glpi import (
+from mevo2glpi_glpi import (
     GlpiClient,
     GlpiCreateOutcomeUnknownError,
     GlpiDuplicateExternalIdError,
@@ -36,7 +36,7 @@ from glpi_ticketing_glpi import (
 BASE_URL = "https://glpi.example.test"
 TOKEN_PATH = "/api.php/v2.3.0/token"
 TICKET_PATH = "/api.php/v2.3.0/Assistance/Ticket"
-USERNAME = "gta-test-user"
+USERNAME = "mevo2glpi-test-user"
 PASSWORD = "synthetic-password"
 CLIENT_ID = "synthetic-client-id"
 CLIENT_SECRET = "synthetic-client-secret"
@@ -367,7 +367,7 @@ def test_debug_transport_diagnostic_exposes_tls_metadata_without_secrets(
     client, http_client = make_glpi_client(handler)
     with (
         http_client,
-        caplog.at_level(logging.DEBUG, logger="glpi_ticketing_glpi.client"),
+        caplog.at_level(logging.DEBUG, logger="mevo2glpi_glpi.client"),
         pytest.raises(GlpiTransportError),
     ):
         client.authenticate()
@@ -401,7 +401,7 @@ def test_transport_diagnostic_is_silent_at_info(
     client, http_client = make_glpi_client(handler)
     with (
         http_client,
-        caplog.at_level(logging.INFO, logger="glpi_ticketing_glpi.client"),
+        caplog.at_level(logging.INFO, logger="mevo2glpi_glpi.client"),
         pytest.raises(GlpiTransportError),
     ):
         client.authenticate()
@@ -626,7 +626,7 @@ def test_get_ticket_classifies_transport_unavailability(
     client, http_client = make_glpi_client(handler)
     with (
         http_client,
-        caplog.at_level(logging.DEBUG, logger="glpi_ticketing_glpi.client"),
+        caplog.at_level(logging.DEBUG, logger="mevo2glpi_glpi.client"),
         pytest.raises(GlpiTransportError) as error_info,
     ):
         client.get_ticket(TicketId(73))
@@ -932,7 +932,7 @@ def test_search_transport_error_never_creates_a_ticket(
     client, http_client = make_glpi_client(handler)
     with (
         http_client,
-        caplog.at_level(logging.DEBUG, logger="glpi_ticketing_glpi.client"),
+        caplog.at_level(logging.DEBUG, logger="mevo2glpi_glpi.client"),
         pytest.raises(GlpiTransportError) as error_info,
     ):
         client.ensure_ticket(make_ticket_command())
@@ -966,7 +966,7 @@ def test_create_transport_diagnostic_identifies_the_ambiguous_operation(
     client, http_client = make_glpi_client(handler)
     with (
         http_client,
-        caplog.at_level(logging.DEBUG, logger="glpi_ticketing_glpi.client"),
+        caplog.at_level(logging.DEBUG, logger="mevo2glpi_glpi.client"),
         pytest.raises(GlpiCreateOutcomeUnknownError),
     ):
         client.ensure_ticket(make_ticket_command())

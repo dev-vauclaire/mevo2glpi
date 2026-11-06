@@ -7,8 +7,9 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from glpi_ticketing_common import (
+from mevo2glpi_common import (
     OriginatingPhoneNumberCipher,
     OriginatingPhoneNumberCipherError,
     OriginatingPhoneNumberKeyError,
@@ -39,6 +40,25 @@ def test_encrypt_uses_a_fresh_nonce() -> None:
     assert first != second
 
 
+def test_decrypt_rejects_legacy_brand_associated_data() -> None:
+    nonce = bytes(range(12))
+    legacy_associated_data = (
+        b"glpi-ticketing-automation:originating-phone-number:v1:" + INGESTION_UUID.bytes
+    )
+    legacy_encrypted = AESGCM(KEY).encrypt(
+        nonce,
+        PHONE_NUMBER.encode("ascii"),
+        legacy_associated_data,
+    )
+    legacy_ciphertext = b"MEVOPN\x01" + nonce + legacy_encrypted
+
+    with pytest.raises(OriginatingPhoneNumberCipherError):
+        OriginatingPhoneNumberCipher(KEY).decrypt(
+            legacy_ciphertext,
+            INGESTION_UUID,
+        )
+
+
 @pytest.mark.parametrize("mutation", ["wrong_uuid", "wrong_key", "tampered"])
 def test_decrypt_rejects_untrusted_ciphertext(mutation: str) -> None:
     cipher = OriginatingPhoneNumberCipher(KEY)
@@ -58,7 +78,7 @@ def test_decrypt_rejects_untrusted_ciphertext(mutation: str) -> None:
 
 @pytest.mark.parametrize(
     "ciphertext",
-    [b"", b"unsupported", b"GTAOPN\x02" + b"0" * 38],
+    [b"", b"unsupported", b"MEVOPN\x02" + b"0" * 38],
 )
 def test_decrypt_rejects_invalid_envelopes(ciphertext: bytes) -> None:
     with pytest.raises(OriginatingPhoneNumberCipherError):

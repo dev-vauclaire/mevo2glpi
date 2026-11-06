@@ -7,14 +7,14 @@ from threading import Event
 
 import pytest
 
-from glpi_ticketing_common import DeploymentEnvironment, ReleaseIdentity
-from glpi_ticketing_worker_publisher.application import (
+from mevo2glpi_common import DeploymentEnvironment, ReleaseIdentity
+from mevo2glpi_worker_publisher.application import (
     PublisherAlreadyRunningError,
     PublisherExitCode,
     configure_publisher_logging,
     run_cli,
 )
-from glpi_ticketing_worker_publisher.settings import PublisherLogLevel
+from mevo2glpi_worker_publisher.settings import PublisherLogLevel
 
 SYNTHETIC_SECRET = "never-log-publisher-secret"
 COMMIT_SHA = "bd88d901f4569ea8ee455c53b20920b0e1140ee2"
@@ -37,7 +37,7 @@ class _Settings:
 def test_debug_logging_keeps_http_urls_disabled() -> None:
     configure_publisher_logging(PublisherLogLevel.DEBUG)
 
-    assert logging.getLogger("glpi_ticketing_worker_publisher").level == logging.DEBUG
+    assert logging.getLogger("mevo2glpi_worker_publisher").level == logging.DEBUG
     assert logging.getLogger("httpx2").level == logging.WARNING
     assert logging.getLogger("httpcore2").level == logging.WARNING
 

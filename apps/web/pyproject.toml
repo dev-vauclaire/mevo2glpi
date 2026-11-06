@@ -1,20 +1,20 @@
 [project]
-name = "glpi-ticketing-web"
+name = "mevo2glpi-web"
 version = "0.1.0"
 description = "Tableau web de consultation des traitements audio"
 license = "EUPL-1.2"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.116,<1",
-    "glpi-ticketing-common>=0.1,<0.2",
-    "glpi-ticketing-database>=0.1,<0.2",
+    "mevo2glpi-common>=0.1,<0.2",
+    "mevo2glpi-database>=0.1,<0.2",
     "jinja2>=3.1,<4",
     "pydantic-settings>=2.10,<3",
     "uvicorn>=0.35,<1",
 ]
 
 [project.scripts]
-glpi-ticketing-web = "glpi_ticketing_web.application:main"
+mevo2glpi-web = "mevo2glpi_web.application:main"
 
 [build-system]
 requires = ["uv_build>=0.10.11,<0.11.0"]

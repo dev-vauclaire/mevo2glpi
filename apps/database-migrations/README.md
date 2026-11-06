@@ -2,7 +2,7 @@
 
 Cette application uv exécute les migrations Alembic du MVP puis se termine.
 Elle ne sert aucune requête et ne possède pas les modèles SQLAlchemy : ceux-ci
-restent dans le package partagé `glpi-ticketing-database`.
+restent dans le package partagé `mevo2glpi-database`.
 
 ## Contrat d'exécution
 
@@ -28,15 +28,15 @@ Variables optionnelles :
 Lancement depuis la racine du workspace :
 
 ```bash
-uv run --package glpi-ticketing-database-migrations \
-  glpi-ticketing-database-migrations
+uv run --package mevo2glpi-database-migrations \
+  mevo2glpi-database-migrations
 ```
 
 La forme module est équivalente :
 
 ```bash
-uv run --package glpi-ticketing-database-migrations \
-  python -m glpi_ticketing_database_migrations
+uv run --package mevo2glpi-database-migrations \
+  python -m mevo2glpi_database_migrations
 ```
 
 Les ressources Alembic sont embarquées dans le package Python. Leur résolution
@@ -47,7 +47,7 @@ ne dépend donc pas du répertoire courant du processus.
 Le [Dockerfile de migration](../../infra/docker/apps/database-migrations/Dockerfile)
 construit une image multi-stage verrouillée par `uv.lock`, sans dépendances de
 développement ni installation editable. Le runtime non-root exécute uniquement
-`glpi-ticketing-database-migrations`, puis s'arrête : le service Compose est un
+`mevo2glpi-database-migrations`, puis s'arrête : le service Compose est un
 one-shot sans healthcheck ni politique de redémarrage.
 
 Cette application accède seulement à PostgreSQL. Elle ne monte pas le volume

@@ -1,12 +1,12 @@
 [project]
-name = "glpi-ticketing-worker-publisher"
+name = "mevo2glpi-worker-publisher"
 version = "0.1.0"
 description = "Application d'ingestion des messages vocaux Microsoft 365"
 license = "EUPL-1.2"
 requires-python = ">=3.12"
 dependencies = [
-    "glpi-ticketing-common>=0.1,<0.2",
-    "glpi-ticketing-database>=0.1,<0.2",
+    "mevo2glpi-common>=0.1,<0.2",
+    "mevo2glpi-database>=0.1,<0.2",
     "httpx2>=2,<3",
     "msal>=1.35,<2",
     "pydantic-settings>=2.10,<3",
@@ -14,13 +14,13 @@ dependencies = [
 ]
 
 [project.scripts]
-glpi-ticketing-publisher = "glpi_ticketing_worker_publisher.application:main"
-glpi-ticketing-publisher-replay = "glpi_ticketing_worker_publisher.replay.application:main"
+mevo2glpi-worker-publisher = "mevo2glpi_worker_publisher.application:main"
+mevo2glpi-worker-publisher-replay = "mevo2glpi_worker_publisher.replay.application:main"
 
 [build-system]
 requires = ["uv_build>=0.10.11,<0.11.0"]
 build-backend = "uv_build"
 
 [tool.uv.sources]
-glpi-ticketing-common = { workspace = true }
-glpi-ticketing-database = { workspace = true }
+mevo2glpi-common = { workspace = true }
+mevo2glpi-database = { workspace = true }

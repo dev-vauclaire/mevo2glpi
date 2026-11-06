@@ -137,20 +137,24 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
 
     assert set(documented_values) == interpolated_names
     assert "# Docker Compose et Dokploy" in example_source
-    assert "# PostgreSQL externe" in example_source
+    assert "# PostgreSQL Database Dokploy" in example_source
     assert "# Application web" in example_source
     assert "# Worker d'automatisation" in example_source
     assert "# Worker de rétention" in example_source
     assert documented_values["APP_ENVIRONMENT"] == "production"
     assert documented_values["APP_RELEASE"] == "CHANGE_ME"
     assert documented_values["APP_COMMIT_SHA"] == "CHANGE_ME"
-    assert documented_values["TRANSCRIPTION_NETWORK_NAME"] == (
-        "gta-prod-transcription-network"
+    assert documented_values["DATABASE_NETWORK_NAME"] == (
+        "mevo2glpi-prod-database-network"
     )
+    assert documented_values["TRANSCRIPTION_NETWORK_NAME"] == (
+        "mevo2glpi-prod-transcription-network"
+    )
+    assert documented_values["AUDIO_VOLUME_NAME"] == "mevo2glpi-prod-audio-data"
     assert documented_values["FAILED_RETENTION_DAYS"] == "10"
     assert documented_values["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "180"
     assert documented_values["ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH"] == (
-        "/etc/gta/secrets/originating-phone-number.key"
+        "/etc/mevo2glpi/secrets/originating-phone-number.key"
     )
     assert documented_values["GLPI_TICKET_TYPE"] == "1"
     assert documented_values["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
@@ -165,7 +169,7 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
         "GLPI_CLIENT_SECRET",
     }
     assert {documented_values[name] for name in secret_names} == {"CHANGE_ME"}
-    assert "gta:CHANGE_ME@" in documented_values["DATABASE_URL"]
+    assert "mevo2glpi:CHANGE_ME@" in documented_values["DATABASE_URL"]
     assert not re.search(
         r"(?i)(?:api[_-]?key|secret|password)=[0-9a-f]{32,}", example_source
     )
@@ -269,6 +273,10 @@ def test_application_dockerfiles_embed_the_release_identity() -> None:
         assert "ARG VCS_REF=" not in dockerfile
         assert 'org.opencontainers.image.version="${IMAGE_VERSION}"' in dockerfile
         assert 'org.opencontainers.image.revision="${VCS_REF}"' in dockerfile
+        assert (
+            'org.opencontainers.image.source="https://github.com/dev-vauclaire/mevo2glpi"'
+            in dockerfile
+        )
         assert 'org.opencontainers.image.title="mevo2glpi ' in dockerfile
         assert 'org.opencontainers.image.licenses="EUPL-1.2' in dockerfile
         assert "ENV APP_RELEASE=${IMAGE_VERSION}" in dockerfile
@@ -284,13 +292,17 @@ def test_production_manifest_separates_application_networks(
         "dokploy-network",
         "transcription",
     }
-    assert config["networks"]["database"]["name"] == "gta-contract-database"
+    assert config["networks"]["database"]["name"] == ("mevo2glpi-contract-database")
     assert config["networks"]["database"]["external"] is True
-    assert config["networks"]["dokploy-network"]["name"] == "gta-contract-dokploy"
+    assert config["networks"]["dokploy-network"]["name"] == (
+        "mevo2glpi-contract-dokploy"
+    )
     assert config["networks"]["dokploy-network"]["external"] is True
-    assert config["networks"]["transcription"]["name"] == "gta-contract-transcription"
+    assert config["networks"]["transcription"]["name"] == (
+        "mevo2glpi-contract-transcription"
+    )
     assert config["networks"]["transcription"]["external"] is True
-    assert config["volumes"] == {"audio-data": {"name": "gta-contract-audio"}}
+    assert config["volumes"] == {"audio-data": {"name": "mevo2glpi-contract-audio"}}
     services = _services(config)
     assert set(services["web"]["networks"]) == {"database", "dokploy-network"}
     assert set(services["worker-automation"]["networks"]) == {
@@ -425,7 +437,7 @@ def test_ca_bundle_is_read_only_and_used_without_disabling_tls(
     render_compose: Callable[[], dict[str, object]],
 ) -> None:
     services = _services(render_compose())
-    target = "/etc/ssl/certs/gta-ca-bundle.pem"
+    target = "/etc/ssl/certs/mevo2glpi-ca-bundle.pem"
     for service in services.values():
         bundle = _volume_for(service, target)
         assert bundle is not None

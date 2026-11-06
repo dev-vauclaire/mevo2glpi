@@ -30,29 +30,29 @@ COPY providers/simulators/transcribe-ai-simulator/pyproject.toml providers/simul
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
-      --package glpi-ticketing-microsoft-graph-simulator --no-install-workspace
+      --package mevo2glpi-microsoft-graph-simulator --no-install-workspace
 
 COPY providers/simulators/microsoft-graph-simulator/src providers/simulators/microsoft-graph-simulator/src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
-      --package glpi-ticketing-microsoft-graph-simulator
+      --package mevo2glpi-microsoft-graph-simulator
 
 FROM ${PYTHON_IMAGE} AS runtime
 
 ARG IMAGE_VERSION=0.1.0
 ARG VCS_REF=unknown
 
-LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/glpi-ticketing-automation" \
+LABEL org.opencontainers.image.source="https://github.com/dev-vauclaire/mevo2glpi" \
       org.opencontainers.image.title="Microsoft Graph simulator" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.licenses="EUPL-1.2"
 
-RUN groupadd --gid 10001 gta \
+RUN groupadd --gid 10001 mevo2glpi \
     && useradd --uid 10001 --gid 10001 \
       --no-create-home --no-log-init --home-dir /nonexistent \
-      --shell /usr/sbin/nologin gta
+      --shell /usr/sbin/nologin mevo2glpi
 
 ENV HOME=/nonexistent \
     PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -74,4 +74,4 @@ HEALTHCHECK --interval=15s --timeout=3s --start-period=3s --retries=3 \
     --start-interval=1s \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).close()"]
 
-CMD ["glpi-ticketing-microsoft-graph-simulator"]
+CMD ["mevo2glpi-microsoft-graph-simulator"]

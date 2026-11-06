@@ -12,9 +12,9 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from glpi_ticketing_common import OriginatingPhoneNumberCipher
-from glpi_ticketing_common.audio_files import publish_audio
-from glpi_ticketing_database import (
+from mevo2glpi_common import OriginatingPhoneNumberCipher
+from mevo2glpi_common.audio_files import publish_audio
+from mevo2glpi_database import (
     AudioExtension,
     AudioRetention,
     DiscoveredMail,
@@ -33,13 +33,13 @@ from glpi_ticketing_database import (
     TicketCreationJobRepository,
     create_session_factory,
 )
-from glpi_ticketing_glpi import GlpiTicketDefaults, TicketLevel, TicketType
-from glpi_ticketing_worker_automation.title_generation import DefaultTitleGenerator
-from glpi_ticketing_worker_automation.transcription import (
+from mevo2glpi_glpi import GlpiTicketDefaults, TicketLevel, TicketType
+from mevo2glpi_worker_automation.title_generation import DefaultTitleGenerator
+from mevo2glpi_worker_automation.transcription import (
     TranscriptionResult,
     TranscriptionRetryRequired,
 )
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.worker import (
     AudioInspector,
     AutomationJobLifecycleService,
     AutomationWorker,

@@ -8,17 +8,17 @@ from uuid import UUID
 
 import pytest
 
-import glpi_ticketing_worker_automation.runtime.heartbeat as heartbeat_module
-from glpi_ticketing_database import (
+import mevo2glpi_worker_automation.runtime.heartbeat as heartbeat_module
+from mevo2glpi_database import (
     ErrorScope,
     JobStage,
     WorkerRuntimeState,
     WorkerServiceName,
 )
-from glpi_ticketing_worker_automation.runtime.heartbeat import (
+from mevo2glpi_worker_automation.runtime.heartbeat import (
     RuntimeHeartbeatReporter,
 )
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.worker import (
     CompletedOutcome,
     FailureDetails,
     IdleOutcome,

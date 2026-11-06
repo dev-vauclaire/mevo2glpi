@@ -1,6 +1,6 @@
-# Package `glpi-ticketing-common`
+# Package `mevo2glpi-common`
 
-`glpi-ticketing-common` contient les primitives de stockage audio, de backoff,
+`mevo2glpi-common` contient les primitives de stockage audio, de backoff,
 d'attente coopérative, de healthcheck runtime et d'identité de release
 partagées par les applications. Il ne connaît ni PostgreSQL, ni FastAPI, ni
 GLPI, ni provider de transcription et ne porte aucune politique métier.
@@ -40,7 +40,7 @@ flowchart LR
 ## API publique
 
 Les primitives de stockage courant se trouvent dans
-`glpi_ticketing_common.audio_files`.
+`mevo2glpi_common.audio_files`.
 
 | Primitive | Responsabilité |
 | --- | --- |
@@ -51,7 +51,7 @@ Les primitives de stockage courant se trouvent dans
 | `delete_audio()` | Supprimer exactement une clé puis synchroniser le répertoire |
 | `parse_audio_filename()` | Valider un nom audio canonique reçu à la frontière d'un provider |
 
-`glpi_ticketing_common.audio_purge` expose une suppression spécialisée pour le
+`mevo2glpi_common.audio_purge` expose une suppression spécialisée pour le
 worker de rétention. `purge_audio()` valide une clé canonique exacte, publie le
 nom `.purge/{storage_key}` de façon create-only par lien dur sur le même volume,
 retire le nom canonique, synchronise les deux répertoires puis supprime les
@@ -64,12 +64,12 @@ Cette primitive cible le volume Linux local du déploiement Docker : la racine
 et `.purge` doivent partager le même système de fichiers, avec prise en charge
 des liens durs et de `fsync` sur les répertoires.
 
-`glpi_ticketing_common.backoff.ExponentialBackoffPolicy` calcule un délai
+`mevo2glpi_common.backoff.ExponentialBackoffPolicy` calcule un délai
 exponentiel plafonné sans dormir ni connaître le mécanisme de persistance. Le
 worker appelant reste responsable du compteur consécutif et de la date de
 prochaine tentative.
 
-`glpi_ticketing_common.cooperative_wait.wait_with_periodic_checkpoint()`
+`mevo2glpi_common.cooperative_wait.wait_with_periodic_checkpoint()`
 découpe une attente en tranches bornées. Entre deux tranches, elle vérifie
 l'arrêt demandé puis appelle un checkpoint injecté. Les workers l'utilisent
 pour rafraîchir leur heartbeat sur la connexion qui détient leur verrou
@@ -77,7 +77,7 @@ advisory. La primitive ne crée aucun thread, ne connaît ni PostgreSQL ni le
 heartbeat et propage toute erreur du checkpoint afin que l'application puisse
 échouer en mode fermé.
 
-`glpi_ticketing_common.runtime_healthcheck` porte la politique générique des
+`mevo2glpi_common.runtime_healthcheck` porte la politique générique des
 sondes conteneur sans importer SQLAlchemy : configuration minimale, fraîcheur
 du heartbeat, codes d'erreur expurgés et vérification du mode d'accès au volume
 audio. Chaque worker fournit son propre adaptateur PostgreSQL et choisit le
@@ -86,7 +86,7 @@ publisher et la rétention. Le seuil `WORKER_HEALTHCHECK_STALE_AFTER_SECONDS`
 vaut `45` secondes par défaut et doit rester strictement supérieur à
 `WORKER_HEARTBEAT_INTERVAL_SECONDS`.
 
-`glpi_ticketing_common.release_identity` expose `DeploymentEnvironment` et
+`mevo2glpi_common.release_identity` expose `DeploymentEnvironment` et
 `ReleaseIdentity`. Cette identité non sensible relie un processus à son
 environnement, sa release et son SHA Git complet. Elle accepte le mode local
 `development/unknown`, impose un SHA complet en staging et exige un tag stable
@@ -144,7 +144,7 @@ from io import BytesIO
 from pathlib import Path
 from uuid import UUID
 
-from glpi_ticketing_common.audio_files import (
+from mevo2glpi_common.audio_files import (
     build_audio_storage_key,
     publish_audio,
 )
@@ -164,7 +164,7 @@ published = publish_audio(
 packages/common/
 ├── pyproject.toml
 ├── README.md
-├── src/glpi_ticketing_common/
+├── src/mevo2glpi_common/
 │   ├── __init__.py
 │   ├── audio_files.py
 │   ├── audio_purge.py

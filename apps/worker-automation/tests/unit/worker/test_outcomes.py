@@ -4,7 +4,7 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_worker_automation.worker import (
+from mevo2glpi_worker_automation.worker import (
     BlockedOutcome,
     CompletedOutcome,
     ErrorScope,

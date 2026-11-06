@@ -16,7 +16,7 @@ import pytest
 from testcontainers.compose import DockerCompose
 from testcontainers.core.docker_client import DockerClient
 
-from glpi_ticketing_glpi import TicketStatus
+from mevo2glpi_glpi import TicketStatus
 
 GLPI_TEST_DIRECTORY = (
     Path(__file__).resolve().parents[3]

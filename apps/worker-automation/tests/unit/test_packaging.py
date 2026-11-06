@@ -41,5 +41,5 @@ def test_worker_runtime_image_is_locked_minimal_and_non_root() -> None:
     assert "/usr/local/bin/uv" not in runtime
     assert "COPY apps/" not in runtime
     assert "COPY packages/" not in runtime
-    assert "glpi_ticketing_worker_automation.runtime.healthcheck" in runtime
-    assert 'CMD ["glpi-ticketing-worker"]' in runtime
+    assert "mevo2glpi_worker_automation.runtime.healthcheck" in runtime
+    assert 'CMD ["mevo2glpi-worker-automation"]' in runtime

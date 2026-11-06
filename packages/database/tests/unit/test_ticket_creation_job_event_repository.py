@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.orm import Session
 
-from glpi_ticketing_database import (
+from mevo2glpi_database import (
     ErrorScope,
     JobEventActor,
     JobEventCursor,

@@ -7,19 +7,19 @@ from uuid import UUID
 
 import pytest
 
-from glpi_ticketing_common.audio_purge import (
+from mevo2glpi_common.audio_purge import (
     AudioPurgeErrorCode,
     AudioPurgeFilesystemError,
     UnsafeAudioPurgeStateError,
 )
-from glpi_ticketing_common.backoff import ExponentialBackoffPolicy
-from glpi_ticketing_database import (
+from mevo2glpi_common.backoff import ExponentialBackoffPolicy
+from mevo2glpi_database import (
     DeletionReason,
     ErrorScope,
     RetentionCandidateKind,
     RetentionStatus,
 )
-from glpi_ticketing_glpi import (
+from mevo2glpi_glpi import (
     GlpiErrorCategory,
     GlpiHttpError,
     GlpiOperation,
@@ -27,10 +27,10 @@ from glpi_ticketing_glpi import (
     GlpiTransportError,
     TicketStatus,
 )
-from glpi_ticketing_worker_retention.retention.lifecycle import (
+from mevo2glpi_worker_retention.retention.lifecycle import (
     StaleRetentionCandidateError,
 )
-from glpi_ticketing_worker_retention.retention.outcomes import (
+from mevo2glpi_worker_retention.retention.outcomes import (
     AudioDeletedOutcome,
     CheckRecoveredOutcome,
     DependencyCondition,
@@ -43,10 +43,10 @@ from glpi_ticketing_worker_retention.retention.outcomes import (
     StaleCandidateOutcome,
     SystemBlockedOutcome,
 )
-from glpi_ticketing_worker_retention.retention.policies import RetentionCheckPolicy
-from glpi_ticketing_worker_retention.retention.ports import CheckRecoveryWork
-from glpi_ticketing_worker_retention.retention.service import RetentionWorker
-from glpi_ticketing_worker_retention.retention.stages import GlpiCheckStage
+from mevo2glpi_worker_retention.retention.policies import RetentionCheckPolicy
+from mevo2glpi_worker_retention.retention.ports import CheckRecoveryWork
+from mevo2glpi_worker_retention.retention.service import RetentionWorker
+from mevo2glpi_worker_retention.retention.stages import GlpiCheckStage
 
 from ._fakes import (
     JOB_UUID,
@@ -528,7 +528,7 @@ def test_failure_logs_contain_uuid_and_only_sanitized_error_fields(
 
     with caplog.at_level(
         logging.INFO,
-        logger="glpi_ticketing_worker_retention.retention.service",
+        logger="mevo2glpi_worker_retention.retention.service",
     ):
         worker.run_once()
 

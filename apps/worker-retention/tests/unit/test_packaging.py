@@ -10,11 +10,9 @@ def test_console_script_uses_the_validated_worker_name() -> None:
         (application_root / "pyproject.toml").read_text(encoding="utf-8")
     )
 
-    assert manifest["project"]["name"] == "glpi-ticketing-worker-retention"
+    assert manifest["project"]["name"] == "mevo2glpi-worker-retention"
     assert manifest["project"]["scripts"] == {
-        "glpi-ticketing-worker-retention": (
-            "glpi_ticketing_worker_retention.application:main"
-        )
+        "mevo2glpi-worker-retention": ("mevo2glpi_worker_retention.application:main")
     }
 
 
@@ -49,5 +47,5 @@ def test_retention_image_context_and_runtime_are_minimal() -> None:
     assert "/usr/local/bin/uv" not in runtime
     assert "COPY apps/" not in runtime
     assert "COPY packages/" not in runtime
-    assert "glpi_ticketing_worker_retention.runtime.healthcheck" in runtime
-    assert 'CMD ["glpi-ticketing-worker-retention"]' in runtime
+    assert "mevo2glpi_worker_retention.runtime.healthcheck" in runtime
+    assert 'CMD ["mevo2glpi-worker-retention"]' in runtime

@@ -8,14 +8,14 @@ from uuid import UUID
 
 import pytest
 
-import glpi_ticketing_web.services.jobs.downloads as downloads_module
-from glpi_ticketing_database import (
+import mevo2glpi_web.services.jobs.downloads as downloads_module
+from mevo2glpi_database import (
     AudioExtension,
     JobStage,
     JobStatus,
     RetentionStatus,
 )
-from glpi_ticketing_web.services import (
+from mevo2glpi_web.services import (
     AudioPurgedError,
     AudioStorageInvariantError,
     AudioStorageUnavailableError,

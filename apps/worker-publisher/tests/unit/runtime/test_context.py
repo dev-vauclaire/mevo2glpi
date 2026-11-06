@@ -5,14 +5,14 @@ from typing import Any, cast
 import pytest
 from pydantic import SecretStr
 
-import glpi_ticketing_worker_publisher.runtime.context as context_module
-from glpi_ticketing_database import WorkerRuntimeState, WorkerServiceName
-from glpi_ticketing_worker_publisher.publisher import IdleOutcome
-from glpi_ticketing_worker_publisher.runtime import (
+import mevo2glpi_worker_publisher.runtime.context as context_module
+from mevo2glpi_database import WorkerRuntimeState, WorkerServiceName
+from mevo2glpi_worker_publisher.publisher import IdleOutcome
+from mevo2glpi_worker_publisher.runtime import (
     PublisherAlreadyRunningError,
     publisher_runtime,
 )
-from glpi_ticketing_worker_publisher.settings import PublisherSettings
+from mevo2glpi_worker_publisher.settings import PublisherSettings
 
 
 class _Engine:

@@ -50,15 +50,17 @@ def e2e_environment(
         glpi_client_secret=credentials.client_secret,
         glpi_request_source_id=glpi_environment.request_source.id,
     )
-    runtime_root = tmp_path_factory.mktemp("gta-mvp-e2e")
+    runtime_root = tmp_path_factory.mktemp("mevo2glpi-e2e")
     environment = create_mvp_compose_environment(
         runtime_root,
         providers=providers,
-        project_prefix="gtamvpe2e",
+        project_prefix="mevo2glpie2e",
         extra_compose_files=(E2E_COMPOSE_FILE,),
         extra_compose_environment={
-            "GTA_E2E_GLPI_NETWORK": glpi_environment.network_name,
-            "GTA_E2E_TRANSCRIBE_AI_NETWORK": (transcribe_ai_environment.network_name),
+            "MEVO2GLPI_E2E_GLPI_NETWORK": glpi_environment.network_name,
+            "MEVO2GLPI_E2E_TRANSCRIBE_AI_NETWORK": (
+                transcribe_ai_environment.network_name
+            ),
         },
         # Avoid the `postgres` DNS alias owned by the Transcribe AI network.
         database_host="mvp-postgres",

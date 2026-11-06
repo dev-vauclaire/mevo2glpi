@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import httpx
 import pytest
 
-from glpi_ticketing_common.audio_files import (
+from mevo2glpi_common.audio_files import (
     SUPPORTED_AUDIO_STORAGE_EXTENSIONS,
 )
 

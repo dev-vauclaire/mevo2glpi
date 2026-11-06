@@ -9,8 +9,8 @@ from uuid import UUID
 
 import pytest
 
-import glpi_ticketing_web.services.jobs.retry as retry_module
-from glpi_ticketing_database import (
+import mevo2glpi_web.services.jobs.retry as retry_module
+from mevo2glpi_database import (
     AudioExtension,
     AudioRetentionSnapshot,
     ErrorScope,
@@ -20,7 +20,7 @@ from glpi_ticketing_database import (
     RetentionPolicy,
     RetentionStatus,
 )
-from glpi_ticketing_web.services import (
+from mevo2glpi_web.services import (
     AudioStorageUnavailableError,
     JobPersistenceUnavailableError,
     JobRetryConflictError,

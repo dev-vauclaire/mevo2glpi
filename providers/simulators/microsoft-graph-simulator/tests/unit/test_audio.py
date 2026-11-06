@@ -5,13 +5,13 @@ from io import BytesIO
 
 import pytest
 
-from glpi_ticketing_microsoft_graph_simulator import scenarios
-from glpi_ticketing_microsoft_graph_simulator.audio import (
+from mevo2glpi_microsoft_graph_simulator import scenarios
+from mevo2glpi_microsoft_graph_simulator.audio import (
     SyntheticAudioExtension,
     SyntheticAudioFixture,
     load_synthetic_audio,
 )
-from glpi_ticketing_microsoft_graph_simulator.scenarios import (
+from mevo2glpi_microsoft_graph_simulator.scenarios import (
     MAX_SEED_AUDIO_BYTES,
     SeedScenario,
     SyntheticAttachmentKind,

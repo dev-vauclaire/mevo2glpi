@@ -8,8 +8,8 @@ from uuid import UUID
 import pytest
 from sqlalchemy import Engine, select
 
-from glpi_ticketing_common import OriginatingPhoneNumberCipher
-from glpi_ticketing_database import (
+from mevo2glpi_common import OriginatingPhoneNumberCipher
+from mevo2glpi_database import (
     AudioExtension,
     JobEventActor,
     JobEventType,
@@ -24,14 +24,14 @@ from glpi_ticketing_database import (
     TicketCreationJobEvent,
     create_session_factory,
 )
-from glpi_ticketing_worker_publisher.graph import (
+from mevo2glpi_worker_publisher.graph import (
     AttachmentId,
     FolderId,
     GraphAttachment,
     GraphMessage,
     MessageId,
 )
-from glpi_ticketing_worker_publisher.publisher import (
+from mevo2glpi_worker_publisher.publisher import (
     PublisherFailure,
     PublisherLifecycleService,
 )

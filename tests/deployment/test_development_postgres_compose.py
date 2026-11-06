@@ -24,7 +24,7 @@ POSTGRES_IMAGE = (
     "10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5"
 )
 DEFAULT_DATABASE_URL = (
-    "postgresql+psycopg://gta_dev:gta_dev_only@127.0.0.1:5432/glpi_ticketing_dev"
+    "postgresql+psycopg://mevo2glpi_dev:mevo2glpi_dev_only@127.0.0.1:5432/mevo2glpi_dev"
 )
 
 
@@ -32,10 +32,10 @@ def _clean_environment(*, published_port: str | None = None) -> dict[str, str]:
     environment = {
         name: value
         for name, value in os.environ.items()
-        if not name.startswith("COMPOSE_") and name != "GTA_DEV_POSTGRES_PORT"
+        if not name.startswith("COMPOSE_") and name != "MEVO2GLPI_DEV_POSTGRES_PORT"
     }
     if published_port is not None:
-        environment["GTA_DEV_POSTGRES_PORT"] = published_port
+        environment["MEVO2GLPI_DEV_POSTGRES_PORT"] = published_port
     return environment
 
 
@@ -87,7 +87,7 @@ def _root_example_environment() -> dict[str, str]:
 def test_development_postgres_manifest_contains_only_postgres(
     postgres_compose_config: dict[str, object],
 ) -> None:
-    assert postgres_compose_config["name"] == "gta-development-postgres"
+    assert postgres_compose_config["name"] == "mevo2glpi-development-postgres"
     assert set(_services(postgres_compose_config)) == {"postgres"}
 
 
@@ -100,9 +100,9 @@ def test_development_postgres_uses_pinned_local_configuration(
     assert "latest" not in service["image"].casefold()
     assert service["command"] == ["postgres", "-c", "timezone=UTC"]
     assert service["environment"] == {
-        "POSTGRES_DB": "glpi_ticketing_dev",
-        "POSTGRES_PASSWORD": "gta_dev_only",
-        "POSTGRES_USER": "gta_dev",
+        "POSTGRES_DB": "mevo2glpi_dev",
+        "POSTGRES_PASSWORD": "mevo2glpi_dev_only",
+        "POSTGRES_USER": "mevo2glpi_dev",
     }
 
 
@@ -165,7 +165,7 @@ def test_development_postgres_persists_data_in_a_named_volume(
         }
     ]
     assert postgres_compose_config["volumes"] == {
-        "postgres-data": {"name": "gta-development-postgres18-data"}
+        "postgres-data": {"name": "mevo2glpi-development-postgres18-data"}
     }
 
 
@@ -191,6 +191,6 @@ def test_root_environment_matches_development_postgres_defaults() -> None:
     assert parsed_url.scheme == "postgresql+psycopg"
     assert parsed_url.hostname == "127.0.0.1"
     assert parsed_url.port == 5432
-    assert parsed_url.username == "gta_dev"
-    assert parsed_url.password == "gta_dev_only"
-    assert parsed_url.path == "/glpi_ticketing_dev"
+    assert parsed_url.username == "mevo2glpi_dev"
+    assert parsed_url.password == "mevo2glpi_dev_only"
+    assert parsed_url.path == "/mevo2glpi_dev"
