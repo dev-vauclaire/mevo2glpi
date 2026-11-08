@@ -112,6 +112,11 @@ seconde ingestion. `attachment_id` utilise la même comparaison sensible à la
 casse, mais ne participe pas à l'identité puisque le contrat métier prévoit
 une seule pièce jointe audio par message.
 
+Pour toute nouvelle source, le publisher dérive l'UUID d'ingestion avec
+`uuid5(mailbox_id, message_id)`. Cette formule stable aligne ensuite l'UUID du
+job et la clé de stockage audio. Elle ne s'applique pas rétroactivement : une
+ligne historique déjà associée à la même identité source conserve son UUID.
+
 La colonne `job_uuid` est nullable, unique et liée à
 `ticket_creation_jobs.uuid` :
 

@@ -9,6 +9,7 @@ from .audio import (
     publish_or_confirm_audio,
     select_audio_attachment,
 )
+from .identity import derive_ingestion_uuid
 from .lifecycle import PublisherLifecycleService, PublisherPersistenceConflictError
 from .outcomes import (
     BlockedOutcome,
@@ -46,6 +47,7 @@ __all__ = [
     "RejectedOutcome",
     "RetryScheduledOutcome",
     "SystemBlockedOutcome",
+    "derive_ingestion_uuid",
     "inspect_audio_structure",
     "inspect_ogg_structure",
     "inspect_wav_structure",

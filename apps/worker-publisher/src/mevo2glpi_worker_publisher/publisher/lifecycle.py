@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 from typing import TypeVar
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -31,6 +31,7 @@ from mevo2glpi_database import (
 )
 
 from ..graph import GraphAttachment, GraphMessage
+from .identity import derive_ingestion_uuid
 from .originating_phone_number import extract_originating_phone_number
 from .outcomes import PublisherFailure
 
@@ -50,7 +51,6 @@ class PublisherLifecycleService:
         session_factory: Callable[[], Session],
         originating_phone_number_cipher: OriginatingPhoneNumberCipher,
         ownership_guard: Callable[[], None] | None = None,
-        uuid_factory: Callable[[], UUID] = uuid4,
     ) -> None:
         if not callable(session_factory):
             raise TypeError("session_factory must be callable")
@@ -64,12 +64,9 @@ class PublisherLifecycleService:
             )
         if ownership_guard is not None and not callable(ownership_guard):
             raise TypeError("ownership_guard must be callable")
-        if not callable(uuid_factory):
-            raise TypeError("uuid_factory must be callable")
         self._session_factory = session_factory
         self._originating_phone_number_cipher = originating_phone_number_cipher
         self._ownership_guard = ownership_guard or _no_op
-        self._uuid_factory = uuid_factory
 
     def discover_messages(
         self,
@@ -91,17 +88,19 @@ class PublisherLifecycleService:
             event_repository = MailIngestionEventRepository(session)
             discovered_count = 0
             for message in messages:
+                immutable_message_id = str(message.message_id)
                 if (
                     ingestion_repository.get_by_source(
                         mailbox_id,
-                        str(message.message_id),
+                        immutable_message_id,
                     )
                     is not None
                 ):
                     continue
-                ingestion_uuid = self._uuid_factory()
-                if not isinstance(ingestion_uuid, UUID):
-                    raise TypeError("uuid_factory must return a UUID")
+                ingestion_uuid = derive_ingestion_uuid(
+                    mailbox_id,
+                    immutable_message_id,
+                )
                 originating_phone_number = extract_originating_phone_number(
                     message.subject
                 )
@@ -117,7 +116,7 @@ class PublisherLifecycleService:
                     DiscoveredMail(
                         uuid=ingestion_uuid,
                         mailbox_id=mailbox_id,
-                        message_id=str(message.message_id),
+                        message_id=immutable_message_id,
                         received_at=message.received_at,
                         originating_phone_number_ciphertext=(
                             originating_phone_number_ciphertext

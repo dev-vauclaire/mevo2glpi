@@ -32,7 +32,8 @@ Une itération respecte l'ordre suivant :
 1. reprendre une ingestion `processing` ou un retry échu déjà persisté ;
 2. seulement si aucun travail durable n'est disponible, paginer l'Inbox de la
    plus ancienne à la plus récente ;
-3. enregistrer chaque message découvert avec son identifiant immuable ;
+3. dériver un UUIDv5 stable avec `uuid5(mailbox_id, message_id)` à partir de
+   l'identifiant immuable, puis enregistrer le message découvert ;
 4. sélectionner exactement une pièce jointe WAV ou OGG, non inline, non vide et dont
    la taille annoncée ne dépasse pas 25 Mio ;
 5. télécharger le contenu dans un fichier temporaire non publié, sans écrire
@@ -46,6 +47,11 @@ Une itération respecte l'ordre suivant :
 
 Un autre message portant des octets identiques crée volontairement un autre
 job. Le publisher ne déduplique pas les contenus audio.
+
+La formule de dérivation de l'UUID fait partie du contrat de persistance et ne
+doit pas être modifiée ni rendue configurable par environnement. Les lignes
+historiques conservent leur UUID existant ; seules les nouvelles ingestions
+utilisent UUIDv5.
 
 ## Reprise, erreurs et traçabilité
 

@@ -6,11 +6,12 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 
 from mevo2glpi_common import OriginatingPhoneNumberCipher
 from mevo2glpi_database import (
     AudioExtension,
+    DiscoveredMail,
     JobEventActor,
     JobEventType,
     MailIngestion,
@@ -34,6 +35,7 @@ from mevo2glpi_worker_publisher.graph import (
 from mevo2glpi_worker_publisher.publisher import (
     PublisherFailure,
     PublisherLifecycleService,
+    derive_ingestion_uuid,
 )
 
 pytestmark = pytest.mark.database
@@ -75,12 +77,11 @@ def test_accepted_message_creates_one_aligned_job_and_complete_audit(
     migrated_engine: Engine,
 ) -> None:
     session_factory = create_session_factory(migrated_engine)
-    ingestion_uuid = UUID("00000000-0000-4000-8000-000000000301")
+    ingestion_uuid = derive_ingestion_uuid(MAILBOX_ID, "immutable-message-a")
     phone_number_cipher = _phone_number_cipher()
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
         originating_phone_number_cipher=phone_number_cipher,
-        uuid_factory=lambda: ingestion_uuid,
     )
 
     assert (
@@ -166,11 +167,10 @@ def test_accepted_message_creates_one_aligned_job_and_complete_audit(
 
 def test_ogg_attachment_creates_an_aligned_ogg_job(migrated_engine: Engine) -> None:
     session_factory = create_session_factory(migrated_engine)
-    ingestion_uuid = UUID("00000000-0000-4000-8000-000000000302")
+    ingestion_uuid = derive_ingestion_uuid(MAILBOX_ID, "immutable-message-ogg")
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
         originating_phone_number_cipher=_phone_number_cipher(),
-        uuid_factory=lambda: ingestion_uuid,
     )
     attachment = GraphAttachment(
         attachment_id=AttachmentId("ogg-attachment-id"),
@@ -214,11 +214,13 @@ def test_empty_download_can_be_rejected_after_nonempty_ogg_metadata(
     migrated_engine: Engine,
 ) -> None:
     session_factory = create_session_factory(migrated_engine)
-    ingestion_uuid = UUID("00000000-0000-4000-8000-000000000303")
+    ingestion_uuid = derive_ingestion_uuid(
+        MAILBOX_ID,
+        "immutable-message-empty-ogg",
+    )
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
         originating_phone_number_cipher=_phone_number_cipher(),
-        uuid_factory=lambda: ingestion_uuid,
     )
     attachment = GraphAttachment(
         attachment_id=AttachmentId("empty-ogg-attachment-id"),
@@ -261,16 +263,9 @@ def test_discovery_is_idempotent_and_equal_audio_messages_remain_distinct(
     migrated_engine: Engine,
 ) -> None:
     session_factory = create_session_factory(migrated_engine)
-    generated = iter(
-        (
-            UUID("00000000-0000-4000-8000-000000000311"),
-            UUID("00000000-0000-4000-8000-000000000312"),
-        )
-    )
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
         originating_phone_number_cipher=_phone_number_cipher(),
-        uuid_factory=lambda: next(generated),
     )
     first = _message("immutable-message-a", minutes_ago=2)
     second = _message("immutable-message-b", minutes_ago=1)
@@ -284,7 +279,10 @@ def test_discovery_is_idempotent_and_equal_audio_messages_remain_distinct(
         == 2
     )
     assert (
-        lifecycle.discover_messages(
+        PublisherLifecycleService(
+            session_factory=session_factory,
+            originating_phone_number_cipher=_phone_number_cipher(),
+        ).discover_messages(
             mailbox_id=MAILBOX_ID,
             messages=(first, second),
             now=NOW + timedelta(seconds=1),
@@ -338,3 +336,49 @@ def test_discovery_is_idempotent_and_equal_audio_messages_remain_distinct(
         first_ingestion.uuid,
         second_ingestion.uuid,
     }
+
+
+def test_existing_legacy_source_keeps_its_random_uuid(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    legacy_uuid = UUID("00000000-0000-4000-8000-000000000321")
+    message = _message("immutable-legacy-message", minutes_ago=1)
+
+    with session_factory.begin() as session:
+        MailIngestionRepository(session).add_discovered(
+            DiscoveredMail(
+                uuid=legacy_uuid,
+                mailbox_id=MAILBOX_ID,
+                message_id=str(message.message_id),
+                received_at=message.received_at,
+            ),
+            now=NOW,
+        )
+
+    lifecycle = PublisherLifecycleService(
+        session_factory=session_factory,
+        originating_phone_number_cipher=_phone_number_cipher(),
+    )
+
+    assert (
+        lifecycle.discover_messages(
+            mailbox_id=MAILBOX_ID,
+            messages=(message,),
+            now=NOW + timedelta(seconds=1),
+        )
+        == 0
+    )
+
+    with session_factory() as session:
+        persisted = MailIngestionRepository(session).get_by_source(
+            MAILBOX_ID,
+            str(message.message_id),
+        )
+        ingestion_count = session.scalar(
+            select(func.count()).select_from(MailIngestion)
+        )
+
+    assert persisted is not None
+    assert persisted.uuid == legacy_uuid
+    assert ingestion_count == 1
