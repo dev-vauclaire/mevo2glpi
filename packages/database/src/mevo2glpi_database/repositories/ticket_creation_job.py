@@ -154,6 +154,19 @@ class TicketCreationJobRepository:
             raise JobNotFoundError(f"job {job_uuid} does not exist")
         return _to_snapshot(job)
 
+    def delete_by_uuid(self, job_uuid: UUID) -> None:
+        """Delete one locked job without owning the caller's transaction."""
+        validate_uuid(job_uuid, "job_uuid")
+        job = self._session.get(
+            TicketCreationJob,
+            job_uuid,
+            with_for_update=True,
+        )
+        if job is None:
+            raise JobNotFoundError(f"job {job_uuid} does not exist")
+        self._session.delete(job)
+        self._session.flush()
+
     def list_page(
         self,
         *,

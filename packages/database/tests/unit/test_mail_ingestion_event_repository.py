@@ -80,6 +80,21 @@ def test_list_page_returns_typed_events_and_stable_cursor() -> None:
     session.flush.assert_not_called()
 
 
+def test_delete_by_ingestion_uuid_deletes_only_matching_events() -> None:
+    session = create_autospec(Session, instance=True)
+    session.execute.return_value.rowcount = 4
+    ingestion_uuid = uuid4()
+
+    deleted = MailIngestionEventRepository(session).delete_by_ingestion_uuid(
+        ingestion_uuid
+    )
+
+    assert deleted == 4
+    session.execute.assert_called_once()
+    session.flush.assert_called_once_with()
+    session.commit.assert_not_called()
+
+
 def test_append_rejects_partial_or_unsafe_diagnostics_before_mutation() -> None:
     session = create_autospec(Session, instance=True)
     repository = MailIngestionEventRepository(session)

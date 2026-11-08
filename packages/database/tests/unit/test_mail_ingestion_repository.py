@@ -158,6 +158,54 @@ def test_get_by_source_uses_the_case_sensitive_opaque_identity() -> None:
     session.flush.assert_not_called()
 
 
+def test_get_by_job_uuid_returns_the_optional_linked_ingestion() -> None:
+    session = _session()
+    ingestion = _ingestion(
+        status=MailIngestionStatus.COMPLETED,
+        stage=MailIngestionStage.ACKNOWLEDGEMENT,
+        disposition=MailIngestionDisposition.ACCEPTED,
+    )
+    ingestion.job_uuid = INGESTION_UUID
+    ingestion.finished_at = NOW
+    session.scalars.return_value = _scalar_result(ingestion)
+
+    snapshot = MailIngestionRepository(session).get_by_job_uuid(INGESTION_UUID)
+
+    assert snapshot is not None
+    assert snapshot.uuid == INGESTION_UUID
+    assert snapshot.job_uuid == INGESTION_UUID
+    session.scalars.assert_called_once()
+    session.flush.assert_not_called()
+
+
+def test_delete_by_uuid_deletes_only_the_locked_ingestion() -> None:
+    session = _session()
+    ingestion = _ingestion()
+    session.get.return_value = ingestion
+
+    MailIngestionRepository(session).delete_by_uuid(INGESTION_UUID)
+
+    session.get.assert_called_once_with(
+        MailIngestion,
+        INGESTION_UUID,
+        with_for_update=True,
+    )
+    session.delete.assert_called_once_with(ingestion)
+    session.flush.assert_called_once_with()
+    session.commit.assert_not_called()
+
+
+def test_delete_by_uuid_rejects_an_unknown_ingestion() -> None:
+    session = _session()
+    session.get.return_value = None
+
+    with pytest.raises(LookupError, match="does not exist"):
+        MailIngestionRepository(session).delete_by_uuid(INGESTION_UUID)
+
+    session.delete.assert_not_called()
+    session.flush.assert_not_called()
+
+
 @pytest.mark.parametrize("message_id", ["", "x" * 513, "opaque\nidentifier"])
 def test_add_discovered_rejects_invalid_bounded_message_ids(
     message_id: str,

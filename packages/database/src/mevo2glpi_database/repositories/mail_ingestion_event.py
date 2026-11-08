@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -175,6 +175,17 @@ class MailIngestionEventRepository:
             next_cursor=next_cursor,
             has_more=has_more,
         )
+
+    def delete_by_ingestion_uuid(self, ingestion_uuid: UUID) -> int:
+        """Delete every event owned by one ingestion and return their count."""
+        validate_uuid(ingestion_uuid, "ingestion_uuid")
+        result = self._session.execute(
+            delete(MailIngestionEvent).where(
+                MailIngestionEvent.ingestion_uuid == ingestion_uuid
+            )
+        )
+        self._session.flush()
+        return result.rowcount if result.rowcount is not None else 0
 
 
 def _to_snapshot(event: MailIngestionEvent) -> MailIngestionEventSnapshot:

@@ -44,6 +44,11 @@ JOB_UUID = UUID("4dc17ce3-c7ce-46d4-a14d-b83f0fb7e098")
             RetentionStatus.SCHEDULED,
             RetentionCandidateKind.START_GLPI_CHECK,
         ),
+        (
+            5,
+            RetentionStatus.DELETED,
+            RetentionCandidateKind.PURGE_DELETED_AGGREGATE,
+        ),
     ],
 )
 def test_find_next_candidate_applies_the_global_priority_without_locking(
@@ -71,11 +76,11 @@ def test_find_next_candidate_applies_the_global_priority_without_locking(
 
 def test_find_next_candidate_returns_none_after_all_categories_are_empty() -> None:
     session = create_autospec(Session, instance=True)
-    session.scalars.side_effect = [_scalar_result(None) for _index in range(5)]
+    session.scalars.side_effect = [_scalar_result(None) for _index in range(6)]
 
     assert AudioRetentionRepository(session).find_next_candidate(NOW) is None
 
-    assert session.scalars.call_count == 5
+    assert session.scalars.call_count == 6
     session.flush.assert_not_called()
 
 
@@ -129,6 +134,7 @@ def _retention(*, status: RetentionStatus) -> AudioRetention:
         in {
             RetentionStatus.DELETING,
             RetentionStatus.RETRY_SCHEDULED,
+            RetentionStatus.DELETED,
         }
         else None
     )
@@ -150,7 +156,9 @@ def _retention(*, status: RetentionStatus) -> AudioRetention:
             "deadline_expired" if deletion_started_at is not None else None
         ),
         deletion_started_at=deletion_started_at,
-        audio_deleted_at=None,
+        audio_deleted_at=(
+            NOW - timedelta(minutes=1) if status is RetentionStatus.DELETED else None
+        ),
         last_error_category=(
             "storage_unavailable" if status is RetentionStatus.RETRY_SCHEDULED else None
         ),

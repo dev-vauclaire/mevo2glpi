@@ -27,7 +27,7 @@ flowchart LR
     MIG -->|migre le schéma| DB
     PUB -->|persiste| DB
     AUTO -->|persiste| DB
-    RET -->|persiste| DB
+    RET -->|persiste puis purge les agrégats clos| DB
     WEB -->|consulte et réarme| DB
 
     PUB -->|publie| AUDIO
@@ -51,7 +51,9 @@ Docker privé.
 
 Il contrôle l'état du ticket GLPI et supprime l'audio lorsque le ticket est
 fermé ou que son échéance absolue est atteinte. Ses transitions permettent de
-reprendre une suppression interrompue sans perdre la traçabilité.
+reprendre une suppression interrompue sans perdre la traçabilité. Dès que la
+suppression du fichier est confirmée, il supprime dans une transaction unique
+l'ingestion acceptée éventuelle, les événements, la rétention et le job liés.
 
 ### Worker automation
 
@@ -80,7 +82,9 @@ constitue plus une voie d'ingestion.
 
 PostgreSQL est la source de vérité du système. Il persiste notamment les jobs,
 les événements, les tentatives, les échéances de retry, les rétentions et les
-heartbeats des workers.
+heartbeats des workers. L'agrégat d'un job reste disponible tant que son audio
+est conservé, puis il est purgé avec lui. Les ingestions rejetées sans job
+restent inchangées et observables.
 
 ### Volume audio
 

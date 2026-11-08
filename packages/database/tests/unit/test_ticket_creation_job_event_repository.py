@@ -68,6 +68,19 @@ def test_exists_reads_only_the_event_model() -> None:
     session.flush.assert_not_called()
 
 
+def test_delete_by_job_uuid_deletes_only_matching_events() -> None:
+    session = create_autospec(Session, instance=True)
+    session.execute.return_value.rowcount = 3
+    job_uuid = uuid4()
+
+    deleted = TicketCreationJobEventRepository(session).delete_by_job_uuid(job_uuid)
+
+    assert deleted == 3
+    session.execute.assert_called_once()
+    session.flush.assert_called_once_with()
+    session.commit.assert_not_called()
+
+
 def test_list_page_returns_typed_events_and_a_stable_cursor() -> None:
     session = create_autospec(Session, instance=True)
     job_uuid = uuid4()

@@ -19,7 +19,6 @@ from mevo2glpi_database import (
     AudioRetention,
     AudioRetentionRepository,
     DeletionReason,
-    JobEventActor,
     JobEventType,
     JobStatus,
     PendingJob,
@@ -105,7 +104,7 @@ def test_solved_ticket_keeps_audio_and_reschedules_retention(
     assert events == []
 
 
-def test_closed_correlated_ticket_purges_audio_and_persists_events(
+def test_closed_correlated_ticket_purges_audio_and_database_aggregate(
     glpi_environment: GlpiTestEnvironment,
     migrated_engine: Engine,
     tmp_path: Path,
@@ -141,18 +140,9 @@ def test_closed_correlated_ticket_purges_audio_and_persists_events(
         job = session.get(TicketCreationJob, job_uuid)
         retention = session.get(AudioRetention, job_uuid)
         events = _retention_events(session, job_uuid)
-    assert job is not None
-    assert job.status == JobStatus.COMPLETED.value
-    assert retention is not None
-    assert retention.status == RetentionStatus.DELETED.value
-    assert retention.deletion_reason == "ticket_closed"
-    assert retention.last_glpi_status_id == int(TicketStatus.CLOSED)
-    assert retention.audio_deleted_at == NOW
-    assert [event.event_type for event in events] == [
-        JobEventType.AUDIO_DELETION_STARTED.value,
-        JobEventType.AUDIO_DELETED.value,
-    ]
-    assert all(event.actor == JobEventActor.WORKER_RETENTION.value for event in events)
+    assert job is None
+    assert retention is None
+    assert events == []
 
 
 def test_ticket_correlated_to_another_uuid_blocks_retention_and_keeps_audio(

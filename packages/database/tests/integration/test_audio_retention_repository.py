@@ -512,7 +512,7 @@ def test_future_glpi_retry_probe_does_not_suspend_local_deadline(
     )
 
 
-def test_deadline_deleting_deleted_chain_is_durable(
+def test_deadline_deleting_deleted_chain_exposes_legacy_purge_candidate(
     migrated_engine: Engine,
 ) -> None:
     session_factory = create_session_factory(migrated_engine)
@@ -554,7 +554,11 @@ def test_deadline_deleting_deleted_chain_is_durable(
         )
     assert deleted.status is RetentionStatus.DELETED
     assert deleted.audio_deleted_at == deleted_at
-    assert _find_candidate(session_factory, deleted_at) is None
+    _assert_candidate(
+        _find_candidate(session_factory, deleted_at),
+        kind=RetentionCandidateKind.PURGE_DELETED_AGGREGATE,
+        job_uuid=job_uuid,
+    )
 
     persisted = _get_retention(session_factory, job_uuid)
     assert persisted.deletion_reason is DeletionReason.FAILED_TTL

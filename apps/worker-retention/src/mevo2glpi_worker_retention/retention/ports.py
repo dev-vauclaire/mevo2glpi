@@ -45,7 +45,17 @@ class AudioPurgeWork:
     consecutive_retry_count: int
 
 
-type PreparedRetentionWork = CheckRecoveryWork | GlpiCheckWork | AudioPurgeWork
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DatabasePurgeWork:
+    """Detached data needed to remove one legacy audio-deleted aggregate."""
+
+    job_uuid: UUID
+    reason: DeletionReason
+
+
+type PreparedRetentionWork = (
+    CheckRecoveryWork | GlpiCheckWork | AudioPurgeWork | DatabasePurgeWork
+)
 type ExternalRetentionWork = GlpiCheckWork | AudioPurgeWork
 
 
@@ -97,7 +107,10 @@ class RetentionLifecycleProtocol(Protocol):
         now: datetime,
     ) -> None: ...
 
-    def mark_deleted(self, work: AudioPurgeWork, *, now: datetime) -> None: ...
+    def purge_database_aggregate(
+        self,
+        work: AudioPurgeWork | DatabasePurgeWork,
+    ) -> None: ...
 
 
 class RetryBackoffProtocol(Protocol):
@@ -133,6 +146,7 @@ __all__ = [
     "AudioPurgeWork",
     "AudioPurgerProtocol",
     "CheckRecoveryWork",
+    "DatabasePurgeWork",
     "ExternalRetentionWork",
     "GlpiCheckStageProtocol",
     "GlpiCheckWork",

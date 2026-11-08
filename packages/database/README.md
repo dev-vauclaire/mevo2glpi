@@ -26,6 +26,8 @@ par modèle, et les verrous advisory protègent l'unicité des workers persistan
 - exposer le heartbeat expurgé des workers singleton ;
 - exposer des agrégats bornés de lecture pour l'observabilité, sans persister
   d'alerte ;
+- fournir des primitives de suppression limitées à un modèle afin que
+  l'application puisse purger un agrégat sans cascade implicite ;
 - conserver un verrou advisory PostgreSQL sur une connexion dédiée pendant la
   durée de vie d'un worker ;
 - retourner des snapshots immuables et typés plutôt que des objets ORM liés à
@@ -89,8 +91,34 @@ active. Un statut `checking` porte toujours `last_checked_at`, et une
 suppression confirmée ne peut pas précéder `deletion_started_at`.
 
 L'index `(status, updated_at DESC, job_uuid DESC)` couvre les agrégats par état
-du dashboard lorsque les lignes `deleted` commencent à s'accumuler. Les
-deadlines et retries continuent d'utiliser leurs index partiels dédiés.
+du dashboard. Les deadlines et retries continuent d'utiliser leurs index
+partiels dédiés. Le statut `deleted` reste accepté pour reprendre les agrégats
+créés par une version antérieure ; ces lignes sont purgées par le worker de
+rétention et ne constituent plus un historique durable.
+
+## Purge de l'agrégat après suppression audio
+
+La suppression durable de l'audio entraîne immédiatement la suppression de
+l'agrégat PostgreSQL associé. L'application conserve la frontière
+transactionnelle et appelle des primitives model-scoped dans cet ordre :
+
+1. événements de l'ingestion Exchange liée ;
+2. ingestion Exchange liée, lorsqu'elle existe ;
+3. événements du job ;
+4. rétention audio ;
+5. job.
+
+Chaque repository supprime uniquement les lignes de son modèle, effectue un
+`flush()` et ne réalise jamais de `commit()`. Les clés étrangères restent en
+`RESTRICT` ; aucun `ON DELETE CASCADE` ne remplace cette orchestration explicite.
+Une erreur annule donc l'ensemble de la transaction sans laisser de ligne
+orpheline.
+
+L'intention `deleting` est persistée avant toute opération de stockage. Si le
+fichier est supprimé mais que la transaction PostgreSQL échoue, le worker
+reprend cette intention, accepte l'absence idempotente du fichier et retente la
+purge complète. Les ingestions `Rejected` sans job ne participent pas à cet
+agrégat et conservent leur comportement actuel.
 
 ## Contrat d'ingestion des messages
 

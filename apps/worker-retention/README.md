@@ -4,7 +4,8 @@ Cette application applique la politique de conservation des audios après la
 fin d'un job. PostgreSQL est son unique source de vérité : elle ne parcourt
 jamais le volume pour découvrir du travail. Elle lit un ticket GLPI directement
 par son identifiant connu, conserve l'audio tant que le ticket n'est pas fermé
-et le supprime au plus tard à la deadline persistée.
+et le supprime au plus tard à la deadline persistée. Une fois cette suppression
+confirmée, elle supprime immédiatement l'agrégat PostgreSQL associé au job.
 
 Le worker est un membre autonome du workspace. Il partage les packages
 `common`, `database` et `glpi-client`, mais n'importe aucun module interne du
@@ -40,7 +41,7 @@ expurgé :
 | `RetryScheduledOutcome` | Une indisponibilité temporaire a été persistée avec backoff. |
 | `SystemBlockedOutcome` | Une erreur GLPI globale exige une sonde différée. |
 | `RetentionBlockedOutcome` | Une ambiguïté propre à cette rétention exige une décision opérateur. |
-| `AudioDeletedOutcome` | L'audio et l'état durable de suppression sont finalisés. |
+| `AudioDeletedOutcome` | L'audio et l'agrégat PostgreSQL associé sont supprimés. |
 | `StaleCandidateOutcome` | Une transition concurrente a rendu la sélection caduque sans action externe. |
 
 Aucun outcome, événement, log ou heartbeat ne contient de secret, de réponse
@@ -57,6 +58,7 @@ flowchart TD
     Heartbeat --> Select{Candidat PostgreSQL prioritaire}
 
     Select -->|deleting| Purge[Reprendre la purge]
+    Select -->|deleted historique| DatabasePurge[Supprimer l'agrégat PostgreSQL]
     Select -->|checking| Recover[Replanifier le contrôle interrompu]
     Select -->|deadline atteinte| Intent[Persister deleting + événement]
     Select -->|retry de purge dû| Purge
@@ -77,7 +79,8 @@ flowchart TD
     Intent --> Purge
     Purge --> Move[Publier create-only vers .purge sur le même volume]
     Move --> Unlink[Supprimer et synchroniser]
-    Unlink --> Deleted[Persister deleted + événement]
+    Unlink --> DatabasePurge
+    DatabasePurge --> Done[Retourner AudioDeletedOutcome]
 ```
 
 La priorité est volontairement indépendante de GLPI pour les deadlines. Une
@@ -101,17 +104,30 @@ La suppression utilise la quarantaine privée
    canonique est retiré ;
 3. les répertoires sont synchronisés, le fichier est supprimé, puis la
    quarantaine est synchronisée ;
-4. une nouvelle transaction persiste `deleted` et `audio_deleted`.
+4. une nouvelle transaction supprime les événements de l'ingestion, l'ingestion
+   acceptée éventuelle, les événements du job, la rétention, puis le job.
 
 Après un crash, le worker reprend selon l'état exact : fichier canonique seul,
 deux noms du même inode, fichier en quarantaine seul ou deux entrées absentes.
+Si le fichier a disparu mais que la transaction PostgreSQL n'a pas été validée,
+la rétention reste en `deleting` et la purge est retentée intégralement. Une
+erreur SQL intermédiaire annule toute la transaction et ne laisse aucune ligne
+orpheline. Les anciennes rétentions déjà persistées avec le statut `deleted`
+sont également supprimées unitairement, sans retenter une opération sur le
+volume audio.
+
 Deux noms portant des inodes distincts, un lien symbolique, un fichier non
 régulier ou une `storage_key` invalide sont des ambiguïtés terminales pour la
 rétention ; aucun chemin arbitraire n'est supprimé.
 
 Aucune transaction SQL ne reste ouverte pendant un appel HTTP ou une opération
-de stockage. Les transactions multi-modèles verrouillent toujours le job avant
-sa rétention et écrivent l'événement dans la même transaction.
+de stockage. La transaction finale verrouille et revalide toujours le job avant
+de supprimer son agrégat. Chaque repository ne supprime que son propre modèle ;
+le service applicatif orchestre leur ordre sans `ON DELETE CASCADE`.
+
+Les ingestions placées dans `Rejected` sans création de job ne sont pas
+concernées : elles restent observables et rejouables selon le comportement
+existant.
 
 ## Runtime et heartbeat
 

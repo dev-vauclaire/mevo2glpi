@@ -201,6 +201,35 @@ def test_lock_by_uuid_rejects_an_unknown_job() -> None:
     session.flush.assert_not_called()
 
 
+def test_delete_by_uuid_deletes_only_the_locked_job() -> None:
+    session = create_autospec(Session, instance=True)
+    job_uuid = uuid4()
+    job = _persisted_job(job_uuid, datetime(2026, 8, 27, 12, tzinfo=UTC))
+    session.get.return_value = job
+
+    TicketCreationJobRepository(session).delete_by_uuid(job_uuid)
+
+    session.get.assert_called_once_with(
+        TicketCreationJob,
+        job_uuid,
+        with_for_update=True,
+    )
+    session.delete.assert_called_once_with(job)
+    session.flush.assert_called_once_with()
+    session.commit.assert_not_called()
+
+
+def test_delete_by_uuid_rejects_an_unknown_job() -> None:
+    session = create_autospec(Session, instance=True)
+    session.get.return_value = None
+
+    with pytest.raises(database_api.JobNotFoundError, match="does not exist"):
+        TicketCreationJobRepository(session).delete_by_uuid(uuid4())
+
+    session.delete.assert_not_called()
+    session.flush.assert_not_called()
+
+
 def test_list_page_returns_a_stable_cursor_from_the_last_visible_job() -> None:
     session = create_autospec(Session, instance=True)
     oldest_time = datetime(2026, 8, 27, 10, tzinfo=UTC)

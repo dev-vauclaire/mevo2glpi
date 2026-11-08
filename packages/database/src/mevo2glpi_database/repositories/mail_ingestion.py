@@ -183,6 +183,29 @@ class MailIngestionRepository:
         ).first()
         return _to_snapshot(ingestion) if ingestion is not None else None
 
+    def get_by_job_uuid(self, job_uuid: UUID) -> MailIngestionSnapshot | None:
+        """Return the optional ingestion linked to one application job."""
+        validate_uuid(job_uuid, "job_uuid")
+        ingestion = self._session.scalars(
+            select(MailIngestion).where(MailIngestion.job_uuid == job_uuid).limit(1)
+        ).first()
+        return _to_snapshot(ingestion) if ingestion is not None else None
+
+    def delete_by_uuid(self, ingestion_uuid: UUID) -> None:
+        """Delete one locked ingestion without touching related models."""
+        validate_uuid(ingestion_uuid, "ingestion_uuid")
+        ingestion = self._session.get(
+            MailIngestion,
+            ingestion_uuid,
+            with_for_update=True,
+        )
+        if ingestion is None:
+            raise MailIngestionNotFoundError(
+                f"mail ingestion {ingestion_uuid} does not exist"
+            )
+        self._session.delete(ingestion)
+        self._session.flush()
+
     def clear_originating_phone_number_ciphertext(
         self,
         ingestion_uuid: UUID,

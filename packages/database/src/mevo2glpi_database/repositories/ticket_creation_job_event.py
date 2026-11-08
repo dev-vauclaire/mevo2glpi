@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -139,6 +139,17 @@ class TicketCreationJobEventRepository:
             .limit(1)
         )
         return self._session.scalar(statement) is not None
+
+    def delete_by_job_uuid(self, job_uuid: UUID) -> int:
+        """Delete every event owned by one job and return the affected count."""
+        validate_uuid(job_uuid, "job_uuid")
+        result = self._session.execute(
+            delete(TicketCreationJobEvent).where(
+                TicketCreationJobEvent.job_uuid == job_uuid
+            )
+        )
+        self._session.flush()
+        return result.rowcount if result.rowcount is not None else 0
 
     def list_page(
         self,

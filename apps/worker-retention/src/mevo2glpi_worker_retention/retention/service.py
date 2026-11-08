@@ -33,6 +33,7 @@ from .ports import (
     AudioPurgerProtocol,
     AudioPurgeWork,
     CheckRecoveryWork,
+    DatabasePurgeWork,
     GlpiCheckStageProtocol,
     GlpiCheckWork,
     RetentionLifecycleProtocol,
@@ -120,6 +121,8 @@ class RetentionWorker:
                 return self._execute_glpi_check(work)
             if isinstance(work, AudioPurgeWork):
                 return self._execute_audio_purge(work)
+            if isinstance(work, DatabasePurgeWork):
+                return self._execute_database_purge(work)
             raise AssertionError("unsupported prepared retention work")
         except StaleRetentionCandidateError:
             LOGGER.info("retention candidate became stale job_uuid=%s", job_uuid)
@@ -311,10 +314,21 @@ class RetentionWorker:
                 failure=failure,
             )
 
-        completed_at = self._current_time()
-        self._lifecycle.mark_deleted(work, now=completed_at)
+        self._lifecycle.purge_database_aggregate(work)
         LOGGER.info(
-            "audio purge completed job_uuid=%s deletion_reason=%s",
+            "audio and database purge completed job_uuid=%s deletion_reason=%s",
+            work.job_uuid,
+            work.reason.value,
+        )
+        return AudioDeletedOutcome(job_uuid=work.job_uuid, reason=work.reason)
+
+    def _execute_database_purge(
+        self,
+        work: DatabasePurgeWork,
+    ) -> RetentionRunOutcome:
+        self._lifecycle.purge_database_aggregate(work)
+        LOGGER.info(
+            "legacy database aggregate purge completed job_uuid=%s deletion_reason=%s",
             work.job_uuid,
             work.reason.value,
         )

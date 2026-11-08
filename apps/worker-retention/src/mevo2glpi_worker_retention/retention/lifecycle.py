@@ -20,9 +20,15 @@ from mevo2glpi_database import (
     JobNotFoundError,
     JobSnapshot,
     JobStatus,
+    MailIngestionDisposition,
+    MailIngestionEventRepository,
+    MailIngestionNotFoundError,
+    MailIngestionRepository,
+    MailIngestionStatus,
     RetentionCandidate,
     RetentionCandidateKind,
     RetentionNotFoundError,
+    RetentionStatus,
     TicketCreationJobEventRepository,
     TicketCreationJobRepository,
 )
@@ -33,6 +39,7 @@ from .policies import RetentionCheckPolicy
 from .ports import (
     AudioPurgeWork,
     CheckRecoveryWork,
+    DatabasePurgeWork,
     ExternalRetentionWork,
     GlpiCheckWork,
     PreparedRetentionWork,
@@ -71,12 +78,23 @@ class RetentionJobLifecycleService:
         event_repository_factory: Callable[
             [Session], TicketCreationJobEventRepository
         ] = TicketCreationJobEventRepository,
+        ingestion_repository_factory: Callable[
+            [Session], MailIngestionRepository
+        ] = MailIngestionRepository,
+        ingestion_event_repository_factory: Callable[
+            [Session], MailIngestionEventRepository
+        ] = MailIngestionEventRepository,
     ) -> None:
         for value, field_name in (
             (session_factory, "session_factory"),
             (job_repository_factory, "job_repository_factory"),
             (retention_repository_factory, "retention_repository_factory"),
             (event_repository_factory, "event_repository_factory"),
+            (ingestion_repository_factory, "ingestion_repository_factory"),
+            (
+                ingestion_event_repository_factory,
+                "ingestion_event_repository_factory",
+            ),
         ):
             if not callable(value):
                 raise TypeError(f"{field_name} must be callable")
@@ -91,6 +109,8 @@ class RetentionJobLifecycleService:
         self._job_repository_factory = job_repository_factory
         self._retention_repository_factory = retention_repository_factory
         self._event_repository_factory = event_repository_factory
+        self._ingestion_repository_factory = ingestion_repository_factory
+        self._ingestion_event_repository_factory = ingestion_event_repository_factory
 
     def find_next_candidate(self, now: datetime) -> RetentionCandidate | None:
         """Read the next candidate without retaining a transaction or lock."""
@@ -165,6 +185,18 @@ class RetentionJobLifecycleService:
                 self._require_terminal_job(job)
                 retention = retention_repository.resume_deletion(job_uuid, now=now)
                 return self._purge_work(job, retention)
+
+            if candidate.kind is RetentionCandidateKind.PURGE_DELETED_AGGREGATE:
+                self._require_terminal_job(job)
+                retention = retention_repository.get_by_job_uuid(job_uuid)
+                if retention is None or retention.status is not RetentionStatus.DELETED:
+                    raise StaleRetentionCandidateError(job_uuid)
+                if retention.deletion_reason is None:
+                    raise RetentionJobInvariantError("deletion context has no reason")
+                return DatabasePurgeWork(
+                    job_uuid=job.uuid,
+                    reason=retention.deletion_reason,
+                )
 
             raise AssertionError("unsupported retention candidate kind")
 
@@ -303,23 +335,48 @@ class RetentionJobLifecycleService:
 
         self._stale_aware_transaction(work.job_uuid, operation)
 
-    def mark_deleted(self, work: AudioPurgeWork, *, now: datetime) -> None:
-        """Confirm filesystem deletion and append its audit event atomically."""
+    def purge_database_aggregate(
+        self,
+        work: AudioPurgeWork | DatabasePurgeWork,
+    ) -> None:
+        """Delete every persisted row owned by a successfully purged audio."""
         _require_purge_work(work)
 
         def operation(session: Session) -> None:
-            job = self._job_repository_factory(session).lock_by_uuid(work.job_uuid)
+            job_repository = self._job_repository_factory(session)
+            job = job_repository.lock_by_uuid(work.job_uuid)
             self._require_terminal_job(job)
-            self._retention_repository_factory(session).mark_deleted(
-                work.job_uuid,
-                now=now,
-            )
-            self._append_event(
-                session,
-                job,
-                event_type=JobEventType.AUDIO_DELETED,
-                occurred_at=now,
-            )
+            retention_repository = self._retention_repository_factory(session)
+            retention = retention_repository.get_by_job_uuid(work.job_uuid)
+            if retention is None or retention.status not in {
+                RetentionStatus.DELETING,
+                RetentionStatus.DELETED,
+            }:
+                raise StaleRetentionCandidateError(work.job_uuid)
+            if retention.deletion_reason is not work.reason:
+                raise RetentionJobInvariantError(
+                    "audio purge reason does not match persisted deletion intent"
+                )
+
+            ingestion_repository = self._ingestion_repository_factory(session)
+            ingestion = ingestion_repository.get_by_job_uuid(work.job_uuid)
+            if ingestion is not None:
+                if (
+                    ingestion.job_uuid != work.job_uuid
+                    or ingestion.status is not MailIngestionStatus.COMPLETED
+                    or ingestion.disposition is not MailIngestionDisposition.ACCEPTED
+                ):
+                    raise RetentionJobInvariantError(
+                        "linked ingestion is not a completed acceptance"
+                    )
+                self._ingestion_event_repository_factory(
+                    session
+                ).delete_by_ingestion_uuid(ingestion.uuid)
+                ingestion_repository.delete_by_uuid(ingestion.uuid)
+
+            self._event_repository_factory(session).delete_by_job_uuid(work.job_uuid)
+            retention_repository.delete_by_job_uuid(work.job_uuid)
+            job_repository.delete_by_uuid(work.job_uuid)
 
         self._stale_aware_transaction(work.job_uuid, operation)
 
@@ -399,6 +456,7 @@ class RetentionJobLifecycleService:
             except (
                 InvalidRetentionTransitionError,
                 JobNotFoundError,
+                MailIngestionNotFoundError,
                 RetentionNotFoundError,
             ) as error:
                 raise StaleRetentionCandidateError(job_uuid) from error
@@ -419,8 +477,8 @@ def _require_glpi_work(value: object) -> None:
 
 
 def _require_purge_work(value: object) -> None:
-    if not isinstance(value, AudioPurgeWork):
-        raise TypeError("work must be an AudioPurgeWork")
+    if not isinstance(value, AudioPurgeWork | DatabasePurgeWork):
+        raise TypeError("work must be an AudioPurgeWork or DatabasePurgeWork")
 
 
 def _require_failure(value: object) -> None:

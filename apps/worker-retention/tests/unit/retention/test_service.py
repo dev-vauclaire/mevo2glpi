@@ -44,7 +44,10 @@ from mevo2glpi_worker_retention.retention.outcomes import (
     SystemBlockedOutcome,
 )
 from mevo2glpi_worker_retention.retention.policies import RetentionCheckPolicy
-from mevo2glpi_worker_retention.retention.ports import CheckRecoveryWork
+from mevo2glpi_worker_retention.retention.ports import (
+    CheckRecoveryWork,
+    DatabasePurgeWork,
+)
 from mevo2glpi_worker_retention.retention.service import RetentionWorker
 from mevo2glpi_worker_retention.retention.stages import GlpiCheckStage
 
@@ -185,7 +188,7 @@ def test_closed_ticket_starts_and_completes_ticket_closed_purge() -> None:
         "find_next_candidate",
         "prepare_candidate",
         "start_deletion_after_check",
-        "mark_deleted",
+        "purge_database_aggregate",
     ]
     deletion_call = lifecycle.calls[2]
     assert deletion_call[2] is DeletionReason.TICKET_CLOSED
@@ -257,7 +260,7 @@ def test_deadline_crossed_during_glpi_call_takes_priority_over_result(
         "find_next_candidate",
         "prepare_candidate",
         "start_deletion_after_check",
-        "mark_deleted",
+        "purge_database_aggregate",
     ]
     assert lifecycle.calls[2][2] is DeletionReason.DEADLINE_EXPIRED
     assert lifecycle.calls[2][3] is expected_observed_status
@@ -405,7 +408,7 @@ def test_persisted_probe_gate_waits_without_fanning_out_or_busy_loop(
     assert purger.storage_keys == []
 
 
-def test_successful_prepared_purge_marks_audio_deleted() -> None:
+def test_successful_prepared_purge_removes_audio_and_database_aggregate() -> None:
     work = purge_work(reason=DeletionReason.FAILED_TTL)
     lifecycle = FakeLifecycle(
         candidate=retention_candidate(
@@ -415,7 +418,7 @@ def test_successful_prepared_purge_marks_audio_deleted() -> None:
     )
     worker, purger, reader = _worker(
         lifecycle,
-        clock=ScriptedClock(NOW, NOW + timedelta(seconds=1)),
+        clock=ScriptedClock(NOW),
     )
 
     outcome = worker.run_once()
@@ -424,8 +427,35 @@ def test_successful_prepared_purge_marks_audio_deleted() -> None:
         job_uuid=JOB_UUID,
         reason=DeletionReason.FAILED_TTL,
     )
-    assert _call_names(lifecycle)[-1] == "mark_deleted"
+    assert _call_names(lifecycle)[-1] == "purge_database_aggregate"
     assert purger.storage_keys == [STORAGE_KEY]
+    assert reader.ticket_ids == []
+
+
+def test_legacy_deleted_aggregate_is_purged_without_touching_storage() -> None:
+    work = DatabasePurgeWork(
+        job_uuid=JOB_UUID,
+        reason=DeletionReason.FAILED_TTL,
+    )
+    lifecycle = FakeLifecycle(
+        candidate=retention_candidate(
+            RetentionCandidateKind.PURGE_DELETED_AGGREGATE,
+        ),
+        prepared_work=work,
+    )
+    worker, purger, reader = _worker(
+        lifecycle,
+        clock=ScriptedClock(NOW),
+    )
+
+    outcome = worker.run_once()
+
+    assert outcome == AudioDeletedOutcome(
+        job_uuid=JOB_UUID,
+        reason=DeletionReason.FAILED_TTL,
+    )
+    assert _call_names(lifecycle)[-1] == "purge_database_aggregate"
+    assert purger.storage_keys == []
     assert reader.ticket_ids == []
 
 

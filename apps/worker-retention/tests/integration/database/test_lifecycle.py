@@ -48,7 +48,7 @@ NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
 ACTIVATED_AT = NOW - timedelta(days=1)
 
 
-def test_closed_ticket_deletion_is_durable_resumable_and_audited(
+def test_closed_ticket_deletion_is_durable_resumable_and_purges_database(
     migrated_engine: Engine,
 ) -> None:
     session_factory = create_session_factory(migrated_engine)
@@ -88,24 +88,15 @@ def test_closed_ticket_deletion_is_durable_resumable_and_audited(
     )
     assert resumed_work == purge_work
 
-    lifecycle.mark_deleted(resumed_work, now=NOW + timedelta(seconds=3))
+    lifecycle.purge_database_aggregate(resumed_work)
 
     with session_factory() as session:
         job = session.get(TicketCreationJob, job_uuid)
         retention = session.get(AudioRetention, job_uuid)
         events = _retention_events(session, job_uuid)
-    assert job is not None
-    assert job.status == JobStatus.COMPLETED.value
-    assert retention is not None
-    assert retention.status == RetentionStatus.DELETED.value
-    assert retention.deletion_reason == DeletionReason.TICKET_CLOSED.value
-    assert retention.last_glpi_status_id == int(TicketStatus.CLOSED)
-    assert retention.audio_deleted_at == NOW + timedelta(seconds=3)
-    assert [event.event_type for event in events] == [
-        JobEventType.AUDIO_DELETION_STARTED.value,
-        JobEventType.AUDIO_DELETED.value,
-    ]
-    assert all(event.actor == JobEventActor.WORKER_RETENTION.value for event in events)
+    assert job is None
+    assert retention is None
+    assert events == []
 
 
 @pytest.mark.parametrize(
@@ -155,7 +146,7 @@ def test_deadline_preparation_uses_the_terminal_job_reason(
     ]
 
 
-def test_deletion_retry_resumes_then_marks_deleted_with_atomic_events(
+def test_deletion_retry_resumes_then_purges_the_database_aggregate(
     migrated_engine: Engine,
 ) -> None:
     session_factory = create_session_factory(migrated_engine)
@@ -193,25 +184,15 @@ def test_deletion_retry_resumes_then_marks_deleted_with_atomic_events(
     resumed_work = lifecycle.prepare_candidate(retry_candidate, retry_at)
     assert isinstance(resumed_work, AudioPurgeWork)
     assert resumed_work.consecutive_retry_count == 1
-    lifecycle.mark_deleted(resumed_work, now=retry_at + timedelta(seconds=1))
+    lifecycle.purge_database_aggregate(resumed_work)
 
     with session_factory() as session:
+        job = session.get(TicketCreationJob, job_uuid)
         retention = session.get(AudioRetention, job_uuid)
         events = _retention_events(session, job_uuid)
-    assert retention is not None
-    assert retention.status == RetentionStatus.DELETED.value
-    assert retention.consecutive_retry_count == 0
-    assert retention.last_error_category is None
-    assert retention.last_error_code is None
-    assert [event.event_type for event in events] == [
-        JobEventType.AUDIO_DELETION_STARTED.value,
-        JobEventType.RETENTION_RETRY_SCHEDULED.value,
-        JobEventType.AUDIO_DELETED.value,
-    ]
-    retry_event = events[1]
-    assert retry_event.error_scope == ErrorScope.SYSTEM.value
-    assert retry_event.error_category == "storage_unavailable"
-    assert retry_event.technical_code == "unlink_failed"
+    assert job is None
+    assert retention is None
+    assert events == []
 
 
 def test_glpi_retry_persists_the_probe_and_its_event(
@@ -405,6 +386,43 @@ def test_event_failure_rolls_back_deletion_intent_and_event(
     assert events == []
 
 
+def test_database_aggregate_purge_rolls_back_every_delete_on_failure(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    job_uuid = _uuid(172)
+    _add_terminal_retention(
+        session_factory,
+        job_uuid,
+        status=JobStatus.FAILED,
+        hard_delete_at=NOW,
+        next_check_at=None,
+    )
+    lifecycle = _lifecycle(session_factory)
+    candidate = lifecycle.find_next_candidate(NOW)
+    assert candidate is not None
+    work = lifecycle.prepare_candidate(candidate, NOW)
+    assert isinstance(work, AudioPurgeWork)
+    failing_lifecycle = _lifecycle(
+        session_factory,
+        event_repository_factory=_FailAfterDeleteEventRepository,
+    )
+
+    with pytest.raises(_SyntheticEventFailure):
+        failing_lifecycle.purge_database_aggregate(work)
+
+    with session_factory() as session:
+        job = session.get(TicketCreationJob, job_uuid)
+        retention = session.get(AudioRetention, job_uuid)
+        events = _retention_events(session, job_uuid)
+    assert job is not None
+    assert retention is not None
+    assert retention.status == RetentionStatus.DELETING.value
+    assert [event.event_type for event in events] == [
+        JobEventType.AUDIO_DELETION_STARTED.value
+    ]
+
+
 def test_selected_candidate_becoming_checking_is_reported_as_stale(
     migrated_engine: Engine,
 ) -> None:
@@ -465,6 +483,12 @@ class _FailAfterAppendEventRepository(TicketCreationJobEventRepository):
             error_category=error_category,
             technical_code=technical_code,
         )
+        raise _SyntheticEventFailure
+
+
+class _FailAfterDeleteEventRepository(TicketCreationJobEventRepository):
+    def delete_by_job_uuid(self, job_uuid: UUID) -> int:
+        super().delete_by_job_uuid(job_uuid)
         raise _SyntheticEventFailure
 
 

@@ -21,6 +21,7 @@ from mevo2glpi_worker_retention.retention.outcomes import (
 )
 from mevo2glpi_worker_retention.retention.ports import (
     AudioPurgeWork,
+    DatabasePurgeWork,
     ExternalRetentionWork,
     GlpiCheckWork,
     PreparedRetentionWork,
@@ -243,8 +244,11 @@ class FakeLifecycle:
     ) -> None:
         self.calls.append(("mark_blocked", work, failure, now))
 
-    def mark_deleted(self, work: AudioPurgeWork, *, now: datetime) -> None:
-        self.calls.append(("mark_deleted", work, now))
+    def purge_database_aggregate(
+        self,
+        work: AudioPurgeWork | DatabasePurgeWork,
+    ) -> None:
+        self.calls.append(("purge_database_aggregate", work))
 
 
 class FakeAudioPurger:

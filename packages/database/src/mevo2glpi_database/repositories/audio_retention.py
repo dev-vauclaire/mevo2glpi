@@ -43,6 +43,7 @@ class RetentionCandidateKind(StrEnum):
     START_DELETION_AT_DEADLINE = "start_deletion_at_deadline"
     RESUME_DELETION_RETRY = "resume_deletion_retry"
     START_GLPI_CHECK = "start_glpi_check"
+    PURGE_DELETED_AGGREGATE = "purge_deleted_aggregate"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -168,6 +169,19 @@ class AudioRetentionRepository:
         validate_uuid(job_uuid, "job_uuid")
         retention = self._session.get(AudioRetention, job_uuid)
         return _to_snapshot(retention) if retention is not None else None
+
+    def delete_by_job_uuid(self, job_uuid: UUID) -> None:
+        """Delete one locked retention row without touching its parent job."""
+        validate_uuid(job_uuid, "job_uuid")
+        retention = self._session.get(
+            AudioRetention,
+            job_uuid,
+            with_for_update=True,
+        )
+        if retention is None:
+            raise RetentionNotFoundError(f"retention for job {job_uuid} does not exist")
+        self._session.delete(retention)
+        self._session.flush()
 
     def get_alert_summary(
         self,
@@ -311,6 +325,10 @@ class AudioRetentionRepository:
             (
                 RetentionCandidateKind.START_GLPI_CHECK,
                 self._glpi_check_candidate_statement(now),
+            ),
+            (
+                RetentionCandidateKind.PURGE_DELETED_AGGREGATE,
+                self._deleted_candidate_statement(),
             ),
         )
         for kind, statement in searches:
@@ -697,6 +715,14 @@ class AudioRetentionRepository:
                 AudioRetention.next_check_at,
                 AudioRetention.job_uuid,
             )
+            .limit(1)
+        )
+
+    def _deleted_candidate_statement(self) -> Select[tuple[AudioRetention]]:
+        return (
+            select(AudioRetention)
+            .where(AudioRetention.status == RetentionStatus.DELETED.value)
+            .order_by(AudioRetention.audio_deleted_at, AudioRetention.job_uuid)
             .limit(1)
         )
 

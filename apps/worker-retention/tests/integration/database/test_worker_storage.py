@@ -56,7 +56,7 @@ AUDIO_BYTES = b"RIFF-retention-integration-audio"
 CHECK_INTERVAL = timedelta(hours=6)
 
 
-def test_failed_deadline_deletes_canonical_audio_and_persists_audit(
+def test_failed_deadline_deletes_audio_and_database_aggregate(
     migrated_engine: Engine,
     tmp_path: Path,
 ) -> None:
@@ -87,15 +87,7 @@ def test_failed_deadline_deletes_canonical_audio_and_persists_audit(
     assert not canonical.exists()
     assert not _quarantine_path(audio_root, storage_key).exists()
     assert ticket_reader.ticket_ids == []
-    retention, job, events = _stored_state(session_factory, job_uuid)
-    assert job.status == JobStatus.FAILED.value
-    assert retention.status == RetentionStatus.DELETED.value
-    assert retention.deletion_reason == DeletionReason.FAILED_TTL.value
-    assert retention.audio_deleted_at == NOW + timedelta(seconds=1)
-    assert events == [
-        JobEventType.AUDIO_DELETION_STARTED.value,
-        JobEventType.AUDIO_DELETED.value,
-    ]
+    _assert_aggregate_absent(session_factory, job_uuid)
 
 
 @pytest.mark.parametrize(
@@ -149,12 +141,48 @@ def test_deleting_database_state_recovers_every_unambiguous_storage_state(
     assert not (audio_root / storage_key).exists()
     assert not _quarantine_path(audio_root, storage_key).exists()
     assert ticket_reader.ticket_ids == []
-    retention, _job, events = _stored_state(session_factory, job_uuid)
-    assert retention.status == RetentionStatus.DELETED.value
-    assert events == [
-        JobEventType.AUDIO_DELETION_STARTED.value,
-        JobEventType.AUDIO_DELETED.value,
-    ]
+    _assert_aggregate_absent(session_factory, job_uuid)
+
+
+def test_legacy_deleted_retention_is_purged_without_an_audio_file(
+    migrated_engine: Engine,
+    tmp_path: Path,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    audio_root = _audio_root(tmp_path)
+    job_uuid = _uuid(314)
+    _add_terminal_retention(
+        session_factory,
+        job_uuid,
+        status=JobStatus.FAILED,
+        hard_delete_at=NOW,
+        next_check_at=None,
+    )
+    lifecycle = _lifecycle(session_factory)
+    candidate = lifecycle.find_next_candidate(NOW)
+    assert candidate is not None
+    lifecycle.prepare_candidate(candidate, NOW)
+    with session_factory.begin() as session:
+        AudioRetentionRepository(session).mark_deleted(
+            job_uuid,
+            now=NOW + timedelta(seconds=1),
+        )
+
+    worker, ticket_reader = _worker(
+        session_factory,
+        audio_root,
+        job_uuid=job_uuid,
+        clock=_Clock(NOW + timedelta(seconds=2)),
+    )
+
+    outcome = worker.run_once()
+
+    assert outcome == AudioDeletedOutcome(
+        job_uuid=job_uuid,
+        reason=DeletionReason.FAILED_TTL,
+    )
+    assert ticket_reader.ticket_ids == []
+    _assert_aggregate_absent(session_factory, job_uuid)
 
 
 def test_open_ticket_reschedules_check_and_keeps_audio_bytes(
@@ -200,7 +228,7 @@ def test_open_ticket_reschedules_check_and_keeps_audio_bytes(
     assert events == []
 
 
-def test_deadline_crossed_during_glpi_read_purges_and_records_observed_status(
+def test_deadline_crossed_during_glpi_read_purges_audio_and_database(
     migrated_engine: Engine,
     tmp_path: Path,
 ) -> None:
@@ -233,15 +261,7 @@ def test_deadline_crossed_during_glpi_read_purges_and_records_observed_status(
     )
     assert not canonical.exists()
     assert ticket_reader.ticket_ids == [_ticket_id(job_uuid)]
-    retention, job, events = _stored_state(session_factory, job_uuid)
-    assert job.status == JobStatus.COMPLETED.value
-    assert retention.status == RetentionStatus.DELETED.value
-    assert retention.deletion_reason == DeletionReason.DEADLINE_EXPIRED.value
-    assert retention.last_glpi_status_id == int(TicketStatus.ASSIGNED)
-    assert events == [
-        JobEventType.AUDIO_DELETION_STARTED.value,
-        JobEventType.AUDIO_DELETED.value,
-    ]
+    _assert_aggregate_absent(session_factory, job_uuid)
 
 
 def test_filesystem_failure_schedules_retry_with_deletion_context(
@@ -448,6 +468,23 @@ def _stored_state(
         session.expunge(retention)
         session.expunge(job)
     return retention, job, events
+
+
+def _assert_aggregate_absent(
+    session_factory: sessionmaker[Session],
+    job_uuid: UUID,
+) -> None:
+    with session_factory() as session:
+        assert session.get(AudioRetention, job_uuid) is None
+        assert session.get(TicketCreationJob, job_uuid) is None
+        assert (
+            session.scalars(
+                select(TicketCreationJobEvent).where(
+                    TicketCreationJobEvent.job_uuid == job_uuid
+                )
+            ).first()
+            is None
+        )
 
 
 def _audio_root(tmp_path: Path) -> Path:

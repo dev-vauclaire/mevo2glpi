@@ -177,6 +177,34 @@ def test_get_by_job_uuid_returns_a_typed_snapshot() -> None:
     session.flush.assert_not_called()
 
 
+def test_delete_by_job_uuid_deletes_only_the_locked_retention() -> None:
+    session = create_autospec(Session, instance=True)
+    retention = _retention(uuid4(), status=RetentionStatus.DELETING)
+    session.get.return_value = retention
+
+    AudioRetentionRepository(session).delete_by_job_uuid(retention.job_uuid)
+
+    session.get.assert_called_once_with(
+        AudioRetention,
+        retention.job_uuid,
+        with_for_update=True,
+    )
+    session.delete.assert_called_once_with(retention)
+    session.flush.assert_called_once_with()
+    session.commit.assert_not_called()
+
+
+def test_delete_by_job_uuid_rejects_an_unknown_retention() -> None:
+    session = create_autospec(Session, instance=True)
+    session.get.return_value = None
+
+    with pytest.raises(RetentionNotFoundError, match="does not exist"):
+        AudioRetentionRepository(session).delete_by_job_uuid(uuid4())
+
+    session.delete.assert_not_called()
+    session.flush.assert_not_called()
+
+
 def test_deactivate_for_operator_retry_clears_transient_retention_state() -> None:
     session = create_autospec(Session, instance=True)
     job_uuid = uuid4()

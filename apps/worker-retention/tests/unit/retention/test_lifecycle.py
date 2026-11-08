@@ -21,6 +21,8 @@ from mevo2glpi_database import (
     JobSnapshot,
     JobStage,
     JobStatus,
+    MailIngestionDisposition,
+    MailIngestionStatus,
     RetentionCandidate,
     RetentionCandidateKind,
     RetentionPolicy,
@@ -37,6 +39,7 @@ from mevo2glpi_worker_retention.retention.policies import RetentionCheckPolicy
 from mevo2glpi_worker_retention.retention.ports import (
     AudioPurgeWork,
     CheckRecoveryWork,
+    DatabasePurgeWork,
     GlpiCheckWork,
 )
 
@@ -377,6 +380,146 @@ def test_candidate_read_returns_a_detached_immutable_snapshot() -> None:
     session.close.assert_called_once_with()
     with pytest.raises(FrozenInstanceError):
         result.retention.status = RetentionStatus.CHECKING  # type: ignore[misc]
+
+
+def test_legacy_deleted_candidate_is_prepared_for_database_only_purge() -> None:
+    session = create_autospec(Session, instance=True)
+    job_repository = MagicMock()
+    retention_repository = MagicMock()
+    job_repository.lock_by_uuid.return_value = _job_snapshot()
+    retention_repository.get_by_job_uuid.return_value = _retention_snapshot(
+        status=RetentionStatus.DELETED,
+        deletion_reason=DeletionReason.TICKET_CLOSED,
+    )
+    service = _service(
+        session,
+        job_repository=job_repository,
+        retention_repository=retention_repository,
+        event_repository=MagicMock(),
+    )
+
+    work = service.prepare_candidate(
+        _candidate(
+            RetentionCandidateKind.PURGE_DELETED_AGGREGATE,
+            status=RetentionStatus.DELETED,
+        ),
+        NOW,
+    )
+
+    assert work == DatabasePurgeWork(
+        job_uuid=JOB_UUID,
+        reason=DeletionReason.TICKET_CLOSED,
+    )
+    retention_repository.get_by_job_uuid.assert_called_once_with(JOB_UUID)
+
+
+def test_database_aggregate_purge_orders_every_child_before_its_parent() -> None:
+    session = create_autospec(Session, instance=True)
+    manager = MagicMock()
+    job_repository = MagicMock()
+    retention_repository = MagicMock()
+    job_event_repository = MagicMock()
+    ingestion_repository = MagicMock()
+    ingestion_event_repository = MagicMock()
+    for name, repository in (
+        ("job", job_repository),
+        ("retention", retention_repository),
+        ("job_event", job_event_repository),
+        ("ingestion", ingestion_repository),
+        ("ingestion_event", ingestion_event_repository),
+    ):
+        manager.attach_mock(repository, name)
+    job_repository.lock_by_uuid.return_value = _job_snapshot()
+    retention_repository.get_by_job_uuid.return_value = _retention_snapshot(
+        status=RetentionStatus.DELETING,
+        deletion_reason=DeletionReason.TICKET_CLOSED,
+    )
+    ingestion = MagicMock(
+        uuid=JOB_UUID,
+        job_uuid=JOB_UUID,
+        status=MailIngestionStatus.COMPLETED,
+        disposition=MailIngestionDisposition.ACCEPTED,
+    )
+    ingestion_repository.get_by_job_uuid.return_value = ingestion
+    service = RetentionJobLifecycleService(
+        session_factory=lambda: session,
+        check_policy=RetentionCheckPolicy(check_interval=timedelta(hours=6)),
+        job_repository_factory=lambda _session: job_repository,
+        retention_repository_factory=lambda _session: retention_repository,
+        event_repository_factory=lambda _session: job_event_repository,
+        ingestion_repository_factory=lambda _session: ingestion_repository,
+        ingestion_event_repository_factory=lambda _session: ingestion_event_repository,
+    )
+
+    service.purge_database_aggregate(
+        AudioPurgeWork(
+            job_uuid=JOB_UUID,
+            storage_key=STORAGE_KEY,
+            reason=DeletionReason.TICKET_CLOSED,
+            consecutive_retry_count=0,
+        ),
+    )
+
+    assert manager.mock_calls == [
+        call.job.lock_by_uuid(JOB_UUID),
+        call.retention.get_by_job_uuid(JOB_UUID),
+        call.ingestion.get_by_job_uuid(JOB_UUID),
+        call.ingestion_event.delete_by_ingestion_uuid(JOB_UUID),
+        call.ingestion.delete_by_uuid(JOB_UUID),
+        call.job_event.delete_by_job_uuid(JOB_UUID),
+        call.retention.delete_by_job_uuid(JOB_UUID),
+        call.job.delete_by_uuid(JOB_UUID),
+    ]
+    session.begin.assert_called_once_with()
+    session.close.assert_called_once_with()
+
+
+def test_database_aggregate_purge_rejects_an_active_linked_ingestion() -> None:
+    session = create_autospec(Session, instance=True)
+    job_repository = MagicMock()
+    retention_repository = MagicMock()
+    job_event_repository = MagicMock()
+    ingestion_repository = MagicMock()
+    ingestion_event_repository = MagicMock()
+    job_repository.lock_by_uuid.return_value = _job_snapshot()
+    retention_repository.get_by_job_uuid.return_value = _retention_snapshot(
+        status=RetentionStatus.DELETING,
+        deletion_reason=DeletionReason.TICKET_CLOSED,
+    )
+    ingestion_repository.get_by_job_uuid.return_value = MagicMock(
+        uuid=JOB_UUID,
+        job_uuid=JOB_UUID,
+        status=MailIngestionStatus.PROCESSING,
+        disposition=MailIngestionDisposition.ACCEPTED,
+    )
+    service = RetentionJobLifecycleService(
+        session_factory=lambda: session,
+        check_policy=RetentionCheckPolicy(check_interval=timedelta(hours=6)),
+        job_repository_factory=lambda _session: job_repository,
+        retention_repository_factory=lambda _session: retention_repository,
+        event_repository_factory=lambda _session: job_event_repository,
+        ingestion_repository_factory=lambda _session: ingestion_repository,
+        ingestion_event_repository_factory=lambda _session: ingestion_event_repository,
+    )
+
+    with pytest.raises(
+        RetentionJobInvariantError,
+        match="linked ingestion is not a completed acceptance",
+    ):
+        service.purge_database_aggregate(
+            AudioPurgeWork(
+                job_uuid=JOB_UUID,
+                storage_key=STORAGE_KEY,
+                reason=DeletionReason.TICKET_CLOSED,
+                consecutive_retry_count=0,
+            )
+        )
+
+    ingestion_event_repository.delete_by_ingestion_uuid.assert_not_called()
+    ingestion_repository.delete_by_uuid.assert_not_called()
+    job_event_repository.delete_by_job_uuid.assert_not_called()
+    retention_repository.delete_by_job_uuid.assert_not_called()
+    job_repository.delete_by_uuid.assert_not_called()
 
 
 def _service(

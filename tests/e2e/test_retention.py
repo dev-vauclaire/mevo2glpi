@@ -13,8 +13,6 @@ import pytest
 from tests.e2e.support import (
     SyntheticAudio,
     download_audio,
-    get_job,
-    get_job_events,
     open_e2e_database,
     poll_until,
     seed_audio_job,
@@ -25,9 +23,6 @@ from tests.support.mvp_compose import MvpComposeEnvironment
 
 from mevo2glpi_database import (
     AudioRetentionSnapshot,
-    DeletionReason,
-    JobEventActor,
-    JobEventType,
     JobStatus,
     RetentionStatus,
 )
@@ -108,10 +103,10 @@ def test_solved_ticket_keeps_audio_then_closed_ticket_purges_it(
                 )
                 e2e_environment.start_service(RETENTION_SERVICE)
                 retention_stopped = False
-                deleted_retention = poll_until(
-                    lambda: database.get_retention_snapshot(accepted.audio_uuid),
-                    _is_ticket_closed_deletion,
-                    description="the CLOSED ticket audio purge",
+                deleted_job = poll_until(
+                    lambda: database.get_job_snapshot(accepted.audio_uuid),
+                    lambda job: job is None,
+                    description="the CLOSED ticket aggregate purge",
                     timeout_seconds=RETENTION_TIMEOUT_SECONDS,
                 )
         except BaseException as error:
@@ -126,12 +121,8 @@ def test_solved_ticket_keeps_audio_then_closed_ticket_purges_it(
                 primary_error=primary_error,
             )
 
-        assert deleted_retention is not None
-        _assert_audio_absent(client, accepted.audio_uuid)
-        detail = get_job(client, accepted.audio_uuid)
-        assert detail.state == JobStatus.COMPLETED.value
-        assert detail.retention_status == RetentionStatus.DELETED.value
-        _assert_deletion_events(client, accepted.audio_uuid)
+        assert deleted_job is None
+        _assert_job_and_audio_absent(client, accepted.audio_uuid)
 
 
 def test_expired_deadline_purges_audio_without_glpi(
@@ -174,10 +165,10 @@ def test_expired_deadline_purges_audio_without_glpi(
                 )
                 e2e_environment.start_service(RETENTION_SERVICE)
                 retention_stopped = False
-                deleted_retention = poll_until(
-                    lambda: database.get_retention_snapshot(accepted.audio_uuid),
-                    _is_deadline_deletion_without_glpi,
-                    description="the deadline audio purge without GLPI",
+                deleted_job = poll_until(
+                    lambda: database.get_job_snapshot(accepted.audio_uuid),
+                    lambda job: job is None,
+                    description="the deadline aggregate purge without GLPI",
                     timeout_seconds=RETENTION_TIMEOUT_SECONDS,
                 )
         except BaseException as error:
@@ -192,12 +183,8 @@ def test_expired_deadline_purges_audio_without_glpi(
                 primary_error=primary_error,
             )
 
-        assert deleted_retention is not None
-        _assert_audio_absent(client, accepted.audio_uuid)
-        detail = get_job(client, accepted.audio_uuid)
-        assert detail.state == JobStatus.COMPLETED.value
-        assert detail.retention_status == RetentionStatus.DELETED.value
-        _assert_deletion_events(client, accepted.audio_uuid)
+        assert deleted_job is None
+        _assert_job_and_audio_absent(client, accepted.audio_uuid)
 
 
 def _is_solved_and_scheduled(
@@ -212,48 +199,14 @@ def _is_solved_and_scheduled(
     )
 
 
-def _is_ticket_closed_deletion(
-    retention: AudioRetentionSnapshot | None,
-) -> bool:
-    return (
-        retention is not None
-        and retention.status is RetentionStatus.DELETED
-        and retention.deletion_reason is DeletionReason.TICKET_CLOSED
-        and retention.last_glpi_status_id == int(TicketStatus.CLOSED)
-        and retention.check_attempt_count == 2
-        and retention.audio_deleted_at is not None
-    )
+def _assert_job_and_audio_absent(client: httpx.Client, audio_uuid: UUID) -> None:
+    job_response = client.get(f"/api/jobs/{audio_uuid}")
+    audio_response = client.get(f"/audios/{audio_uuid}")
+    events_response = client.get(f"/api/jobs/{audio_uuid}/events")
 
-
-def _is_deadline_deletion_without_glpi(
-    retention: AudioRetentionSnapshot | None,
-) -> bool:
-    return (
-        retention is not None
-        and retention.status is RetentionStatus.DELETED
-        and retention.deletion_reason is DeletionReason.DEADLINE_EXPIRED
-        and retention.last_glpi_status_id is None
-        and retention.check_attempt_count == 0
-        and retention.audio_deleted_at is not None
-    )
-
-
-def _assert_audio_absent(client: httpx.Client, audio_uuid: UUID) -> None:
-    response = client.get(f"/audios/{audio_uuid}")
-    assert response.status_code == httpx.codes.GONE
-
-
-def _assert_deletion_events(client: httpx.Client, audio_uuid: UUID) -> None:
-    events = get_job_events(client, audio_uuid)
-    retention_events = tuple(
-        event.event_type
-        for event in events
-        if event.actor == JobEventActor.WORKER_RETENTION.value
-    )
-    assert retention_events == (
-        JobEventType.AUDIO_DELETION_STARTED.value,
-        JobEventType.AUDIO_DELETED.value,
-    )
+    assert job_response.status_code == httpx.codes.NOT_FOUND
+    assert audio_response.status_code == httpx.codes.NOT_FOUND
+    assert events_response.status_code == httpx.codes.NOT_FOUND
 
 
 def _require_ticket_id(value: int | None) -> int:

@@ -49,7 +49,7 @@
 - création de tickets GLPI V2.3.0 contenant la transcription et un accès à
   l'audio ;
 - suppression crash-safe des audios à la clôture du ticket ou à une échéance
-  configurable ;
+  configurable, suivie de la purge immédiate de l'agrégat PostgreSQL associé ;
 - dashboard des jobs, des événements, de l'état des workers et des alertes,
   avec relance par l'opérateur.
 
@@ -113,12 +113,6 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
 
 ### Évolutions prioritaires
 
-- [ ] Générer l'UUID d'ingestion de manière déterministe à partir de l'identité
-  immuable du message Exchange afin de renforcer l'idempotence et les reprises
-  après rollback.
-- [ ] Mettre en œuvre la
-  [rétention de l'historique PostgreSQL](docs/conception/retention-postgresql.md)
-  selon la politique validée.
 - [ ] Étendre l'ingestion Exchange aux formats MP3 et M4A après validation de
   leur structure et de leur compatibilité avec le service de transcription.
 
