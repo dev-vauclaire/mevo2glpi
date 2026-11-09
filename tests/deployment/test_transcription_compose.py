@@ -275,3 +275,13 @@ def test_transcription_image_pins_runtime_and_model_artifact() -> None:
     assert PARAKEET_ULTRA_MODEL_SHA256 in dockerfile
     assert "sha256sum --check --strict" in dockerfile
     assert "latest" not in dockerfile.casefold()
+
+
+def test_transcription_image_uses_https_debian_sources_for_package_stages() -> None:
+    dockerfile = TRANSCRIPTION_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "FROM ${PYTHON_IMAGE} AS debian-package-base" in dockerfile
+    assert dockerfile.count("'s|http://deb.debian.org|https://deb.debian.org|g'") == 1
+    assert "FROM debian-package-base AS model-fetcher" in dockerfile
+    assert "FROM debian-package-base AS runtime" in dockerfile
+    assert "FROM ${PYTHON_IMAGE} AS builder" in dockerfile

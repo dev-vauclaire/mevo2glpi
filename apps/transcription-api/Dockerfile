@@ -8,7 +8,12 @@ ARG PARAKEET_ULTRA_MODEL_SHA256=007a59761e9258779f189df396b50d12b83bb5b79e66df4b
 
 FROM ${UV_IMAGE} AS uv-binary
 
-FROM ${PYTHON_IMAGE} AS model-fetcher
+FROM ${PYTHON_IMAGE} AS debian-package-base
+
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
+      /etc/apt/sources.list.d/debian.sources
+
+FROM debian-package-base AS model-fetcher
 
 ARG PARAKEET_ULTRA_MODEL_URL
 ARG PARAKEET_ULTRA_MODEL_SHA256
@@ -61,7 +66,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       --package mevo2glpi-transcription-api \
     && test "$(/app/.venv/bin/python -c 'import transcribe_cpp; print(transcribe_cpp.__version__)')" = "${TRANSCRIBE_CPP_VERSION}"
 
-FROM ${PYTHON_IMAGE} AS runtime
+FROM debian-package-base AS runtime
 
 ARG IMAGE_VERSION
 ARG VCS_REF
