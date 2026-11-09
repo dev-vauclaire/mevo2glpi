@@ -128,8 +128,7 @@ def message_payload(message_id: str, folder_id: str = "inbox") -> dict[str, obje
         "receivedDateTime": "2026-09-08T07:30:00Z",
         "hasAttachments": True,
         "subject": (
-            "Message vocale de la part de06 78 37 43 63"
-            "pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+            "Message vocale de la part de01 00 00 00 00pourMEVO ETABLISSEMENT-TEST"
         ),
     }
 
@@ -175,9 +174,9 @@ def test_list_messages_uses_configured_page_size_and_follows_safe_next_link() ->
     ]
     assert messages[0].received_at == datetime(2026, 9, 8, 7, 30, tzinfo=UTC)
     assert messages[0].subject == (
-        "Message vocale de la part de06 78 37 43 63pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+        "Message vocale de la part de01 00 00 00 00pourMEVO ETABLISSEMENT-TEST"
     )
-    assert "06 78 37 43 63" not in repr(messages[0])
+    assert "01 00 00 00 00" not in repr(messages[0])
     assert len(requests) == 2
     assert len({request.headers["client-request-id"] for request in requests}) == 2
 

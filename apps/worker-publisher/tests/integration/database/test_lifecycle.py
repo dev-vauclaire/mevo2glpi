@@ -92,8 +92,8 @@ def test_accepted_message_creates_one_aligned_job_and_complete_audit(
                     "immutable-message-a",
                     minutes_ago=1,
                     subject=(
-                        "Message vocale de la part de06 78 37 43 63"
-                        "pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+                        "Message vocale de la part de01 00 00 00 00"
+                        "pourMEVO ETABLISSEMENT-TEST"
                     ),
                 ),
             ),
@@ -141,13 +141,13 @@ def test_accepted_message_creates_one_aligned_job_and_complete_audit(
 
     assert ingestion is not None
     assert ingestion.originating_phone_number_ciphertext is not None
-    assert b"0678374363" not in ingestion.originating_phone_number_ciphertext
+    assert b"0100000000" not in ingestion.originating_phone_number_ciphertext
     assert (
         phone_number_cipher.decrypt(
             ingestion.originating_phone_number_ciphertext,
             ingestion_uuid,
         )
-        == "0678374363"
+        == "0100000000"
     )
     assert ingestion.status == MailIngestionStatus.COMPLETED.value
     assert job is not None

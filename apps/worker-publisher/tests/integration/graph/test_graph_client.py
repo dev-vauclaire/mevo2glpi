@@ -85,7 +85,7 @@ def test_stateful_fake_paginates_and_streams_without_external_network() -> None:
         "immutable-message-3",
     ]
     assert messages[0].subject == (
-        "Message vocale de la part de06 78 37 43 63pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+        "Message vocale de la part de01 00 00 00 00pourMEVO ETABLISSEMENT-TEST"
     )
     assert attachments[0].name == "voice-message.wav"
     assert download.size_bytes == len(wav_content)

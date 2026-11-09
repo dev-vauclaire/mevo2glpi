@@ -18,7 +18,7 @@ from .scenarios import (
 
 INBOX_FOLDER_ID = "inbox"
 SYNTHETIC_VOICE_MESSAGE_SUBJECT = (
-    "Message vocale de la part de06 78 37 43 63pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+    "Message vocale de la part de01 00 00 00 00pourMEVO ETABLISSEMENT-TEST"
 )
 
 

@@ -18,7 +18,7 @@ from uuid import UUID
 
 IMMUTABLE_ID_PREFERENCE = 'IdType="ImmutableId"'
 SYNTHETIC_SUBJECT = (
-    "Message vocale de la part de06 78 37 43 63pourMEVO CH-VAUCLAIRE 29 34 23 12 32"
+    "Message vocale de la part de01 00 00 00 00pourMEVO ETABLISSEMENT-TEST"
 )
 
 
