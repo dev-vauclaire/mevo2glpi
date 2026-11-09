@@ -23,6 +23,8 @@ from mevo2glpi_worker_retention.retention import (
     DependencyWaitingOutcome,
     GlpiCheckRescheduledOutcome,
     IdleOutcome,
+    RejectedIngestionsPurgedOutcome,
+    RejectedIngestionsReportedOutcome,
     RetentionBlockedOutcome,
     RetentionFailure,
     RetentionOperation,
@@ -233,6 +235,43 @@ def test_selected_job_requires_uuid_and_unknown_outcome_is_rejected() -> None:
         reporter.start_job(cast(Any, "not-a-uuid"))
     with pytest.raises(AssertionError, match="unreachable"):
         reporter.report_outcome(cast(Any, object()))
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        RejectedIngestionsReportedOutcome(
+            eligible_count=3,
+            cutoff=NOW - timedelta(days=90),
+            next_scan_at=NOW + timedelta(hours=6),
+        ),
+        RejectedIngestionsPurgedOutcome(
+            purged_count=3,
+            cutoff=NOW - timedelta(days=90),
+            next_scan_at=NOW + timedelta(hours=6),
+        ),
+    ],
+)
+def test_rejected_ingestion_housekeeping_preserves_dependency_health(
+    heartbeat_records: list[dict[str, object]],
+    outcome: RejectedIngestionsReportedOutcome | RejectedIngestionsPurgedOutcome,
+) -> None:
+    reporter = _reporter(_FakeLock())
+    reporter.report_outcome(
+        RetryScheduledOutcome(
+            job_uuid=JOB_UUID,
+            operation=RetentionOperation.GLPI_CHECK,
+            failure=_system_failure(),
+            next_attempt_at=NOW + timedelta(minutes=1),
+        )
+    )
+
+    reporter.report_outcome(outcome)
+
+    assert [record["state"] for record in heartbeat_records] == [
+        WorkerRuntimeState.DEGRADED,
+        WorkerRuntimeState.DEGRADED,
+    ]
 
 
 def test_failures_are_sticky_and_cleared_independently_by_dependency(

@@ -9,6 +9,9 @@ import pytest
 from pydantic import ValidationError
 
 from mevo2glpi_common import DeploymentEnvironment
+from mevo2glpi_worker_retention.retention.rejected_ingestions import (
+    RejectedIngestionRetentionMode,
+)
 from mevo2glpi_worker_retention.settings import RetentionWorkerSettings
 
 DATABASE_URL = "postgresql+psycopg://retention:password@database:5432/jobs"
@@ -62,6 +65,10 @@ def test_settings_expose_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "RETENTION_RETRY_MAX_SECONDS",
         "RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS",
         "RETENTION_CHECK_INTERVAL_HOURS",
+        "REJECTED_INGESTION_RETENTION_DAYS",
+        "REJECTED_INGESTION_RETENTION_MODE",
+        "REJECTED_INGESTION_RETENTION_BATCH_SIZE",
+        "REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS",
         "GLPI_HTTP_TIMEOUT_SECONDS",
     ):
         monkeypatch.delenv(variable_name, raising=False)
@@ -76,6 +83,13 @@ def test_settings_expose_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.retention_retry_max_seconds == 300.0
     assert settings.retention_system_probe_interval_seconds == 60.0
     assert settings.retention_check_interval_hours == 6
+    assert settings.rejected_ingestion_retention_days == 90
+    assert (
+        settings.rejected_ingestion_retention_mode
+        is RejectedIngestionRetentionMode.REPORT
+    )
+    assert settings.rejected_ingestion_retention_batch_size == 100
+    assert settings.rejected_ingestion_retention_scan_interval_hours == 6
     assert settings.glpi_http_timeout_seconds == 10.0
 
 
@@ -96,6 +110,10 @@ def test_settings_read_environment_overrides(
         "RETENTION_RETRY_MAX_SECONDS": "121",
         "RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS": "46",
         "RETENTION_CHECK_INTERVAL_HOURS": "7",
+        "REJECTED_INGESTION_RETENTION_DAYS": "120",
+        "REJECTED_INGESTION_RETENTION_MODE": "apply",
+        "REJECTED_INGESTION_RETENTION_BATCH_SIZE": "50",
+        "REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS": "12",
         "GLPI_HTTP_TIMEOUT_SECONDS": "11.5",
     }
     for name, value in overrides.items():
@@ -114,6 +132,13 @@ def test_settings_read_environment_overrides(
     assert settings.retention_retry_max_seconds == 121.0
     assert settings.retention_system_probe_interval_seconds == 46.0
     assert settings.retention_check_interval_hours == 7
+    assert settings.rejected_ingestion_retention_days == 120
+    assert (
+        settings.rejected_ingestion_retention_mode
+        is RejectedIngestionRetentionMode.APPLY
+    )
+    assert settings.rejected_ingestion_retention_batch_size == 50
+    assert settings.rejected_ingestion_retention_scan_interval_hours == 12
     assert settings.glpi_http_timeout_seconds == 11.5
 
 
@@ -155,7 +180,12 @@ def test_duration_settings_must_be_positive_and_finite(
 
 @pytest.mark.parametrize(
     "field_name",
-    ["database_connect_timeout_seconds", "retention_check_interval_hours"],
+    [
+        "database_connect_timeout_seconds",
+        "retention_check_interval_hours",
+        "rejected_ingestion_retention_days",
+        "rejected_ingestion_retention_scan_interval_hours",
+    ],
 )
 @pytest.mark.parametrize("invalid_value", [True, 0, -1])
 def test_integer_durations_reject_booleans_and_non_positive_values(
@@ -165,6 +195,24 @@ def test_integer_durations_reject_booleans_and_non_positive_values(
 ) -> None:
     with pytest.raises(ValidationError):
         retention_settings_factory(**{field_name: invalid_value})
+
+
+@pytest.mark.parametrize("invalid_value", [True, 0, -1, 101])
+def test_rejected_ingestion_batch_size_is_bounded(
+    retention_settings_factory: Callable[..., RetentionWorkerSettings],
+    invalid_value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        retention_settings_factory(
+            rejected_ingestion_retention_batch_size=invalid_value
+        )
+
+
+def test_rejected_ingestion_retention_mode_is_closed(
+    retention_settings_factory: Callable[..., RetentionWorkerSettings],
+) -> None:
+    with pytest.raises(ValidationError):
+        retention_settings_factory(rejected_ingestion_retention_mode="delete")
 
 
 def test_retry_initial_delay_cannot_exceed_cap(

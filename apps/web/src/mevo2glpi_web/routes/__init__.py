@@ -4,6 +4,7 @@ from mevo2glpi_web.routes.health import create_health_router
 from mevo2glpi_web.routes.jobs import create_jobs_router
 from mevo2glpi_web.routes.observability import create_observability_router
 from mevo2glpi_web.routes.pages import create_pages_router
+from mevo2glpi_web.routes.rejections import create_rejections_router
 from mevo2glpi_web.routes.version import create_version_router
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "create_jobs_router",
     "create_observability_router",
     "create_pages_router",
+    "create_rejections_router",
     "create_version_router",
 ]

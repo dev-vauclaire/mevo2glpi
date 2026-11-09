@@ -23,6 +23,7 @@ from .services import (
     GetObservability,
     ListAudioJobEvents,
     ListAudioJobs,
+    ListRejectedIngestions,
     ObservabilityThresholds,
     RetryAudioJob,
 )
@@ -86,6 +87,7 @@ def build_application(settings: WebSettings) -> FastAPI:
             list_audio_jobs=ListAudioJobs(session_factory),
             get_audio_job=get_audio_job,
             list_audio_job_events=ListAudioJobEvents(session_factory),
+            list_rejected_ingestions=ListRejectedIngestions(session_factory),
             retry_audio_job=RetryAudioJob(
                 audio_root=audio_root,
                 session_factory=session_factory,

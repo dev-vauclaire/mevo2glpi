@@ -646,7 +646,12 @@ Contrôler les invariants suivants :
 - `CA_BUNDLE_HOST_PATH=/etc/ssl/certs/ca-certificates.crt` ;
 - `PUBLIC_BASE_URL` contient le domaine HTTPS interne du web ;
 - `ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH` cible
-  `/etc/mevo2glpi/secrets/staging-originating-phone-number.key`.
+  `/etc/mevo2glpi/secrets/staging-originating-phone-number.key` ;
+- `REJECTED_INGESTION_RETENTION_DAYS=90`,
+  `REJECTED_INGESTION_RETENTION_BATCH_SIZE=100` et
+  `REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS=6` ;
+- `REJECTED_INGESTION_RETENTION_MODE=report` pour le premier déploiement : ce
+  mode compte les rejets expirés sans les supprimer.
 
 Le provider nominal est `openai_compatible`. Le mock Transcribe AI reste
 disponible uniquement pour une bascule legacy explicite ; aucun basculement
@@ -733,7 +738,15 @@ Vérifier dans cet ordre :
 4. l'environnement, la release et le SHA affichés correspondent au déploiement ;
 5. automation et retention joignent le GLPI de test sans erreur TLS ;
 6. aucun journal ne contient de secret, d'audio, de transcription ou de
-   réponse HTTP brute.
+   réponse HTTP brute ;
+7. le worker retention journalise un rapport agrégé des ingestions rejetées
+   éligibles, sans identifiant Graph ni contenu de message.
+
+Après validation du nombre annoncé et du contenu de la vue « Messages rejetés »,
+passer `REJECTED_INGESTION_RETENTION_MODE` à `apply`, redéployer uniquement les
+applications, puis vérifier que les lignes de plus de 90 jours disparaissent
+par lots bornés. Cette suppression PostgreSQL est irréversible ; les messages
+restent dans le dossier Exchange `Rejected`.
 
 ## Porte de validation 2 — Déploiement
 

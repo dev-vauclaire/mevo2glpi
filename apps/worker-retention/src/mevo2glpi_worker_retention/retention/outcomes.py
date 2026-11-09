@@ -26,6 +26,8 @@ class RetentionRunStatus(StrEnum):
     SYSTEM_BLOCKED = "system_blocked"
     RETENTION_BLOCKED = "retention_blocked"
     AUDIO_DELETED = "audio_deleted"
+    REJECTED_INGESTIONS_REPORTED = "rejected_ingestions_reported"
+    REJECTED_INGESTIONS_PURGED = "rejected_ingestions_purged"
     STALE_CANDIDATE = "stale_candidate"
 
 
@@ -207,6 +209,42 @@ class AudioDeletedOutcome:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RejectedIngestionsReportedOutcome:
+    """Report expired rejected ingestions without mutating PostgreSQL."""
+
+    eligible_count: int
+    cutoff: datetime
+    next_scan_at: datetime
+    status: RetentionRunStatus = field(
+        init=False,
+        default=RetentionRunStatus.REJECTED_INGESTIONS_REPORTED,
+    )
+
+    def __post_init__(self) -> None:
+        _validate_non_negative_integer(self.eligible_count, "eligible_count")
+        _validate_aware_datetime(self.cutoff, "cutoff")
+        _validate_aware_datetime(self.next_scan_at, "next_scan_at")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RejectedIngestionsPurgedOutcome:
+    """Report one bounded PostgreSQL purge of rejected ingestions."""
+
+    purged_count: int
+    cutoff: datetime
+    next_scan_at: datetime
+    status: RetentionRunStatus = field(
+        init=False,
+        default=RetentionRunStatus.REJECTED_INGESTIONS_PURGED,
+    )
+
+    def __post_init__(self) -> None:
+        _validate_non_negative_integer(self.purged_count, "purged_count")
+        _validate_aware_datetime(self.cutoff, "cutoff")
+        _validate_aware_datetime(self.next_scan_at, "next_scan_at")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class StaleCandidateOutcome:
     """Report a harmless race invalidating a previously selected candidate."""
 
@@ -229,6 +267,8 @@ type RetentionRunOutcome = (
     | SystemBlockedOutcome
     | RetentionBlockedOutcome
     | AudioDeletedOutcome
+    | RejectedIngestionsReportedOutcome
+    | RejectedIngestionsPurgedOutcome
     | StaleCandidateOutcome
 )
 
@@ -276,6 +316,13 @@ def _validate_aware_datetime(value: object, field_name: str) -> None:
         raise ValueError(f"{field_name} must be timezone-aware")
 
 
+def _validate_non_negative_integer(value: object, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be an integer")
+    if value < 0:
+        raise ValueError(f"{field_name} must not be negative")
+
+
 __all__ = [
     "AudioDeletedOutcome",
     "CheckRecoveredOutcome",
@@ -286,6 +333,8 @@ __all__ = [
     "RetentionBlockedOutcome",
     "RetentionFailure",
     "RetentionOperation",
+    "RejectedIngestionsPurgedOutcome",
+    "RejectedIngestionsReportedOutcome",
     "RetentionRunOutcome",
     "RetentionRunStatus",
     "RetryScheduledOutcome",

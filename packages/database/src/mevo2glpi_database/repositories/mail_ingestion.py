@@ -6,8 +6,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..models import (
     ORIGINATING_PHONE_NUMBER_CIPHERTEXT_MAX_BYTES,
@@ -19,6 +20,8 @@ from ..models import (
     MailIngestionStatus,
 )
 from ._validation import (
+    validate_aware_datetime,
+    validate_page_limit,
     validate_positive_integer,
     validate_safe_identifier,
     validate_utc_datetime,
@@ -110,6 +113,34 @@ class MailIngestionReplayFilter:
         _validate_replay_filter(self)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RejectedMailIngestionSnapshot:
+    """Safe view of one terminal rejection without Graph identifiers."""
+
+    uuid: UUID
+    rejection_category: str
+    rejection_code: str
+    received_at: datetime
+    finished_at: datetime
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MailIngestionCursor:
+    """Stable keyset cursor for descending rejected-message pagination."""
+
+    finished_at: datetime
+    uuid: UUID
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MailIngestionPage:
+    """One bounded page of terminal rejected-message diagnostics."""
+
+    items: tuple[RejectedMailIngestionSnapshot, ...]
+    next_cursor: MailIngestionCursor | None
+    has_more: bool
+
+
 class MailIngestionRepository:
     """Read and mutate only mail ingestions in a caller-owned transaction."""
 
@@ -190,6 +221,100 @@ class MailIngestionRepository:
             select(MailIngestion).where(MailIngestion.job_uuid == job_uuid).limit(1)
         ).first()
         return _to_snapshot(ingestion) if ingestion is not None else None
+
+    def list_rejected(
+        self,
+        *,
+        page_size: int,
+        cursor: MailIngestionCursor | None = None,
+    ) -> MailIngestionPage:
+        """List terminal rejections without exposing opaque Graph identifiers."""
+        page_size = validate_page_limit(page_size, "page_size")
+        if cursor is not None:
+            if not isinstance(cursor, MailIngestionCursor):
+                raise TypeError("cursor must be a MailIngestionCursor or None")
+            validate_aware_datetime(cursor.finished_at, "cursor.finished_at")
+            validate_uuid(cursor.uuid, "cursor.uuid")
+
+        statement = select(
+            MailIngestion.uuid,
+            MailIngestion.rejection_category,
+            MailIngestion.rejection_code,
+            MailIngestion.received_at,
+            MailIngestion.finished_at,
+        ).where(_terminal_rejection_predicate())
+        if cursor is not None:
+            statement = statement.where(
+                or_(
+                    MailIngestion.finished_at < cursor.finished_at,
+                    and_(
+                        MailIngestion.finished_at == cursor.finished_at,
+                        MailIngestion.uuid < cursor.uuid,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            MailIngestion.finished_at.desc(),
+            MailIngestion.uuid.desc(),
+        ).limit(page_size + 1)
+
+        rows = tuple(self._session.execute(statement).all())
+        has_more = len(rows) > page_size
+        items = tuple(
+            _to_rejected_snapshot_values(
+                uuid=row.uuid,
+                rejection_category=row.rejection_category,
+                rejection_code=row.rejection_code,
+                received_at=row.received_at,
+                finished_at=row.finished_at,
+            )
+            for row in rows[:page_size]
+        )
+        next_cursor = None
+        if has_more:
+            last_item = items[-1]
+            next_cursor = MailIngestionCursor(
+                finished_at=last_item.finished_at,
+                uuid=last_item.uuid,
+            )
+        return MailIngestionPage(
+            items=items,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+
+    def count_expired_rejected(self, cutoff: datetime) -> int:
+        """Count terminal rejections at or before one strict UTC cutoff."""
+        cutoff = validate_utc_datetime(cutoff, "cutoff")
+        count = self._session.scalar(
+            select(func.count())
+            .select_from(MailIngestion)
+            .where(
+                _terminal_rejection_predicate(),
+                MailIngestion.finished_at <= cutoff,
+            )
+        )
+        return int(count or 0)
+
+    def list_expired_rejected_for_update(
+        self,
+        cutoff: datetime,
+        limit: int,
+    ) -> tuple[RejectedMailIngestionSnapshot, ...]:
+        """Lock one deterministic batch for caller-owned transactional purge."""
+        cutoff = validate_utc_datetime(cutoff, "cutoff")
+        limit = validate_page_limit(limit)
+        ingestions = self._session.scalars(
+            select(MailIngestion)
+            .where(
+                _terminal_rejection_predicate(),
+                MailIngestion.finished_at <= cutoff,
+            )
+            .order_by(MailIngestion.finished_at, MailIngestion.uuid)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        ).all()
+        return tuple(_to_rejected_snapshot(ingestion) for ingestion in ingestions)
 
     def delete_by_uuid(self, ingestion_uuid: UUID) -> None:
         """Delete one locked ingestion without touching related models."""
@@ -849,12 +974,56 @@ def _to_snapshot(ingestion: MailIngestion) -> MailIngestionSnapshot:
     )
 
 
+def _terminal_rejection_predicate() -> ColumnElement[bool]:
+    return and_(
+        MailIngestion.status == MailIngestionStatus.FAILED.value,
+        MailIngestion.stage == MailIngestionStage.ACKNOWLEDGEMENT.value,
+        MailIngestion.disposition == MailIngestionDisposition.REJECTED.value,
+        MailIngestion.job_uuid.is_(None),
+        MailIngestion.finished_at.is_not(None),
+    )
+
+
+def _to_rejected_snapshot(
+    ingestion: MailIngestion,
+) -> RejectedMailIngestionSnapshot:
+    return _to_rejected_snapshot_values(
+        uuid=ingestion.uuid,
+        rejection_category=ingestion.rejection_category,
+        rejection_code=ingestion.rejection_code,
+        received_at=ingestion.received_at,
+        finished_at=ingestion.finished_at,
+    )
+
+
+def _to_rejected_snapshot_values(
+    *,
+    uuid: UUID,
+    rejection_category: str | None,
+    rejection_code: str | None,
+    received_at: datetime,
+    finished_at: datetime | None,
+) -> RejectedMailIngestionSnapshot:
+    if rejection_category is None or rejection_code is None or finished_at is None:
+        raise RuntimeError("terminal rejected ingestion has incomplete diagnostics")
+    return RejectedMailIngestionSnapshot(
+        uuid=uuid,
+        rejection_category=rejection_category,
+        rejection_code=rejection_code,
+        received_at=received_at,
+        finished_at=finished_at,
+    )
+
+
 __all__ = [
     "DiscoveredMail",
     "InvalidMailIngestionTransitionError",
     "MailIngestionAcquisition",
+    "MailIngestionCursor",
     "MailIngestionNotFoundError",
+    "MailIngestionPage",
     "MailIngestionRepository",
     "MailIngestionReplayFilter",
     "MailIngestionSnapshot",
+    "RejectedMailIngestionSnapshot",
 ]

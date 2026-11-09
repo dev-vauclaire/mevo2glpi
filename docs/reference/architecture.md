@@ -56,6 +56,10 @@ fermé ou que son échéance absolue est atteinte. Ses transitions permettent de
 reprendre une suppression interrompue sans perdre la traçabilité. Dès que la
 suppression du fichier est confirmée, il supprime dans une transaction unique
 l'ingestion acceptée éventuelle, les événements, la rétention et le job liés.
+Indépendamment de GLPI et du volume audio, il applique également la durée de
+conservation des ingestions terminées dans Exchange `Rejected` qui n'ont créé
+aucun job. Ce second traitement commence en mode `report` et ne supprime des
+données que lorsque le mode `apply` est explicitement configuré.
 
 ### Worker automation
 
@@ -78,7 +82,9 @@ succès.
 ### Web et dashboard
 
 Le web expose le dashboard, les détails et événements des jobs, les alertes,
-le téléchargement des audios autorisés et la relance par l'opérateur. Il ne
+le téléchargement des audios autorisés et la relance par l'opérateur. Une vue
+séparée présente les ingestions rejetées avec leur motif fonctionnel et leur
+code technique, sans exposer les identifiants Microsoft Graph. Le web ne
 constitue plus une voie d'ingestion.
 
 ### PostgreSQL
@@ -87,8 +93,8 @@ PostgreSQL est la source de vérité du système. Il persiste notamment les jobs
 les événements, les tentatives, les échéances de retry, les rétentions et les
 heartbeats des workers. L'agrégat d'un job reste disponible tant que son audio
 est conservé, puis il est purgé avec lui. Les ingestions rejetées sans job
-restent inchangées et observables sans durée de conservation bornée ; la mise
-en place de cette rétention figure dans la feuille de route.
+restent observables pendant leur durée de conservation, puis leurs événements
+et leur ligne principale sont supprimés dans une transaction unique.
 
 ### Volume audio
 

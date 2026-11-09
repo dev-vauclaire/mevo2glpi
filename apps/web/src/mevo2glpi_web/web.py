@@ -21,6 +21,7 @@ from mevo2glpi_web.controllers import (
     JobController,
     ObservabilityController,
     PageController,
+    RejectionController,
     VersionController,
 )
 from mevo2glpi_web.routes import (
@@ -28,6 +29,7 @@ from mevo2glpi_web.routes import (
     create_jobs_router,
     create_observability_router,
     create_pages_router,
+    create_rejections_router,
     create_version_router,
 )
 from mevo2glpi_web.schemas import VersionResponse
@@ -37,6 +39,7 @@ from mevo2glpi_web.services import (
     GetObservability,
     ListAudioJobEvents,
     ListAudioJobs,
+    ListRejectedIngestions,
     RetryAudioJob,
 )
 
@@ -56,6 +59,7 @@ def create_app(
     list_audio_jobs: ListAudioJobs,
     get_audio_job: GetAudioJob,
     list_audio_job_events: ListAudioJobEvents,
+    list_rejected_ingestions: ListRejectedIngestions,
     retry_audio_job: RetryAudioJob,
     get_downloadable_audio: GetDownloadableAudio,
     get_observability: GetObservability,
@@ -107,11 +111,13 @@ def create_app(
         version=version,
     )
     observability_controller = ObservabilityController(get_observability)
+    rejection_controller = RejectionController(list_rejected_ingestions)
     version_controller = VersionController(version)
 
     app.include_router(create_health_router(HealthController()))
     app.include_router(create_pages_router(page_controller))
     app.include_router(create_jobs_router(job_controller))
+    app.include_router(create_rejections_router(rejection_controller))
     app.include_router(create_observability_router(observability_controller))
     app.include_router(create_version_router(version_controller))
     return app

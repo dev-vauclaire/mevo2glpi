@@ -596,6 +596,11 @@ prévalent. Contrôler notamment :
 - `OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE=fr` ;
 - `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS=180` pour l'inférence CPU ;
 - `FAILED_RETENTION_DAYS=10` pour la rétention absolue des jobs en échec ;
+- `REJECTED_INGESTION_RETENTION_DAYS=90`,
+  `REJECTED_INGESTION_RETENTION_BATCH_SIZE=100` et
+  `REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS=6` ;
+- `REJECTED_INGESTION_RETENTION_MODE=report` lors du premier déploiement de la
+  politique, afin de contrôler le nombre de rejets expirés sans suppression ;
 - `PUBLISHER_ENTRA_TENANT_ID` contient le Tenant ID ;
 - `PUBLISHER_ENTRA_CLIENT_ID` contient l'Application (client) ID ;
 - `PUBLISHER_MAILBOX_ID` contient l'Object ID Entra de l'utilisateur de la
@@ -615,6 +620,11 @@ changement de provider constitue une opération contrôlée.
 
 Ne jamais créer ou committer un fichier `.env` réel. Les valeurs doivent être
 enregistrées directement dans le gestionnaire d'environnement Dokploy.
+
+Le passage ultérieur de `REJECTED_INGESTION_RETENTION_MODE` à `apply` doit être
+une opération explicite, après validation du rapport en staging puis en
+production. La purge supprime les événements et l'ingestion PostgreSQL, mais ne
+supprime pas le message du dossier Exchange `Rejected`.
 
 ### Configurer le domaine du web
 

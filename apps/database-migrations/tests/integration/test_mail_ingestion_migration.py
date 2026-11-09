@@ -23,6 +23,8 @@ pytestmark = pytest.mark.database
 PREVIOUS_REVISION = "0004_add_observability_queries"
 MAIL_INGESTION_REVISION = "0005_add_mail_ingestions"
 PROTECTED_PHONE_PREVIOUS_REVISION = "0007_transcription_failed_event"
+REJECTED_RETENTION_PREVIOUS_REVISION = "0008_originating_phone_cipher"
+REJECTED_RETENTION_INDEX = "ix_mail_ingestions_rejected_retention"
 
 
 @pytest.fixture
@@ -84,6 +86,74 @@ def test_fresh_database_upgrades_to_replay_aware_mail_ingestion_head(
         if column["name"] == "originating_phone_number_ciphertext"
     )
     assert protected_phone["nullable"] is True
+    assert _current_revision(database_engine) == _head_revision()
+
+
+def test_rejected_retention_index_upgrade_and_downgrade_preserve_data(
+    database_engine: Engine,
+) -> None:
+    _migrate(database_engine, REJECTED_RETENTION_PREVIOUS_REVISION)
+    ingestion_uuid = uuid4()
+    ingestions = _reflect_tables(database_engine)["mail_ingestions"]
+    finished_at = datetime(2026, 11, 1, tzinfo=UTC)
+    with database_engine.begin() as connection:
+        connection.execute(
+            ingestions.insert(),
+            {
+                "uuid": ingestion_uuid,
+                "mailbox_id": uuid4(),
+                "message_id": "AAMkRejectedRetentionMigration",
+                "status": "failed",
+                "stage": "acknowledgement",
+                "disposition": "rejected",
+                "attempt_count": 1,
+                "first_started_at": finished_at,
+                "rejection_category": "invalid_attachment",
+                "rejection_code": "audio_format_not_supported",
+                "received_at": finished_at,
+                "finished_at": finished_at,
+            },
+        )
+
+    upgrade_to_head(database_engine)
+
+    assert REJECTED_RETENTION_INDEX in {
+        index["name"]
+        for index in inspect(database_engine).get_indexes("mail_ingestions")
+    }
+    upgraded = _reflect_tables(database_engine)["mail_ingestions"]
+    with database_engine.connect() as connection:
+        assert (
+            connection.scalar(
+                select(func.count())
+                .select_from(upgraded)
+                .where(upgraded.c.uuid == ingestion_uuid)
+            )
+            == 1
+        )
+
+    _migrate(
+        database_engine,
+        REJECTED_RETENTION_PREVIOUS_REVISION,
+        downgrade=True,
+    )
+
+    assert REJECTED_RETENTION_INDEX not in {
+        index["name"]
+        for index in inspect(database_engine).get_indexes("mail_ingestions")
+    }
+    downgraded = _reflect_tables(database_engine)["mail_ingestions"]
+    with database_engine.connect() as connection:
+        assert (
+            connection.scalar(
+                select(func.count())
+                .select_from(downgraded)
+                .where(downgraded.c.uuid == ingestion_uuid)
+            )
+            == 1
+        )
+
+    upgrade_to_head(database_engine)
     assert _current_revision(database_engine) == _head_revision()
 
 

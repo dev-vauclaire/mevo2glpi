@@ -30,6 +30,7 @@ from mevo2glpi_database import (
 )
 from mevo2glpi_glpi import TicketStatus
 from mevo2glpi_worker_retention.retention.lifecycle import (
+    RejectedIngestionRetentionLifecycleService,
     RetentionJobInvariantError,
     RetentionJobLifecycleService,
     StaleRetentionCandidateError,
@@ -520,6 +521,80 @@ def test_database_aggregate_purge_rejects_an_active_linked_ingestion() -> None:
     job_event_repository.delete_by_job_uuid.assert_not_called()
     retention_repository.delete_by_job_uuid.assert_not_called()
     job_repository.delete_by_uuid.assert_not_called()
+
+
+def test_rejected_ingestion_report_counts_without_opening_a_transaction() -> None:
+    session = create_autospec(Session, instance=True)
+    ingestion_repository = MagicMock()
+    ingestion_repository.count_expired_rejected.return_value = 17
+    service = RejectedIngestionRetentionLifecycleService(
+        session_factory=lambda: session,
+        ingestion_repository_factory=lambda _session: ingestion_repository,
+        event_repository_factory=lambda _session: MagicMock(),
+    )
+
+    result = service.count_expired(NOW)
+
+    assert result == 17
+    ingestion_repository.count_expired_rejected.assert_called_once_with(NOW)
+    session.begin.assert_not_called()
+    session.close.assert_called_once_with()
+
+
+def test_rejected_ingestion_purge_deletes_events_before_each_parent() -> None:
+    session = create_autospec(Session, instance=True)
+    manager = MagicMock()
+    ingestion_repository = MagicMock()
+    event_repository = MagicMock()
+    manager.attach_mock(ingestion_repository, "ingestion")
+    manager.attach_mock(event_repository, "event")
+    first_uuid = UUID("323e4567-e89b-42d3-a456-426614174000")
+    second_uuid = UUID("423e4567-e89b-42d3-a456-426614174000")
+    ingestion_repository.list_expired_rejected_for_update.return_value = (
+        MagicMock(uuid=first_uuid),
+        MagicMock(uuid=second_uuid),
+    )
+    service = RejectedIngestionRetentionLifecycleService(
+        session_factory=lambda: session,
+        ingestion_repository_factory=lambda _session: ingestion_repository,
+        event_repository_factory=lambda _session: event_repository,
+    )
+
+    result = service.purge_expired(NOW, limit=100)
+
+    assert result == 2
+    assert manager.mock_calls == [
+        call.ingestion.list_expired_rejected_for_update(NOW, 100),
+        call.event.delete_by_ingestion_uuid(first_uuid),
+        call.ingestion.delete_by_uuid(first_uuid),
+        call.event.delete_by_ingestion_uuid(second_uuid),
+        call.ingestion.delete_by_uuid(second_uuid),
+    ]
+    session.begin.assert_called_once_with()
+    session.close.assert_called_once_with()
+
+
+def test_rejected_ingestion_purge_closes_session_after_failure() -> None:
+    session = create_autospec(Session, instance=True)
+    ingestion_repository = MagicMock()
+    event_repository = MagicMock()
+    ingestion_uuid = UUID("323e4567-e89b-42d3-a456-426614174000")
+    ingestion_repository.list_expired_rejected_for_update.return_value = (
+        MagicMock(uuid=ingestion_uuid),
+    )
+    ingestion_repository.delete_by_uuid.side_effect = RuntimeError("synthetic")
+    service = RejectedIngestionRetentionLifecycleService(
+        session_factory=lambda: session,
+        ingestion_repository_factory=lambda _session: ingestion_repository,
+        event_repository_factory=lambda _session: event_repository,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic"):
+        service.purge_expired(NOW, limit=100)
+
+    event_repository.delete_by_ingestion_uuid.assert_called_once_with(ingestion_uuid)
+    session.begin.return_value.__exit__.assert_called_once()
+    session.close.assert_called_once_with()
 
 
 def _service(

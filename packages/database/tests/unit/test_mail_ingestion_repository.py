@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, create_autospec
 from uuid import UUID, uuid4
 
@@ -19,8 +20,11 @@ from mevo2glpi_database.repositories import (
     DiscoveredMail,
     InvalidMailIngestionTransitionError,
     MailIngestionAcquisition,
+    MailIngestionCursor,
+    MailIngestionPage,
     MailIngestionReplayFilter,
     MailIngestionRepository,
+    RejectedMailIngestionSnapshot,
 )
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
@@ -176,6 +180,123 @@ def test_get_by_job_uuid_returns_the_optional_linked_ingestion() -> None:
     assert snapshot.job_uuid == INGESTION_UUID
     session.scalars.assert_called_once()
     session.flush.assert_not_called()
+
+
+def test_list_rejected_returns_safe_deterministic_page() -> None:
+    session = _session()
+    first = _rejected_failed_ingestion()
+    second = _rejected_failed_ingestion()
+    second.uuid = UUID("8dfd2d0b-27a8-4962-ae21-71739e92d218")
+    second.finished_at = NOW - timedelta(seconds=2)
+    session.execute.return_value.all.return_value = [
+        _rejected_row(first),
+        _rejected_row(second),
+    ]
+
+    page = MailIngestionRepository(session).list_rejected(page_size=1)
+
+    assert page == MailIngestionPage(
+        items=(
+            RejectedMailIngestionSnapshot(
+                uuid=INGESTION_UUID,
+                rejection_category="invalid_attachment",
+                rejection_code="wav_attachment_missing",
+                received_at=NOW - timedelta(minutes=2),
+                finished_at=NOW - timedelta(seconds=1),
+            ),
+        ),
+        next_cursor=MailIngestionCursor(
+            finished_at=NOW - timedelta(seconds=1),
+            uuid=INGESTION_UUID,
+        ),
+        has_more=True,
+    )
+    assert not hasattr(page.items[0], "message_id")
+    statement = session.execute.call_args.args[0]
+    assert statement._limit_clause.value == 2
+    assert tuple(column.key for column in statement.selected_columns) == (
+        "uuid",
+        "rejection_category",
+        "rejection_code",
+        "received_at",
+        "finished_at",
+    )
+    session.flush.assert_not_called()
+
+
+def test_list_rejected_applies_a_stable_keyset_cursor() -> None:
+    session = _session()
+    session.execute.return_value.all.return_value = []
+
+    page = MailIngestionRepository(session).list_rejected(
+        page_size=10,
+        cursor=MailIngestionCursor(
+            finished_at=NOW - timedelta(hours=1),
+            uuid=INGESTION_UUID,
+        ),
+    )
+
+    assert page == MailIngestionPage(items=(), next_cursor=None, has_more=False)
+    statement = session.execute.call_args.args[0]
+    assert len(statement._where_criteria) == 2
+
+
+def test_count_expired_rejected_uses_a_strict_utc_cutoff() -> None:
+    session = _session()
+    session.scalar.return_value = 4
+
+    count = MailIngestionRepository(session).count_expired_rejected(NOW)
+
+    assert count == 4
+    session.scalar.assert_called_once()
+    session.flush.assert_not_called()
+
+    with pytest.raises(ValueError, match="UTC"):
+        MailIngestionRepository(session).count_expired_rejected(
+            datetime(2026, 9, 8, 14, tzinfo=timezone(timedelta(hours=2)))
+        )
+
+
+def test_expired_rejected_batch_is_bounded_ordered_and_locked() -> None:
+    session = _session()
+    rejected = _rejected_failed_ingestion()
+    session.scalars.return_value.all.return_value = [rejected]
+
+    candidates = MailIngestionRepository(session).list_expired_rejected_for_update(
+        NOW, 100
+    )
+
+    assert candidates == (
+        RejectedMailIngestionSnapshot(
+            uuid=INGESTION_UUID,
+            rejection_category="invalid_attachment",
+            rejection_code="wav_attachment_missing",
+            received_at=NOW - timedelta(minutes=2),
+            finished_at=NOW - timedelta(seconds=1),
+        ),
+    )
+    statement = session.scalars.call_args.args[0]
+    assert statement._limit_clause.value == 100
+    assert statement._for_update_arg.skip_locked is True
+    assert len(statement._order_by_clauses) == 2
+    session.flush.assert_not_called()
+
+
+@pytest.mark.parametrize("limit", [0, 101, True])
+def test_rejected_queries_reject_unbounded_limits(limit: object) -> None:
+    session = _session()
+
+    with pytest.raises((TypeError, ValueError)):
+        MailIngestionRepository(session).list_rejected(
+            page_size=limit,  # type: ignore[arg-type]
+        )
+    with pytest.raises((TypeError, ValueError)):
+        MailIngestionRepository(session).list_expired_rejected_for_update(
+            NOW,
+            limit,  # type: ignore[arg-type]
+        )
+
+    session.scalars.assert_not_called()
 
 
 def test_delete_by_uuid_deletes_only_the_locked_ingestion() -> None:
@@ -658,6 +779,16 @@ def _rejected_failed_ingestion() -> MailIngestion:
     ingestion.rejection_code = "wav_attachment_missing"
     ingestion.finished_at = NOW - timedelta(seconds=1)
     return ingestion
+
+
+def _rejected_row(ingestion: MailIngestion) -> SimpleNamespace:
+    return SimpleNamespace(
+        uuid=ingestion.uuid,
+        rejection_category=ingestion.rejection_category,
+        rejection_code=ingestion.rejection_code,
+        received_at=ingestion.received_at,
+        finished_at=ingestion.finished_at,
+    )
 
 
 def _replay_filter() -> MailIngestionReplayFilter:

@@ -10,6 +10,8 @@ from .outcomes import (
     DependencyWaitingOutcome,
     GlpiCheckRescheduledOutcome,
     IdleOutcome,
+    RejectedIngestionsPurgedOutcome,
+    RejectedIngestionsReportedOutcome,
     RetentionBlockedOutcome,
     RetryScheduledOutcome,
     StaleCandidateOutcome,
@@ -48,6 +50,8 @@ def run_forever(
             | SystemBlockedOutcome
             | RetentionBlockedOutcome
             | AudioDeletedOutcome
+            | RejectedIngestionsPurgedOutcome
+            | RejectedIngestionsReportedOutcome
             | StaleCandidateOutcome,
         ):
             continue

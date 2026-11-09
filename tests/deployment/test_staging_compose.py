@@ -312,3 +312,14 @@ def test_staging_workers_depend_only_on_database_migrations(
                 "required": True,
             }
         }
+
+
+def test_staging_rejected_ingestion_retention_starts_in_report_mode(
+    render_staging_compose: Callable[[], dict[str, object]],
+) -> None:
+    environment = _services(render_staging_compose())["worker-retention"]["environment"]
+
+    assert environment["REJECTED_INGESTION_RETENTION_DAYS"] == "90"
+    assert environment["REJECTED_INGESTION_RETENTION_MODE"] == "report"
+    assert environment["REJECTED_INGESTION_RETENTION_BATCH_SIZE"] == "100"
+    assert environment["REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS"] == "6"

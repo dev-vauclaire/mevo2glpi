@@ -175,6 +175,60 @@
           </button>
         </nav>
       </section>
+
+      <section
+        class="panel rejections-panel"
+        aria-labelledby="rejections-title"
+        data-rejections-panel
+      >
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Publication</p>
+            <h2 id="rejections-title">Messages rejetés</h2>
+          </div>
+          <p class="section-heading__aside">
+            Les motifs sont conservés pendant la durée de rétention configurée.
+          </p>
+        </div>
+
+        <p class="dashboard-feedback" data-rejections-feedback aria-live="polite">
+          Chargement des messages rejetés…
+        </p>
+
+        <div class="table-wrapper" data-rejections-table-container hidden>
+          <table>
+            <caption class="sr-only">Liste paginée des messages rejetés</caption>
+            <thead>
+              <tr>
+                <th scope="col">UUID d’ingestion</th>
+                <th scope="col">Message reçu le</th>
+                <th scope="col">Rejeté le</th>
+                <th scope="col">Motif</th>
+              </tr>
+            </thead>
+            <tbody data-rejections-table></tbody>
+          </table>
+        </div>
+
+        <nav class="pagination" aria-label="Pagination des messages rejetés">
+          <button
+            class="button button--secondary"
+            type="button"
+            data-rejections-previous
+            disabled
+          >
+            Page précédente
+          </button>
+          <button
+            class="button button--secondary"
+            type="button"
+            data-rejections-next
+            disabled
+          >
+            Page suivante
+          </button>
+        </nav>
+      </section>
     </main>
 
     <dialog class="job-dialog" data-job-dialog aria-labelledby="job-dialog-title">

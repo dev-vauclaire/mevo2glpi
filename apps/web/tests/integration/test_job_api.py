@@ -20,6 +20,7 @@ from mevo2glpi_common.release_identity import (
 from mevo2glpi_database import (
     AudioRetention,
     JobStatus,
+    MailIngestion,
     TicketCreationJob,
     TicketCreationJobEvent,
     create_session_factory,
@@ -30,6 +31,7 @@ from mevo2glpi_web.services import (
     GetObservability,
     ListAudioJobEvents,
     ListAudioJobs,
+    ListRejectedIngestions,
     ObservabilityThresholds,
     RetryAudioJob,
 )
@@ -74,6 +76,7 @@ def job_api_context(
         list_audio_jobs=ListAudioJobs(session_factory),
         get_audio_job=get_audio_job,
         list_audio_job_events=ListAudioJobEvents(session_factory),
+        list_rejected_ingestions=ListRejectedIngestions(session_factory),
         retry_audio_job=RetryAudioJob(
             audio_root=audio_root,
             session_factory=session_factory,
@@ -112,6 +115,52 @@ def test_job_collection_rejects_ingestion_without_creating_state(
     assert jobs_count == 0
     assert events_count == 0
     assert not list(job_api_context.audio_root.iterdir())
+
+
+def test_rejected_ingestion_dashboard_exposes_reason_without_graph_ids(
+    job_api_context: JobApiContext,
+) -> None:
+    ingestion_uuid = uuid4()
+    mailbox_id = uuid4()
+    received_at = datetime(2026, 10, 30, 9, 14, tzinfo=UTC)
+    rejected_at = received_at + timedelta(minutes=3)
+    with job_api_context.session_factory.begin() as session:
+        session.add(
+            MailIngestion(
+                uuid=ingestion_uuid,
+                mailbox_id=mailbox_id,
+                message_id="synthetic-immutable-message-id",
+                status="failed",
+                stage="acknowledgement",
+                disposition="rejected",
+                attempt_count=1,
+                rejection_category="invalid_attachment",
+                rejection_code="audio_format_not_supported",
+                received_at=received_at,
+                first_started_at=received_at + timedelta(seconds=1),
+                created_at=received_at,
+                updated_at=rejected_at,
+                finished_at=rejected_at,
+            )
+        )
+
+    response = job_api_context.client.get("/api/rejections")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {
+                "ingestion_uuid": str(ingestion_uuid),
+                "received_at": received_at.isoformat().replace("+00:00", "Z"),
+                "rejected_at": rejected_at.isoformat().replace("+00:00", "Z"),
+                "rejection_category": "invalid_attachment",
+                "rejection_code": "audio_format_not_supported",
+            }
+        ],
+        "next_cursor": None,
+    }
+    assert "synthetic-immutable-message-id" not in response.text
+    assert str(mailbox_id) not in response.text
 
 
 def test_completed_job_audio_is_downloaded_by_canonical_key(

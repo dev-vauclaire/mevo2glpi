@@ -25,6 +25,7 @@ from .observability import (
     WorkerRuntimeState,
     WorkerService,
 )
+from .rejections import RejectedIngestionListResponse, RejectedIngestionResponse
 from .version import VersionResponse
 
 __all__ = [
@@ -45,6 +46,8 @@ __all__ = [
     "OperationalAlertResponse",
     "OperationalAlertSeverity",
     "RetentionState",
+    "RejectedIngestionListResponse",
+    "RejectedIngestionResponse",
     "WorkerHeartbeatStatus",
     "WorkerObservationResponse",
     "WorkerRuntimeState",

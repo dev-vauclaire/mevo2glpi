@@ -2,6 +2,7 @@
 
 import { createDashboardController } from "./dashboard.js";
 import { createObservabilityController } from "./observability.js";
+import { createRejectionsController } from "./rejections.js";
 
 const REFRESH_INTERVAL_MS = 10000;
 const refreshButton = document.querySelector("[data-dashboard-refresh]");
@@ -43,6 +44,14 @@ const observability = createObservabilityController({
   onFilterJobs: showFilteredJobs,
 });
 
+const rejections = createRejectionsController({
+  feedback: document.querySelector("[data-rejections-feedback]"),
+  tableContainer: document.querySelector("[data-rejections-table-container]"),
+  tableBody: document.querySelector("[data-rejections-table]"),
+  previousButton: document.querySelector("[data-rejections-previous]"),
+  nextButton: document.querySelector("[data-rejections-next]"),
+});
+
 let refreshTimer = null;
 let refreshInFlight = null;
 let pollingStopped = false;
@@ -56,6 +65,7 @@ function refreshApplication({ announce = true, onlyWhenIdle = false } = {}) {
   refreshInFlight = Promise.allSettled([
     Promise.resolve().then(() => dashboard.refresh({ announce, onlyWhenIdle })),
     Promise.resolve().then(() => observability.refresh({ announce })),
+    Promise.resolve().then(() => rejections.refresh({ announce, onlyWhenIdle })),
   ]).finally(() => {
     refreshInFlight = null;
     refreshButton.disabled = false;

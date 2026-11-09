@@ -10,6 +10,8 @@ from sqlalchemy.exc import ArgumentError
 
 from mevo2glpi_common import DeploymentEnvironment, ReleaseIdentity
 
+from .retention.rejected_ingestions import RejectedIngestionRetentionMode
+
 
 class RetentionWorkerSettings(BaseSettings):
     """Configuration owned by the singleton retention process."""
@@ -58,6 +60,16 @@ class RetentionWorkerSettings(BaseSettings):
         allow_inf_nan=False,
     )
     retention_check_interval_hours: int = Field(default=6, gt=0)
+    rejected_ingestion_retention_days: int = Field(default=90, gt=0)
+    rejected_ingestion_retention_mode: RejectedIngestionRetentionMode = (
+        RejectedIngestionRetentionMode.REPORT
+    )
+    rejected_ingestion_retention_batch_size: int = Field(
+        default=100,
+        gt=0,
+        le=100,
+    )
+    rejected_ingestion_retention_scan_interval_hours: int = Field(default=6, gt=0)
 
     glpi_base_url: HttpUrl
     glpi_username: str
@@ -85,6 +97,8 @@ class RetentionWorkerSettings(BaseSettings):
     @field_validator(
         "database_connect_timeout_seconds",
         "retention_check_interval_hours",
+        "rejected_ingestion_retention_days",
+        "rejected_ingestion_retention_scan_interval_hours",
         "worker_heartbeat_interval_seconds",
         "retention_poll_interval_seconds",
         "retention_retry_initial_seconds",
@@ -98,6 +112,14 @@ class RetentionWorkerSettings(BaseSettings):
         """Reject booleans instead of silently accepting numeric coercion."""
         if isinstance(value, bool):
             raise ValueError("Duration settings cannot be booleans")
+        return value
+
+    @field_validator("rejected_ingestion_retention_batch_size", mode="before")
+    @classmethod
+    def reject_boolean_batch_size(cls, value: object) -> object:
+        """Reject booleans instead of silently accepting integer coercion."""
+        if isinstance(value, bool):
+            raise ValueError("Rejected-ingestion batch size cannot be a boolean")
         return value
 
     @field_validator("glpi_base_url")

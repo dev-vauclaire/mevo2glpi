@@ -37,6 +37,7 @@ from mevo2glpi_worker_retention.retention.outcomes import (
     DependencyWaitingOutcome,
     GlpiCheckRescheduledOutcome,
     IdleOutcome,
+    RejectedIngestionsReportedOutcome,
     RetentionBlockedOutcome,
     RetentionOperation,
     RetryScheduledOutcome,
@@ -70,6 +71,16 @@ POLL_SECONDS = 60.0
 PROBE_SECONDS = 45.0
 
 
+class FakeRejectedIngestionRetention:
+    def __init__(self, outcome: object | None) -> None:
+        self.outcome = outcome
+        self.calls: list[object] = []
+
+    def run_if_due(self, now: object) -> object | None:
+        self.calls.append(now)
+        return self.outcome
+
+
 def _worker(
     lifecycle: FakeLifecycle,
     *,
@@ -77,6 +88,7 @@ def _worker(
     purge_result: object | BaseException | None = None,
     clock: ScriptedClock,
     on_job_started: Callable[[UUID], None] = lambda _job_uuid: None,
+    rejected_ingestion_retention: FakeRejectedIngestionRetention | None = None,
 ) -> tuple[RetentionWorker, FakeAudioPurger, FakeTicketReader]:
     reader = FakeTicketReader(
         glpi_response
@@ -94,6 +106,7 @@ def _worker(
                 maximum_seconds=300,
             ),
             check_policy=RetentionCheckPolicy(check_interval=timedelta(hours=6)),
+            rejected_ingestion_retention=rejected_ingestion_retention,
             poll_interval_seconds=POLL_SECONDS,
             system_probe_interval_seconds=PROBE_SECONDS,
             now=clock,
@@ -121,6 +134,61 @@ def test_run_once_returns_idle_when_no_operation_or_probe_exists() -> None:
     ]
     assert purger.storage_keys == []
     assert reader.ticket_ids == []
+
+
+def test_rejected_ingestion_scan_runs_before_waiting_for_glpi_probe() -> None:
+    lifecycle = FakeLifecycle(
+        candidate=None,
+        gate=retention_snapshot(
+            status=RetentionStatus.RETRY_SCHEDULED,
+            next_check_at=NOW + timedelta(minutes=1),
+            last_error_category="unavailable",
+            last_error_code="transport_error",
+        ),
+    )
+    expected = RejectedIngestionsReportedOutcome(
+        eligible_count=3,
+        cutoff=NOW - timedelta(days=90),
+        next_scan_at=NOW + timedelta(hours=6),
+    )
+    rejected_retention = FakeRejectedIngestionRetention(expected)
+    worker, purger, reader = _worker(
+        lifecycle,
+        clock=ScriptedClock(NOW),
+        rejected_ingestion_retention=rejected_retention,
+    )
+
+    outcome = worker.run_once()
+
+    assert outcome is expected
+    assert rejected_retention.calls == [NOW]
+    assert _call_names(lifecycle) == ["find_next_candidate"]
+    assert purger.storage_keys == []
+    assert reader.ticket_ids == []
+
+
+def test_audio_retention_candidate_has_priority_over_rejected_ingestion_scan() -> None:
+    lifecycle = FakeLifecycle(
+        candidate=retention_candidate(RetentionCandidateKind.RECOVER_INTERRUPTED_CHECK),
+        prepared_work=CheckRecoveryWork(job_uuid=JOB_UUID),
+    )
+    rejected_retention = FakeRejectedIngestionRetention(
+        RejectedIngestionsReportedOutcome(
+            eligible_count=3,
+            cutoff=NOW - timedelta(days=90),
+            next_scan_at=NOW + timedelta(hours=6),
+        )
+    )
+    worker, _purger, _reader = _worker(
+        lifecycle,
+        clock=ScriptedClock(NOW),
+        rejected_ingestion_retention=rejected_retention,
+    )
+
+    outcome = worker.run_once()
+
+    assert outcome == CheckRecoveredOutcome(job_uuid=JOB_UUID)
+    assert rejected_retention.calls == []
 
 
 def test_run_once_recovers_an_interrupted_check_without_external_call() -> None:

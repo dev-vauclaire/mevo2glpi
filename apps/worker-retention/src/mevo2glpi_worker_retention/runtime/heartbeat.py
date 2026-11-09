@@ -25,6 +25,8 @@ from ..retention import (
     DependencyWaitingOutcome,
     GlpiCheckRescheduledOutcome,
     IdleOutcome,
+    RejectedIngestionsPurgedOutcome,
+    RejectedIngestionsReportedOutcome,
     RetentionBlockedOutcome,
     RetentionOperation,
     RetentionRunOutcome,
@@ -129,7 +131,13 @@ class RetentionRuntimeHeartbeatReporter:
             self._dependencies.pop(RetentionOperation.AUDIO_PURGE, None)
             if outcome.reason is DeletionReason.TICKET_CLOSED:
                 self._dependencies.pop(RetentionOperation.GLPI_CHECK, None)
-        elif isinstance(outcome, CheckRecoveredOutcome | StaleCandidateOutcome):
+        elif isinstance(
+            outcome,
+            CheckRecoveredOutcome
+            | RejectedIngestionsPurgedOutcome
+            | RejectedIngestionsReportedOutcome
+            | StaleCandidateOutcome,
+        ):
             pass
         else:
             assert_never(outcome)

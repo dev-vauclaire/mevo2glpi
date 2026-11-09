@@ -50,8 +50,10 @@
   l'audio ;
 - suppression crash-safe des audios à la clôture du ticket ou à une échéance
   configurable, suivie de la purge immédiate de l'agrégat PostgreSQL associé ;
-- dashboard des jobs, des événements, de l'état des workers et des alertes,
-  avec relance par l'opérateur.
+- dashboard des jobs, des événements, de l'état des workers, des alertes et
+  des messages rejetés avec leur motif, avec relance par l'opérateur ;
+- conservation bornée et configurable des rejets Exchange sans job, activée
+  explicitement après un premier passage non destructif en mode `report`.
 
 ## Architecture
 
@@ -117,8 +119,9 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
 
 ### Évolutions prioritaires
 
-- [ ] Définir puis appliquer une durée de conservation aux ingestions Exchange
-  rejetées qui ne possèdent aucun job associé.
+- [x] Appliquer une durée de conservation configurable aux ingestions Exchange
+  rejetées sans job associé, avec un déploiement sécurisé en modes `report`
+  puis `apply`.
 
 ### Sécurité de l'interface web
 

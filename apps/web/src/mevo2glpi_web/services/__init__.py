@@ -32,6 +32,12 @@ from .observability import (
     OperationalAlert,
     WorkerObservation,
 )
+from .rejections import (
+    ListRejectedIngestions,
+    RejectedIngestionListPage,
+    RejectedIngestionQueryUnavailableError,
+    RejectedIngestionView,
+)
 
 __all__ = [
     "AudioPurgedError",
@@ -54,11 +60,15 @@ __all__ = [
     "JobView",
     "ListAudioJobEvents",
     "ListAudioJobs",
+    "ListRejectedIngestions",
     "ObservabilityPolicy",
     "ObservabilitySnapshot",
     "ObservabilityThresholds",
     "ObservabilityUnavailableError",
     "OperationalAlert",
+    "RejectedIngestionListPage",
+    "RejectedIngestionQueryUnavailableError",
+    "RejectedIngestionView",
     "RetriedJob",
     "RetryAudioJob",
     "WorkerObservation",

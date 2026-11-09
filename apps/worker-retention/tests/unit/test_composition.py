@@ -26,6 +26,8 @@ def test_build_retention_worker_wires_policies_adapters_and_fencing(
     http_client = httpx.Client()
     captured: dict[str, dict[str, object]] = {}
     lifecycle = object()
+    rejected_lifecycle = object()
+    rejected_retention = object()
     glpi_client = object()
     glpi_stage = object()
     audio_purger = object()
@@ -42,6 +44,16 @@ def test_build_retention_worker_wires_policies_adapters_and_fencing(
         composition_module,
         "RetentionJobLifecycleService",
         capture("lifecycle", lifecycle),
+    )
+    monkeypatch.setattr(
+        composition_module,
+        "RejectedIngestionRetentionLifecycleService",
+        capture("rejected_lifecycle", rejected_lifecycle),
+    )
+    monkeypatch.setattr(
+        composition_module,
+        "RejectedIngestionRetentionService",
+        capture("rejected_retention", rejected_retention),
     )
     monkeypatch.setattr(
         composition_module,
@@ -92,6 +104,17 @@ def test_build_retention_worker_wires_policies_adapters_and_fencing(
     check_policy = lifecycle_arguments["check_policy"]
     assert check_policy.check_interval.total_seconds() == 8 * 3600
 
+    assert captured["rejected_lifecycle"]["kwargs"] == {
+        "session_factory": session_factory,
+        "ownership_guard": ownership_guard,
+    }
+    rejected_arguments = captured["rejected_retention"]["kwargs"]
+    assert rejected_arguments["lifecycle"] is rejected_lifecycle
+    assert rejected_arguments["mode"] is settings.rejected_ingestion_retention_mode
+    assert rejected_arguments["retention_period"].total_seconds() == 90 * 86400
+    assert rejected_arguments["scan_interval"].total_seconds() == 6 * 3600
+    assert rejected_arguments["batch_size"] == 100
+
     glpi_arguments = captured["glpi_client"]["kwargs"]
     assert glpi_arguments == {
         "base_url": "https://glpi.example.test/prefix",
@@ -117,6 +140,7 @@ def test_build_retention_worker_wires_policies_adapters_and_fencing(
     assert worker_arguments["glpi_check_stage"] is glpi_stage
     assert worker_arguments["audio_purger"] is audio_purger
     assert worker_arguments["check_policy"] is check_policy
+    assert worker_arguments["rejected_ingestion_retention"] is rejected_retention
     assert worker_arguments["poll_interval_seconds"] == 61.0
     assert worker_arguments["system_probe_interval_seconds"] == 47.0
     assert worker_arguments["on_job_started"] == started_jobs.append

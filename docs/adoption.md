@@ -106,7 +106,8 @@ adoptant doit intégrer les contrôles suivants à sa propre analyse de risques 
 ## Limites connues
 
 - authentification et autorisation du dashboard non implémentées ;
-- rétention des ingestions Exchange rejetées sans job non bornée ;
+- rétention des ingestions Exchange rejetées sans job configurable, déployée
+  initialement en mode de rapport non destructif ;
 - parcours E2E nominal Parakeet automatisé mais volontairement lancé hors CI,
   car il construit et charge le modèle réel ;
 - la validation du publisher reste structurelle : le décodage effectif relève

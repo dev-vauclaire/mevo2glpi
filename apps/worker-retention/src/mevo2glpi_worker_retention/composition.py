@@ -13,8 +13,12 @@ from sqlalchemy.orm import Session
 from mevo2glpi_common.backoff import ExponentialBackoffPolicy
 from mevo2glpi_glpi import GlpiClient
 
-from .retention.lifecycle import RetentionJobLifecycleService
+from .retention.lifecycle import (
+    RejectedIngestionRetentionLifecycleService,
+    RetentionJobLifecycleService,
+)
 from .retention.policies import RetentionCheckPolicy
+from .retention.rejected_ingestions import RejectedIngestionRetentionService
 from .retention.service import RetentionWorker
 from .retention.stages import CrashSafeAudioPurger, GlpiCheckStage
 from .settings import RetentionWorkerSettings
@@ -73,6 +77,18 @@ def build_retention_worker(
     )
     return RetentionWorker(
         lifecycle=lifecycle,
+        rejected_ingestion_retention=RejectedIngestionRetentionService(
+            lifecycle=RejectedIngestionRetentionLifecycleService(
+                session_factory=session_factory,
+                ownership_guard=ownership_guard,
+            ),
+            mode=settings.rejected_ingestion_retention_mode,
+            retention_period=timedelta(days=settings.rejected_ingestion_retention_days),
+            scan_interval=timedelta(
+                hours=settings.rejected_ingestion_retention_scan_interval_hours
+            ),
+            batch_size=settings.rejected_ingestion_retention_batch_size,
+        ),
         glpi_check_stage=GlpiCheckStage(
             glpi_client,
             ownership_guard=ownership_guard,

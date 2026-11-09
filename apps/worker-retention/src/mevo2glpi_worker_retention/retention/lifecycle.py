@@ -466,6 +466,78 @@ class RetentionJobLifecycleService:
         return result
 
 
+class RejectedIngestionRetentionLifecycleService:
+    """Delete terminal rejected-ingestion aggregates in short transactions."""
+
+    def __init__(
+        self,
+        *,
+        session_factory: Callable[[], Session],
+        ownership_guard: Callable[[], None] | None = None,
+        ingestion_repository_factory: Callable[
+            [Session], MailIngestionRepository
+        ] = MailIngestionRepository,
+        event_repository_factory: Callable[
+            [Session], MailIngestionEventRepository
+        ] = MailIngestionEventRepository,
+    ) -> None:
+        for value, field_name in (
+            (session_factory, "session_factory"),
+            (ingestion_repository_factory, "ingestion_repository_factory"),
+            (event_repository_factory, "event_repository_factory"),
+        ):
+            if not callable(value):
+                raise TypeError(f"{field_name} must be callable")
+        if ownership_guard is not None and not callable(ownership_guard):
+            raise TypeError("ownership_guard must be callable")
+
+        self._session_factory = session_factory
+        self._ownership_guard = ownership_guard or _no_op
+        self._ingestion_repository_factory = ingestion_repository_factory
+        self._event_repository_factory = event_repository_factory
+
+    def count_expired(self, cutoff: datetime) -> int:
+        """Count eligible rows for report mode without mutating PostgreSQL."""
+        _require_aware_datetime(cutoff, "cutoff")
+        self._ownership_guard()
+        session = self._session_factory()
+        try:
+            result = self._ingestion_repository_factory(session).count_expired_rejected(
+                cutoff
+            )
+        finally:
+            session.close()
+        self._ownership_guard()
+        return result
+
+    def purge_expired(self, cutoff: datetime, *, limit: int) -> int:
+        """Delete one locked and bounded batch, including its audit events."""
+        _require_aware_datetime(cutoff, "cutoff")
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("limit must be an integer")
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+
+        self._ownership_guard()
+        session = self._session_factory()
+        try:
+            with session.begin():
+                ingestion_repository = self._ingestion_repository_factory(session)
+                event_repository = self._event_repository_factory(session)
+                candidates = ingestion_repository.list_expired_rejected_for_update(
+                    cutoff,
+                    limit,
+                )
+                for candidate in candidates:
+                    event_repository.delete_by_ingestion_uuid(candidate.uuid)
+                    ingestion_repository.delete_by_uuid(candidate.uuid)
+                purged_count = len(candidates)
+        finally:
+            session.close()
+        self._ownership_guard()
+        return purged_count
+
+
 def _require_external_work(value: object) -> None:
     if not isinstance(value, GlpiCheckWork | AudioPurgeWork):
         raise TypeError("work must be a GlpiCheckWork or AudioPurgeWork")
@@ -490,8 +562,16 @@ def _no_op() -> None:
     return None
 
 
+def _require_aware_datetime(value: object, field_name: str) -> None:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{field_name} must be a datetime")
+    if value.utcoffset() is None:
+        raise ValueError(f"{field_name} must be timezone-aware")
+
+
 __all__ = [
     "RetentionJobInvariantError",
     "RetentionJobLifecycleService",
+    "RejectedIngestionRetentionLifecycleService",
     "StaleRetentionCandidateError",
 ]

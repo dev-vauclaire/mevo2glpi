@@ -36,6 +36,7 @@ from .ports import (
     DatabasePurgeWork,
     GlpiCheckStageProtocol,
     GlpiCheckWork,
+    RejectedIngestionRetentionProtocol,
     RetentionLifecycleProtocol,
     RetryBackoffProtocol,
 )
@@ -67,6 +68,7 @@ class RetentionWorker:
         audio_purger: AudioPurgerProtocol,
         retry_policy: RetryBackoffProtocol,
         check_policy: RetentionCheckPolicy,
+        rejected_ingestion_retention: RejectedIngestionRetentionProtocol | None = None,
         poll_interval_seconds: float,
         system_probe_interval_seconds: float,
         now: Callable[[], datetime] = _utc_now,
@@ -82,6 +84,10 @@ class RetentionWorker:
             raise TypeError("retry_policy must expose next_attempt_at()")
         if not isinstance(check_policy, RetentionCheckPolicy):
             raise TypeError("check_policy must be a RetentionCheckPolicy")
+        if rejected_ingestion_retention is not None and not callable(
+            getattr(rejected_ingestion_retention, "run_if_due", None)
+        ):
+            raise TypeError("rejected_ingestion_retention must expose run_if_due()")
         if not callable(now):
             raise TypeError("now must be callable")
         if not callable(on_job_started):
@@ -92,6 +98,7 @@ class RetentionWorker:
         self._audio_purger = audio_purger
         self._retry_policy = retry_policy
         self._check_policy = check_policy
+        self._rejected_ingestion_retention = rejected_ingestion_retention
         self._poll_interval_seconds = _positive_seconds(
             poll_interval_seconds,
             "poll_interval_seconds",
@@ -107,6 +114,12 @@ class RetentionWorker:
         """Select and execute at most one durable retention operation."""
         selection_time = self._current_time()
         candidate = self._lifecycle.find_next_candidate(selection_time)
+        if candidate is None and self._rejected_ingestion_retention is not None:
+            rejected_ingestion_outcome = self._rejected_ingestion_retention.run_if_due(
+                selection_time
+            )
+            if rejected_ingestion_outcome is not None:
+                return rejected_ingestion_outcome
         if candidate is None:
             return self._idle_or_wait_for_probe(selection_time)
 

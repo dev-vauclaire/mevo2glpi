@@ -21,6 +21,7 @@ elle est assemblée dans la stack Docker Compose du MVP.
 | `GET /api/jobs/{uuid}` | UUID canonique | détail persistant et rétention, ou `404` |
 | `GET /api/jobs/{uuid}/events` | `limit` et curseur optionnels | historique expurgé, paginé séparément |
 | `POST /api/jobs/{uuid}/retry` | UUID d'un job `failed` ou `blocked` | `202`, état `pending` et `Location` |
+| `GET /api/rejections` | `limit` et curseur optionnels | rejets Exchange terminaux avec catégorie et code expurgés |
 | `GET /api/observability` | aucune | état des trois workers et alertes opérationnelles agrégées |
 | `GET /audios/{uuid}` | UUID canonique | audio `completed`, `410` si purgé, sinon `404` |
 
@@ -28,7 +29,9 @@ La collection `/api/jobs` est volontairement en lecture seule : un `POST`
 retourne `405 Method Not Allowed`. La pagination utilise un curseur opaque fondé
 sur `(updated_at, uuid)` ; le client ne doit ni l'interpréter ni le fabriquer.
 
-Le dashboard lit séparément l'état des jobs et l'instantané d'observabilité.
+Le dashboard lit séparément l'état des jobs, les rejets Exchange et
+l'instantané d'observabilité. La vue des rejets n'expose ni identifiant Graph,
+ni nom de pièce jointe, ni contenu du message.
 
 La documentation interactive FastAPI (`/docs`, `/redoc` et
 `/openapi.json`) reste disponible en développement et en staging. Elle est
@@ -98,16 +101,16 @@ flowchart LR
     Browser[Navigateur interne] -->|GET| Routes[Routes FastAPI]
     Routes --> Queries[Services de lecture]
     Queries --> Database[(PostgreSQL)]
-    Queries --> Dashboard[Jobs, événements et alertes expurgés]
+    Queries --> Dashboard[Jobs, rejets, événements et alertes expurgés]
     Browser -->|GET audio completed| Storage[(Volume /data/audios)]
     Browser -->|POST retry opérateur| Retry[Transaction de réarmement]
 ```
 
 Les lectures ne modifient ni PostgreSQL ni le volume. L'unique commande métier
 conservée est la relance opérateur d'un job `failed` ou `blocked`; elle est
-auditée par l'événement `operator_retry_requested`. Les lignes
-`mail_ingestions`, notamment les messages rejetés, restent persistées pour une
-future vue dédiée ; cette itération n'expose pas encore leur liste.
+auditée par l'événement `operator_retry_requested`. Les messages rejetés restent
+consultables jusqu'à l'expiration de leur durée de rétention. La vue présente
+uniquement l'UUID d'ingestion, les dates et le motif technique expurgé.
 
 ## Architecture
 
@@ -147,7 +150,8 @@ apps/web/
 │   ├── controllers/         # adaptation du protocole HTTP
 │   ├── services/
 │   │   ├── jobs/            # requêtes, download, retry et DTO internes
-│   │   └── observability/   # seuils, priorités et projection opérationnelle
+│   │   ├── observability/   # seuils, priorités et projection opérationnelle
+│   │   └── rejections/      # liste expurgée des messages rejetés
 │   ├── schemas/             # contrats HTTP Pydantic
 │   ├── middlewares/         # traitements HTTP transversaux futurs
 │   ├── templates/           # pages HTML Jinja
@@ -178,13 +182,13 @@ Conventions :
 - le nom original n'entre jamais dans `storage_key`.
 
 L'interface utilise du JavaScript natif segmenté en `api.js`, `dashboard.js`,
-`observability.js` et `app.js`. `app.js` possède l'unique
-ordonnanceur de rafraîchissement : les lectures jobs et observabilité sont
-attendues indépendamment, sans `setInterval`, et le polling est suspendu lorsque
-l'onglet est masqué. Les valeurs venant de l'API sont ajoutées au DOM avec
-`textContent` ou `replaceChildren`, jamais interprétées comme du HTML. Cette
-itération suppose un accès limité au réseau interne et n'ajoute pas de mécanisme
-d'authentification applicative.
+`rejections.js`, `observability.js` et `app.js`. `app.js` possède l'unique
+ordonnanceur de rafraîchissement : les lectures jobs, rejets et observabilité
+sont attendues indépendamment, sans `setInterval`, et le polling est suspendu
+lorsque l'onglet est masqué. Les valeurs venant de l'API sont ajoutées au DOM
+avec `textContent` ou `replaceChildren`, jamais interprétées comme du HTML.
+Cette itération suppose un accès limité au réseau interne et n'ajoute pas de
+mécanisme d'authentification applicative.
 
 ## Configuration
 
@@ -250,8 +254,6 @@ uv run ruff check apps/web
   appel HTTP synchrone long peut rendre un processus vivant potentiellement non
   réactif dans le dashboard ;
 - pas encore de suppression des orphelins ;
-- pas encore de liste ni de détail HTTP pour `mail_ingestions` ; les rejets du
-  publisher sont conservés en base mais ne sont visibles qu'indirectement via
-  l'état et les alertes du worker ;
+- pas de détail HTTP individuel ni de rejeu des ingestions depuis le dashboard ;
 - pas encore de test E2E dans un navigateur réel ; les contrats JavaScript sont
   vérifiés statiquement et l'API est testée avec FastAPI.

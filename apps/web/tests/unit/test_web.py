@@ -29,6 +29,7 @@ from mevo2glpi_web.services import (
     JobQueryUnavailableError,
     JobView,
     ObservabilitySnapshot,
+    RejectedIngestionListPage,
     RetriedJob,
 )
 from mevo2glpi_web.web import create_app
@@ -62,6 +63,11 @@ class FakeListAudioJobEvents:
         return JobEventListPage(items=(), next_cursor=None)
 
 
+class FakeListRejectedIngestions:
+    def execute(self, **_kwargs: object) -> RejectedIngestionListPage:
+        return RejectedIngestionListPage(items=(), next_cursor=None)
+
+
 class FakeRetryAudioJob:
     def execute(self, audio_uuid: UUID) -> RetriedJob:
         return RetriedJob(audio_uuid=audio_uuid, state=JobStatus.PENDING)
@@ -93,6 +99,7 @@ def web_context(tmp_path: Path) -> Iterator[WebTestContext]:
         list_audio_jobs=FakeListAudioJobs(),
         get_audio_job=query,
         list_audio_job_events=FakeListAudioJobEvents(),
+        list_rejected_ingestions=FakeListRejectedIngestions(),
         retry_audio_job=FakeRetryAudioJob(),
         get_downloadable_audio=GetDownloadableAudio(audio_root, query),
         get_observability=FakeGetObservability(),  # type: ignore[arg-type]

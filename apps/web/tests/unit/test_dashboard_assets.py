@@ -16,6 +16,8 @@ def test_index_exposes_read_only_dashboard_and_operator_retry() -> None:
     assert "data-job-dialog" in template
     assert "data-job-events" in template
     assert "data-job-retry" in template
+    assert "data-rejections-table" in template
+    assert "data-rejections-feedback" in template
     assert "data-worker-cards" in template
     assert "data-alert-list" in template
     assert "data-alert-empty" in template
@@ -46,6 +48,23 @@ def test_dashboard_uses_cursor_and_separate_event_endpoint() -> None:
     assert 'job.state === "completed"' in dashboard
     assert "event.technical_code" in dashboard
     assert "ACTOR_LABELS" in dashboard
+
+
+def test_dashboard_lists_sanitized_rejections_and_localizes_known_reasons() -> None:
+    api = (JAVASCRIPT_ROOT / "api.js").read_text(encoding="utf-8")
+    app = (JAVASCRIPT_ROOT / "app.js").read_text(encoding="utf-8")
+    rejections = (JAVASCRIPT_ROOT / "rejections.js").read_text(encoding="utf-8")
+
+    assert "requestJson(`/api/rejections?" in api
+    assert "createRejectionsController" in app
+    assert "page.next_cursor" in rejections
+    assert '"audio_attachment_missing"' in rejections
+    assert '"audio_format_not_supported"' in rejections
+    assert '"attachment_count_invalid"' in rejections
+    assert "rejection.rejection_code" in rejections
+    assert "message_id" not in rejections
+    assert "attachment_id" not in rejections
+    assert "innerHTML" not in rejections
 
 
 def test_dashboard_names_every_retention_lifecycle_event() -> None:

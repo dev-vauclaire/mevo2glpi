@@ -1,6 +1,7 @@
 """Application services implementing the audio-retention lifecycle."""
 
 from .lifecycle import (
+    RejectedIngestionRetentionLifecycleService,
     RetentionJobInvariantError,
     RetentionJobLifecycleService,
     StaleRetentionCandidateError,
@@ -12,6 +13,8 @@ from .outcomes import (
     DependencyWaitingOutcome,
     GlpiCheckRescheduledOutcome,
     IdleOutcome,
+    RejectedIngestionsPurgedOutcome,
+    RejectedIngestionsReportedOutcome,
     RetentionBlockedOutcome,
     RetentionFailure,
     RetentionOperation,
@@ -23,6 +26,10 @@ from .outcomes import (
 )
 from .policies import RetentionCheckPolicy
 from .ports import RetentionWorkerProtocol
+from .rejected_ingestions import (
+    RejectedIngestionRetentionMode,
+    RejectedIngestionRetentionService,
+)
 from .runner import run_forever
 from .service import RetentionWorker
 
@@ -33,6 +40,11 @@ __all__ = [
     "DependencyWaitingOutcome",
     "GlpiCheckRescheduledOutcome",
     "IdleOutcome",
+    "RejectedIngestionRetentionLifecycleService",
+    "RejectedIngestionRetentionMode",
+    "RejectedIngestionRetentionService",
+    "RejectedIngestionsPurgedOutcome",
+    "RejectedIngestionsReportedOutcome",
     "RetentionCheckPolicy",
     "RetentionBlockedOutcome",
     "RetentionFailure",

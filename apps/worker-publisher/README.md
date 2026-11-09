@@ -356,8 +356,8 @@ l'audit du rejeu.
   FFmpeg dans le service de transcription reste l'autorité de décodage ;
 - la liste paginée de l'Inbox est interrogée par polling, sans abonnement
   Graph ni delta query ;
-- les rejets restent traçables en base et dans `Rejected`, mais le dashboard
-  n'offre pas encore de liste dédiée aux ingestions mail ;
+- les rejets restent traçables en base et dans `Rejected` pendant leur durée de
+  conservation et sont consultables dans la vue dédiée du dashboard ;
 - les alertes restent locales au dashboard, sans notification externe ;
 - l'E2E global automatise la frontière durable produite par le publisher sans
   utiliser de tenant Entra ID réel ; les contrats Graph et l'orchestration du

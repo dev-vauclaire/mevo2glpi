@@ -79,7 +79,10 @@ procédures de [staging](../../docs/procedures/staging.md) et de
   `transcription_failed` lorsque la création du ticket continue malgré un
   échec terminal de transcription ;
 - `0008_originating_phone_cipher` ajoute le ciphertext temporaire et borné
-  du numéro d'origine, sans stocker l'objet Exchange ni le numéro en clair.
+  du numéro d'origine, sans stocker l'objet Exchange ni le numéro en clair ;
+- `0009_rejected_retention` ajoute l'index partiel utilisé par la pagination
+  du dashboard et la purge bornée des ingestions rejetées terminales. Cette
+  migration ne supprime aucune donnée lors de son exécution.
 
 L'historique est compatible avec les deux situations de déploiement attendues :
 

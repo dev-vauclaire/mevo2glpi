@@ -319,6 +319,74 @@ def test_operator_replay_filters_and_rearms_one_rejected_ingestion(
         )
 
 
+def test_rejected_dashboard_and_retention_use_terminal_finished_at(
+    migrated_engine: Engine,
+) -> None:
+    session_factory = create_session_factory(migrated_engine)
+    expired_uuid = UUID("00000000-0000-0000-0000-000000000141")
+    recent_uuid = UUID("00000000-0000-0000-0000-000000000142")
+    blocked_uuid = UUID("00000000-0000-0000-0000-000000000143")
+    expired_finished_at = NOW - timedelta(days=91)
+    recent_finished_at = NOW - timedelta(days=2)
+
+    with session_factory.begin() as session:
+        _persist_rejected(
+            MailIngestionRepository(session),
+            ingestion_uuid=expired_uuid,
+            message_id="immutable-expired-rejection",
+            received_at=NOW - timedelta(days=180),
+            finished_at=expired_finished_at,
+        )
+    with session_factory.begin() as session:
+        _persist_rejected(
+            MailIngestionRepository(session),
+            ingestion_uuid=recent_uuid,
+            message_id="immutable-recent-rejection",
+            received_at=NOW - timedelta(days=120),
+            finished_at=recent_finished_at,
+        )
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        repository.add_discovered(
+            DiscoveredMail(
+                uuid=blocked_uuid,
+                mailbox_id=MAILBOX_UUID,
+                message_id="immutable-blocked-message",
+                received_at=NOW - timedelta(days=180),
+            ),
+            now=NOW - timedelta(days=100),
+        )
+        repository.resume_or_claim_next(NOW - timedelta(days=100))
+        repository.record_blocked(
+            blocked_uuid,
+            stage=MailIngestionStage.VALIDATION,
+            error_scope=MailIngestionErrorScope.SYSTEM,
+            error_category="configuration",
+            error_code="graph_forbidden",
+            now=NOW - timedelta(days=100),
+        )
+
+    with session_factory.begin() as session:
+        repository = MailIngestionRepository(session)
+        first_page = repository.list_rejected(page_size=1)
+        assert [item.uuid for item in first_page.items] == [recent_uuid]
+        assert first_page.has_more is True
+        assert first_page.next_cursor is not None
+
+        second_page = repository.list_rejected(
+            page_size=1,
+            cursor=first_page.next_cursor,
+        )
+        assert [item.uuid for item in second_page.items] == [expired_uuid]
+        assert second_page.has_more is False
+        assert second_page.items[0].rejection_code == "audio_format_not_supported"
+
+        cutoff = NOW - timedelta(days=90)
+        assert repository.count_expired_rejected(cutoff) == 1
+        candidates = repository.list_expired_rejected_for_update(cutoff, 100)
+        assert [candidate.uuid for candidate in candidates] == [expired_uuid]
+
+
 def _discovered(
     ingestion_uuid: UUID,
     message_id: str,
@@ -331,3 +399,34 @@ def _discovered(
         message_id=message_id,
         received_at=NOW - timedelta(minutes=minutes_ago),
     )
+
+
+def _persist_rejected(
+    repository: MailIngestionRepository,
+    *,
+    ingestion_uuid: UUID,
+    message_id: str,
+    received_at: datetime,
+    finished_at: datetime,
+) -> None:
+    repository.add_discovered(
+        DiscoveredMail(
+            uuid=ingestion_uuid,
+            mailbox_id=MAILBOX_UUID,
+            message_id=message_id,
+            received_at=received_at,
+        ),
+        now=finished_at - timedelta(seconds=2),
+    )
+    acquisition = repository.resume_or_claim_next(finished_at - timedelta(seconds=2))
+    assert acquisition is not None
+    assert acquisition.ingestion.uuid == ingestion_uuid
+    repository.record_rejected(
+        ingestion_uuid,
+        rejection_category="invalid_attachment",
+        rejection_code="audio_format_not_supported",
+        attachment_id="opaque-attachment",
+        attachment_size_bytes=2048,
+        now=finished_at - timedelta(seconds=1),
+    )
+    repository.record_failed(ingestion_uuid, now=finished_at)

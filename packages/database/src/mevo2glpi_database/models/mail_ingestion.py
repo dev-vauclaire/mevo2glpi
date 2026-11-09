@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     Uuid,
+    and_,
     func,
     text,
 )
@@ -267,6 +268,17 @@ class MailIngestion(Base):
             "ix_mail_ingestions_dashboard",
             updated_at.desc(),
             uuid.desc(),
+        ),
+        Index(
+            "ix_mail_ingestions_rejected_retention",
+            finished_at,
+            uuid,
+            postgresql_where=and_(
+                status == MailIngestionStatus.FAILED.value,
+                stage == MailIngestionStage.ACKNOWLEDGEMENT.value,
+                disposition == MailIngestionDisposition.REJECTED.value,
+                job_uuid.is_(None),
+            ),
         ),
         Index(
             "uq_mail_ingestions_single_processing",

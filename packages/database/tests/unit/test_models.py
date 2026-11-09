@@ -525,6 +525,7 @@ def test_query_indexes_match_the_documented_access_paths() -> None:
         "ix_mail_ingestions_pending",
         "ix_mail_ingestions_retry_scheduled",
         "ix_mail_ingestions_dashboard",
+        "ix_mail_ingestions_rejected_retention",
         "ix_mail_ingestion_events_history",
         "ix_worker_runtime_status_heartbeat",
     }
@@ -541,6 +542,22 @@ def test_retention_due_index_includes_retries_for_both_policies() -> None:
 
     assert "policy = 'ticket_or_deadline' AND status = 'scheduled'" in ddl
     assert "OR status = 'retry_scheduled'" in ddl
+
+
+def test_rejected_ingestion_retention_index_matches_terminal_candidates() -> None:
+    table = Base.metadata.tables["mail_ingestions"]
+    index = next(
+        index
+        for index in table.indexes
+        if index.name == "ix_mail_ingestions_rejected_retention"
+    )
+    ddl = str(CreateIndex(index).compile(dialect=postgresql.dialect()))
+
+    assert "finished_at, uuid" in ddl
+    assert "status = 'failed'" in ddl
+    assert "stage = 'acknowledgement'" in ddl
+    assert "disposition = 'rejected'" in ddl
+    assert "job_uuid IS NULL" in ddl
 
 
 def test_metadata_compiles_for_postgresql() -> None:

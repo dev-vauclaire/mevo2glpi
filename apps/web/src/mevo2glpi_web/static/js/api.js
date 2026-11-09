@@ -68,6 +68,14 @@ export function listJobs({ limit = 25, state = "", audioUuid = "", cursor = "" }
   return requestJson(`/api/jobs?${query.toString()}`);
 }
 
+export function listRejections({ limit = 25, cursor = "" } = {}) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor) {
+    query.set("cursor", cursor);
+  }
+  return requestJson(`/api/rejections?${query.toString()}`);
+}
+
 export function getJob(audioUuid) {
   return requestJson(jobPath(audioUuid));
 }

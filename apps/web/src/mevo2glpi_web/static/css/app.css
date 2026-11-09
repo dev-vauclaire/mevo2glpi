@@ -494,6 +494,26 @@ tbody tr:last-child td {
   font-size: 0.8rem;
 }
 
+.rejection-reason {
+  min-width: 15rem;
+}
+
+.rejection-reason__label,
+.rejection-reason__code {
+  display: block;
+}
+
+.rejection-reason__label {
+  font-weight: 650;
+}
+
+.rejection-reason__code {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
 .status-badge {
   display: inline-flex;
   padding: 0.28rem 0.55rem;
