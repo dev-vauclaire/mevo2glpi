@@ -5,6 +5,27 @@ Ce fichier recense les changements fonctionnels et opérationnels destinés aux
 par les tags Git immuables `vX.Y.Z` ; les versions `0.1.0` des packages Python
 sont des métadonnées internes au workspace et ne constituent pas des releases.
 
+## v0.10.0 — 2026-11-09
+
+### Ajouté
+
+- vue paginée des messages Exchange rejetés dans le dashboard, avec leur date
+  et un motif expurgé ;
+- rétention PostgreSQL configurable des ingestions rejetées terminales sans job
+  associé, fixée à 90 jours par défaut ;
+- index partiel Alembic pour borner les lectures du dashboard et les lots de
+  purge.
+
+### Modifié
+
+- le worker de rétention supprime atomiquement les événements puis l'ingestion
+  rejetée, par lots internes de 100, sans contacter GLPI, Microsoft Graph ou le
+  volume audio ;
+- la cadence de cette purge réutilise `RETENTION_CHECK_INTERVAL_HOURS` afin de
+  limiter la surface de configuration ;
+- les ingestions bloquées restent exclues de la purge et aucun identifiant
+  Microsoft Graph ni contenu de message n'est exposé par le dashboard.
+
 ## v0.9.0 — 2026-11-09
 
 ### Ajouté

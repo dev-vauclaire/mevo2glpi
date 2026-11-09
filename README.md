@@ -31,7 +31,6 @@
 - [Procédures par environnement](#procédures-par-environnement)
 - [Documentation](#documentation)
 - [Feuille de route](#feuille-de-route)
-  - [Évolutions prioritaires](#évolutions-prioritaires)
   - [Sécurité de l'interface web](#sécurité-de-linterface-web)
   - [Génération assistée du ticket par LLM](#génération-assistée-du-ticket-par-llm)
 - [Licence](#licence)
@@ -105,11 +104,6 @@ Les déploiements en staging et en production s'effectuent avec **Dokploy**.
 
 Cette feuille de route contient uniquement les évolutions prévues. Les
 fonctionnalités déjà disponibles sont décrites dans les sections précédentes.
-
-### Évolutions prioritaires
-
-- [x] Appliquer une durée de conservation configurable aux ingestions Exchange
-  rejetées sans job associé.
 
 ### Sécurité de l'interface web
 
