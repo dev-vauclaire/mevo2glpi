@@ -743,8 +743,10 @@ pour diagnostiquer la production.
 - les changements Exchange RBAC peuvent demander jusqu'à deux heures de
   propagation ;
 - MP3 et M4A ne sont pas encore acceptés par le publisher ;
-- l'installation actuelle ne configure aucune sauvegarde PostgreSQL ou audio ;
-- une perte de la VM, de la Database ou du volume peut donc être irréversible ;
+- les sauvegardes PostgreSQL et audio ne sont pas automatisées par le dépôt :
+  elles doivent être configurées et qualifiées au niveau de l'hyperviseur ;
+- sans point de reprise externe testé, une perte de la VM, de la Database ou du
+  volume peut être irréversible ;
 - un rollback applicatif ne rétrograde pas automatiquement PostgreSQL et
   n'annule ni un déplacement Exchange ni un ticket déjà créé dans GLPI.
 
@@ -759,9 +761,12 @@ En cas d'échec :
 5. corriger la configuration ou redéployer le même tag ;
 6. ne jamais rétrograder Alembic sans procédure explicitement validée.
 
-En l'absence de sauvegarde, cette procédure ne permet pas de restaurer un état
-antérieur de PostgreSQL ou du volume audio. Un redéploiement applicatif ne
-répare pas automatiquement les effets déjà produits dans Exchange ou GLPI.
+En l'absence d'un point de reprise de l'hyperviseur dont la restauration a été
+qualifiée, cette procédure ne permet pas de restaurer un état antérieur de
+PostgreSQL ou du volume audio. Un redéploiement applicatif ne répare pas
+automatiquement les effets déjà produits dans Exchange ou GLPI. Les mises à
+jour planifiées sont donc lancées uniquement après vidage des jobs `pending` et
+`processing` selon la [procédure dédiée](mise-a-jour.md).
 
 Dès qu'une première version est opérationnelle, toute nouvelle version doit
 suivre la [procédure de mise à jour](mise-a-jour.md), notamment pour le point de

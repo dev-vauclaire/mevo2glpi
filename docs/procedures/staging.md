@@ -860,6 +860,8 @@ Limites connues :
 - le staging dépend du DNS, du routage, de NTP et des CA de la VM ;
 - le web n'applique pas encore d'authentification utilisateur ;
 - le rollback applicatif ne rétrograde pas automatiquement PostgreSQL ;
+- les sauvegardes PostgreSQL et audio relèvent de la politique de
+  l'hyperviseur et ne sont pas automatisées par le dépôt ;
 - aucune opération de nettoyage ne doit viser le GLPI de test externe ni les
   volumes du Compose GLPI optionnel sans autorisation explicite.
 

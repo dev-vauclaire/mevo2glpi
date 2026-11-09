@@ -26,6 +26,9 @@ dist/
 *.pem
 *.p12
 *.pfx
+*.crt
+*.cer
+*.csr
 /infra/docker/.env
 /infra/docker/.env.*
 !/infra/docker/.env.example

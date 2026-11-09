@@ -8,8 +8,14 @@ on:
       - .env.example
       - .dockerignore
       - .github/workflows/ci-apps.yml
+      - CHANGELOG.md
+      - CONTRIBUTING.md
+      - README.md
+      - SECURITY.md
+      - SUPPORT.md
       - apps/**
       - conftest.py
+      - docs/**
       - infra/docker/apps/**
       - infra/docker/development/**
       - infra/docker/providers/glpi-test/**
@@ -25,8 +31,14 @@ on:
       - .env.example
       - .dockerignore
       - .github/workflows/ci-apps.yml
+      - CHANGELOG.md
+      - CONTRIBUTING.md
+      - README.md
+      - SECURITY.md
+      - SUPPORT.md
       - apps/**
       - conftest.py
+      - docs/**
       - infra/docker/apps/**
       - infra/docker/development/**
       - infra/docker/providers/glpi-test/**

@@ -102,6 +102,13 @@ Une branche peut être poussée sur le dépôt pour la partager ou la sauvegarde
 mais ce push ne déclenche pas la CI courante tant qu'il ne concerne ni `main`,
 ni une Pull Request, ni un lancement manuel.
 
+Ce flux direct correspond au fonctionnement actuel avec un mainteneur unique.
+Une contribution provenant d'un autre établissement doit passer par une Pull
+Request, une revue et une CI verte avant fusion, conformément à
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md). Si la maintenance devient partagée,
+la protection de `main` et ce flux par Pull Request devront devenir la règle
+commune.
+
 ## 3. Intégration continue
 
 ### Déclencheurs
@@ -114,7 +121,9 @@ Les deux workflows GitHub Actions sont déclenchés par :
 - un lancement manuel `workflow_dispatch`.
 
 Leurs filtres de chemins évitent d'exécuter un périmètre qui n'a pas changé.
-Une modification uniquement documentaire peut donc ne déclencher aucun job.
+Une modification de la documentation ou des fichiers de gouvernance déclenche
+la CI applications afin de vérifier au minimum les liens relatifs et les
+contrôles généraux du dépôt.
 
 ### Workflows
 
@@ -136,7 +145,8 @@ Selon le périmètre, la CI exécute :
 3. les suites Pytest locales déterministes ;
 4. les migrations et intégrations PostgreSQL jetables ;
 5. le rendu des manifestes Docker Compose ;
-6. les contrats ciblés des images et de la stack de transcription.
+6. les contrats ciblés des images et de la stack de transcription ;
+7. l'existence des cibles des liens Markdown relatifs.
 
 Les suites `glpi`, `transcribe_ai`, `transcription_model`, `e2e` et certains
 tests `deployment` restent des validations manuelles. La CI ne démontre donc

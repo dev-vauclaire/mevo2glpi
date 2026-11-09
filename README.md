@@ -101,10 +101,14 @@ Les déploiements en staging et en production s'effectuent avec **Dokploy**.
 
 ## Documentation
 
+- [guide d'adoption par un autre établissement](docs/adoption.md) ;
 - [architecture technique détaillée](docs/reference/architecture.md) ;
 - [architecture du dépôt et workspace uv](docs/reference/depot.md) ;
 - [cycle CI/CD et convention des tags](docs/reference/ci-cd.md) ;
-- [stratégie de tests](docs/reference/tests.md).
+- [stratégie de tests](docs/reference/tests.md) ;
+- [historique des versions](CHANGELOG.md) ;
+- [contribution](CONTRIBUTING.md), [sécurité](SECURITY.md) et
+  [support](SUPPORT.md).
 
 ## Feuille de route
 
@@ -115,13 +119,14 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
 
 - [ ] Étendre l'ingestion Exchange aux formats MP3 et M4A après validation de
   leur structure et de leur compatibilité avec le service de transcription.
+- [ ] Définir puis appliquer une durée de conservation aux ingestions Exchange
+  rejetées qui ne possèdent aucun job associé.
 
 ### Sécurité de l'interface web
 
-- [ ] Définir avec les équipes réseau et système le mécanisme SSO placé devant
-  l'application.
-- [ ] Ajouter une authentification et des autorisations applicatives avant
-  d'étendre l'accès aux audios ou les actions opérateur.
+- [ ] Intégrer ultérieurement une authentification OIDC avec Keycloak et des
+  autorisations applicatives avant d'étendre l'accès aux audios ou les actions
+  opérateur.
 
 En attendant, le web reste strictement limité au réseau interne par le DNS, le
 pare-feu et la configuration Traefik de Dokploy.

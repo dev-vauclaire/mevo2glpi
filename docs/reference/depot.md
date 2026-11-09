@@ -7,6 +7,11 @@ dépendances pour ses douze membres. Le tableau ci-dessous reprend uniquement le
 chemins déclarés dans `[tool.uv.workspace].members` du fichier
 [`pyproject.toml`](../../pyproject.toml).
 
+Les versions `0.1.0` déclarées dans les `pyproject.toml` sont des métadonnées
+internes de packages non publiés ; elles ne représentent pas la version du
+produit. Une version déployable est identifiée par un tag Git immuable
+`vX.Y.Z`, puis exposée au runtime avec `APP_RELEASE` et `APP_COMMIT_SHA`.
+
 | Membre | Responsabilité | Documentation |
 | --- | --- | --- |
 | `apps/database-migrations` | Migration Alembic one-shot | [README](../../apps/database-migrations/README.md) |

@@ -112,13 +112,15 @@ Ne pas arrêter :
 
 ### Point de reprise
 
-Une fois les services mutateurs arrêtés, réaliser le point de reprise
-PostgreSQL et volume audio prévu par la politique d'exploitation. Les deux
-sauvegardes doivent représenter le même état logique.
+Une fois les services mutateurs arrêtés et les jobs `pending` et `processing`
+vidés, réaliser le point de reprise prévu par la politique d'exploitation. Dans
+la topologie de référence, PostgreSQL et le volume audio sont sauvegardés au
+niveau de l'hyperviseur. Le point de reprise doit couvrir un état cohérent de la
+VM et sa restauration doit avoir été qualifiée par l'établissement.
 
-Le dépôt ne contient pas encore de méthode de sauvegarde et de restauration
-qualifiée pour le stockage choisi. En l'absence d'un runbook externe testé,
-seul un rollback applicatif sans restauration de données peut être garanti.
+Le dépôt n'automatise pas cette sauvegarde et ne remplace pas le runbook de
+l'hyperviseur. En l'absence d'un point de reprise externe testé, seul un
+rollback applicatif sans restauration de données peut être garanti.
 
 ## 3. Préparer Dokploy
 
@@ -260,4 +262,6 @@ rollback doit donc être préparé avant le clic sur **Deploy**.
 Si PostgreSQL ou le volume audio doit être restauré, ne pas utiliser ce rollback
 court. Maintenir les services arrêtés et suivre un runbook de restauration et de
 réconciliation dédié. Une restauration locale n'annule ni un message déplacé
-dans Exchange, ni un ticket déjà créé dans GLPI.
+dans Exchange, ni un ticket déjà créé dans GLPI. Ce risque est borné par la
+porte d'entrée de la mise à jour : aucun job `pending` ou `processing` ne doit
+subsister avant l'arrêt des services.

@@ -15,7 +15,7 @@ flowchart LR
         AUDIO[("Volume audio<br/>stockage des fichiers")]
     end
 
-    DB[("PostgreSQL externe<br/>jobs, événements, tentatives,<br/>rétentions et heartbeats")]
+    DB[("PostgreSQL<br/>jobs, événements, tentatives,<br/>rétentions et heartbeats")]
 
     subgraph PROVIDERS["Providers et services externes"]
         EX["Exchange Online<br/>pièces jointes audio"]
@@ -44,8 +44,10 @@ flowchart LR
 ## Compose applicatif
 
 Le Compose applicatif regroupe les cinq services du projet et crée le volume
-audio partagé. PostgreSQL reste un service externe, rejoint par un réseau
-Docker privé.
+audio partagé. PostgreSQL reste externe à ce Compose et le rejoint par un
+réseau Docker privé. Dans la topologie de référence, il est néanmoins déployé
+sur la même VM comme service **Database Dokploy** ; il ne s'agit pas d'une base
+exposée hors de la plateforme.
 
 ### Worker retention
 
@@ -84,7 +86,8 @@ PostgreSQL est la source de vérité du système. Il persiste notamment les jobs
 les événements, les tentatives, les échéances de retry, les rétentions et les
 heartbeats des workers. L'agrégat d'un job reste disponible tant que son audio
 est conservé, puis il est purgé avec lui. Les ingestions rejetées sans job
-restent inchangées et observables.
+restent inchangées et observables sans durée de conservation bornée ; la mise
+en place de cette rétention figure dans la feuille de route.
 
 ### Volume audio
 
