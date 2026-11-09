@@ -630,6 +630,7 @@ def create_mvp_compose_environment(
         "FAILED_RETENTION_DAYS": "30",
         "BLOCKED_RETENTION_DAYS": "90",
         "RETENTION_CHECK_INTERVAL_HOURS": "6",
+        "TRANSCRIPTION_PROVIDER": "legacy_polling",
         "LEGACY_TRANSCRIPTION_BASE_URL": (
             provider_configuration.transcription_base_url
         ),

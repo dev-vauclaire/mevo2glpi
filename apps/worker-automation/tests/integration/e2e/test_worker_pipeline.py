@@ -238,6 +238,7 @@ def _build_settings(
         failed_retention_days=30,
         blocked_retention_days=90,
         retention_check_interval_hours=6,
+        transcription_provider="legacy_polling",
         legacy_transcription_base_url=transcribe_ai_environment.base_url,
         legacy_transcription_api_key=transcribe_ai_environment.api_key,
         transcription_http_timeout_seconds=30,

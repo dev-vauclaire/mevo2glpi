@@ -39,6 +39,7 @@ def worker_settings_factory(
             "failed_retention_days": 31,
             "blocked_retention_days": 92,
             "retention_check_interval_hours": 7,
+            "transcription_provider": "legacy_polling",
             "legacy_transcription_base_url": ("https://transcribe.example.test/prefix"),
             "legacy_transcription_api_key": "synthetic-transcription-key",
             "transcription_http_timeout_seconds": 4.5,

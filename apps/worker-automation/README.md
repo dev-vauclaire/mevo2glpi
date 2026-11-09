@@ -11,6 +11,10 @@ Le MVP reste volontairement mono-worker. Une connexion PostgreSQL dédiée
 conserve un verrou advisory pendant toute la durée du processus ; une seconde
 instance est refusée avant de traiter un job.
 
+Le provider nominal est l'API synchrone OpenAI-compatible déployée avec
+Parakeet. L'adaptateur historique à polling reste disponible par configuration
+explicite, sans basculement automatique entre les deux providers.
+
 ## Entrées et sorties
 
 ### Entrées
@@ -430,7 +434,7 @@ Les variables obligatoires sont chargées depuis l'environnement ou `.env` :
 | `DATABASE_URL` | URL `postgresql+psycopg` de la base migrée. |
 | `PUBLIC_BASE_URL` | Base des liens audio insérés dans GLPI. |
 | `ORIGINATING_PHONE_NUMBER_KEY_PATH` | Fichier Base64 contenant la clé AES-256 partagée avec publisher. |
-| `TRANSCRIPTION_PROVIDER` | `legacy_polling` ou `openai_compatible` ; `legacy_polling` par défaut. |
+| `TRANSCRIPTION_PROVIDER` | `openai_compatible` par défaut ; `legacy_polling` reste un choix explicite de repli. |
 | `LEGACY_TRANSCRIPTION_BASE_URL` | Base de l'API batch, obligatoire uniquement avec `legacy_polling`. |
 | `LEGACY_TRANSCRIPTION_API_KEY` | Clé de l'API batch, obligatoire uniquement avec `legacy_polling`. |
 | `OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL` | Base OpenAI compatible terminée par son préfixe `/v1`, obligatoire avec `openai_compatible`. |

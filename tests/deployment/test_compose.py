@@ -153,6 +153,13 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     assert documented_values["AUDIO_VOLUME_NAME"] == "mevo2glpi-prod-audio-data"
     assert documented_values["FAILED_RETENTION_DAYS"] == "10"
     assert documented_values["TRANSCRIPTION_HTTP_TIMEOUT_SECONDS"] == "180"
+    assert documented_values["TRANSCRIPTION_PROVIDER"] == "openai_compatible"
+    assert documented_values["OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL"] == (
+        "http://mevo2glpi-prod-transcription:5092/v1"
+    )
+    assert documented_values["OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL"] == (
+        "parakeet-ultra"
+    )
     assert documented_values["ORIGINATING_PHONE_NUMBER_KEY_HOST_PATH"] == (
         "/etc/mevo2glpi/secrets/originating-phone-number.key"
     )
@@ -163,6 +170,7 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
 
     secret_names = {
         "LEGACY_TRANSCRIPTION_API_KEY",
+        "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY",
         "GLPI_USERNAME",
         "GLPI_PASSWORD",
         "GLPI_CLIENT_ID",
@@ -317,13 +325,19 @@ def test_production_manifest_separates_application_networks(
         assert set(services[service_name]["networks"]) == {"database"}
 
 
-def test_production_keeps_legacy_provider_as_rollback_default(
+def test_production_uses_openai_compatible_provider_as_nominal_default(
     render_compose: Callable[[], dict[str, object]],
 ) -> None:
     config = render_compose()
     automation = _services(config)["worker-automation"]
 
-    assert automation["environment"]["TRANSCRIPTION_PROVIDER"] == "legacy_polling"
+    assert automation["environment"]["TRANSCRIPTION_PROVIDER"] == ("openai_compatible")
+    assert automation["environment"]["OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL"] == (
+        "http://mevo2glpi-prod-transcription:5092/v1"
+    )
+    assert automation["environment"]["OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL"] == (
+        "parakeet-ultra"
+    )
     assert set(automation["networks"]) == {"database", "transcription"}
     assert config["networks"]["transcription"]["external"] is True
 

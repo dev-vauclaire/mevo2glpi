@@ -76,7 +76,9 @@ class WorkerSettings(BaseSettings):
     blocked_retention_days: int = Field(default=90, gt=0)
     retention_check_interval_hours: int = Field(default=6, gt=0)
 
-    transcription_provider: TranscriptionProvider = TranscriptionProvider.LEGACY_POLLING
+    transcription_provider: TranscriptionProvider = (
+        TranscriptionProvider.OPENAI_COMPATIBLE
+    )
     legacy_transcription_base_url: HttpUrl | None = None
     legacy_transcription_api_key: SecretStr | None = Field(default=None, repr=False)
     openai_compatible_transcription_base_url: HttpUrl | None = None

@@ -29,6 +29,7 @@ def configure_required_worker_settings(
     tmp_path: Path,
 ) -> None:
     """Provide baseline settings unless a test explicitly removes one."""
+    monkeypatch.setenv("TRANSCRIPTION_PROVIDER", "legacy_polling")
     monkeypatch.setenv("LEGACY_TRANSCRIPTION_BASE_URL", TRANSCRIPTION_BASE_URL)
     monkeypatch.setenv("LEGACY_TRANSCRIPTION_API_KEY", TRANSCRIPTION_API_KEY)
     monkeypatch.setenv("GLPI_BASE_URL", GLPI_BASE_URL)
@@ -557,6 +558,7 @@ def test_glpi_http_timeout_defaults_to_ten_seconds(
 def test_legacy_transcription_settings_are_typed() -> None:
     settings = WorkerSettings(
         public_base_url="http://localhost:8000",
+        transcription_provider="legacy_polling",
         legacy_transcription_base_url="https://transcription.example.test/prefix",
         legacy_transcription_api_key="synthetic-api-key",
         transcription_http_timeout_seconds=4.5,
@@ -577,6 +579,24 @@ def test_legacy_transcription_settings_are_typed() -> None:
     assert settings.transcription_job_timeout_seconds == 120
 
 
+def test_openai_compatible_transcription_is_the_default_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TRANSCRIPTION_PROVIDER")
+
+    settings = WorkerSettings(
+        public_base_url="http://localhost:8000",
+        openai_compatible_transcription_base_url=(
+            "http://transcription-provider.test/v1"
+        ),
+        openai_compatible_transcription_api_key="synthetic-provider-key",
+        openai_compatible_transcription_model="parakeet-ultra",
+        _env_file=None,
+    )
+
+    assert settings.transcription_provider.value == "openai_compatible"
+
+
 @pytest.mark.parametrize(
     "missing_environment_variable",
     [
@@ -591,7 +611,11 @@ def test_selected_legacy_transcription_credentials_are_required(
     monkeypatch.delenv(missing_environment_variable)
 
     with pytest.raises(ValidationError, match="legacy polling"):
-        WorkerSettings(public_base_url="http://localhost:8000", _env_file=None)
+        WorkerSettings(
+            public_base_url="http://localhost:8000",
+            transcription_provider="legacy_polling",
+            _env_file=None,
+        )
 
 
 def test_openai_compatible_provider_requires_only_its_configuration(
@@ -653,6 +677,7 @@ def test_transcription_api_key_rejects_control_characters() -> None:
     with pytest.raises(ValidationError, match="control characters"):
         WorkerSettings(
             public_base_url="http://localhost:8000",
+            transcription_provider="legacy_polling",
             legacy_transcription_base_url="http://transcription.example.test",
             legacy_transcription_api_key="synthetic\napi-key",
             _env_file=None,
