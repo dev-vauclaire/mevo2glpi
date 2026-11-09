@@ -18,7 +18,7 @@
 
 <p align="center">
   Automatise la transformation des messages vocaux reçus via Exchange Online
-  en tickets GLPI transcrits et traçables.
+  en tickets GLPI transcrits.
 </p>
 
 ## Sommaire
@@ -38,22 +38,11 @@
 
 ## Fonctionnalités principales
 
-- récupération et filtrage des pièces jointes WAV, OGG, MP3 ou M4A d'une boîte
-  Exchange Online via Microsoft Graph, avec des identifiants immuables ;
-- orchestration du pipeline par une base de données PostgreSQL : jobs,
-  événements, tentatives, rétentions et heartbeats ;
-- transcription des pièces jointes par un provider interchangeable :
-  Transcribe AI ou un service compatible OpenAI ;
-- API locale optionnelle sur CPU avec Parakeet Ultra, `transcribe.cpp` et
-  normalisation FFmpeg ;
-- création de tickets GLPI V2.3.0 contenant la transcription et un accès à
-  l'audio ;
-- suppression crash-safe des audios à la clôture du ticket ou à une échéance
-  configurable, suivie de la purge immédiate de l'agrégat PostgreSQL associé ;
-- dashboard des jobs, des événements, de l'état des workers, des alertes et
-  des messages rejetés avec leur motif, avec relance par l'opérateur ;
-- conservation bornée et configurable des rejets Exchange sans job, activée
-  explicitement après un premier passage non destructif en mode `report`.
+- récupération et validation des messages vocaux reçus via Exchange Online ;
+- transcription des fichiers audio par un service local ou externe ;
+- création automatique des tickets GLPI avec la transcription et l'audio ;
+- suivi des traitements et des messages rejetés depuis un dashboard ;
+- gestion configurable de la conservation des audios et des données associées.
 
 ## Architecture
 
