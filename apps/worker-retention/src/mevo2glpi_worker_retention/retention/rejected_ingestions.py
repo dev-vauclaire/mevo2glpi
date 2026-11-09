@@ -4,22 +4,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from enum import StrEnum
 
-from .outcomes import (
-    RejectedIngestionsPurgedOutcome,
-    RejectedIngestionsReportedOutcome,
-)
+from .outcomes import RejectedIngestionsPurgedOutcome
 from .ports import RejectedIngestionRetentionLifecycleProtocol
 
 LOGGER = logging.getLogger(__name__)
-
-
-class RejectedIngestionRetentionMode(StrEnum):
-    """Choose whether an expired-ingestion scan only reports or mutates."""
-
-    REPORT = "report"
-    APPLY = "apply"
 
 
 class RejectedIngestionRetentionService:
@@ -29,16 +18,12 @@ class RejectedIngestionRetentionService:
         self,
         *,
         lifecycle: RejectedIngestionRetentionLifecycleProtocol,
-        mode: RejectedIngestionRetentionMode,
         retention_period: timedelta,
         scan_interval: timedelta,
         batch_size: int,
     ) -> None:
-        for method_name in ("count_expired", "purge_expired"):
-            if not callable(getattr(lifecycle, method_name, None)):
-                raise TypeError(f"lifecycle must expose {method_name}()")
-        if not isinstance(mode, RejectedIngestionRetentionMode):
-            raise TypeError("mode must be a RejectedIngestionRetentionMode")
+        if not callable(getattr(lifecycle, "purge_expired", None)):
+            raise TypeError("lifecycle must expose purge_expired()")
         self._retention_period = _positive_timedelta(
             retention_period,
             "retention_period",
@@ -50,35 +35,19 @@ class RejectedIngestionRetentionService:
             raise ValueError("batch_size must be greater than zero")
 
         self._lifecycle = lifecycle
-        self._mode = mode
         self._batch_size = batch_size
         self._next_scan_at: datetime | None = None
 
     def run_if_due(
         self,
         now: datetime,
-    ) -> RejectedIngestionsReportedOutcome | RejectedIngestionsPurgedOutcome | None:
-        """Run one due scan, draining full apply batches without a busy loop."""
+    ) -> RejectedIngestionsPurgedOutcome | None:
+        """Run one due scan, draining full batches without a busy loop."""
         _require_aware_datetime(now, "now")
         if self._next_scan_at is not None and now < self._next_scan_at:
             return None
 
         cutoff = now - self._retention_period
-        if self._mode is RejectedIngestionRetentionMode.REPORT:
-            eligible_count = self._lifecycle.count_expired(cutoff)
-            next_scan_at = now + self._scan_interval
-            self._next_scan_at = next_scan_at
-            LOGGER.info(
-                "rejected ingestion retention report eligible_count=%s cutoff=%s",
-                eligible_count,
-                cutoff.isoformat(),
-            )
-            return RejectedIngestionsReportedOutcome(
-                eligible_count=eligible_count,
-                cutoff=cutoff,
-                next_scan_at=next_scan_at,
-            )
-
         purged_count = self._lifecycle.purge_expired(
             cutoff,
             limit=self._batch_size,
@@ -115,6 +84,5 @@ def _require_aware_datetime(value: object, field_name: str) -> None:
 
 
 __all__ = [
-    "RejectedIngestionRetentionMode",
     "RejectedIngestionRetentionService",
 ]

@@ -37,7 +37,7 @@ from mevo2glpi_worker_retention.retention.outcomes import (
     DependencyWaitingOutcome,
     GlpiCheckRescheduledOutcome,
     IdleOutcome,
-    RejectedIngestionsReportedOutcome,
+    RejectedIngestionsPurgedOutcome,
     RetentionBlockedOutcome,
     RetentionOperation,
     RetryScheduledOutcome,
@@ -146,8 +146,8 @@ def test_rejected_ingestion_scan_runs_before_waiting_for_glpi_probe() -> None:
             last_error_code="transport_error",
         ),
     )
-    expected = RejectedIngestionsReportedOutcome(
-        eligible_count=3,
+    expected = RejectedIngestionsPurgedOutcome(
+        purged_count=3,
         cutoff=NOW - timedelta(days=90),
         next_scan_at=NOW + timedelta(hours=6),
     )
@@ -173,8 +173,8 @@ def test_audio_retention_candidate_has_priority_over_rejected_ingestion_scan() -
         prepared_work=CheckRecoveryWork(job_uuid=JOB_UUID),
     )
     rejected_retention = FakeRejectedIngestionRetention(
-        RejectedIngestionsReportedOutcome(
-            eligible_count=3,
+        RejectedIngestionsPurgedOutcome(
+            purged_count=3,
             cutoff=NOW - timedelta(days=90),
             next_scan_at=NOW + timedelta(hours=6),
         )

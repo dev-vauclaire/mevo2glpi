@@ -523,24 +523,6 @@ def test_database_aggregate_purge_rejects_an_active_linked_ingestion() -> None:
     job_repository.delete_by_uuid.assert_not_called()
 
 
-def test_rejected_ingestion_report_counts_without_opening_a_transaction() -> None:
-    session = create_autospec(Session, instance=True)
-    ingestion_repository = MagicMock()
-    ingestion_repository.count_expired_rejected.return_value = 17
-    service = RejectedIngestionRetentionLifecycleService(
-        session_factory=lambda: session,
-        ingestion_repository_factory=lambda _session: ingestion_repository,
-        event_repository_factory=lambda _session: MagicMock(),
-    )
-
-    result = service.count_expired(NOW)
-
-    assert result == 17
-    ingestion_repository.count_expired_rejected.assert_called_once_with(NOW)
-    session.begin.assert_not_called()
-    session.close.assert_called_once_with()
-
-
 def test_rejected_ingestion_purge_deletes_events_before_each_parent() -> None:
     session = create_autospec(Session, instance=True)
     manager = MagicMock()

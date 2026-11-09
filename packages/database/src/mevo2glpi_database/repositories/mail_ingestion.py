@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -282,19 +282,6 @@ class MailIngestionRepository:
             next_cursor=next_cursor,
             has_more=has_more,
         )
-
-    def count_expired_rejected(self, cutoff: datetime) -> int:
-        """Count terminal rejections at or before one strict UTC cutoff."""
-        cutoff = validate_utc_datetime(cutoff, "cutoff")
-        count = self._session.scalar(
-            select(func.count())
-            .select_from(MailIngestion)
-            .where(
-                _terminal_rejection_predicate(),
-                MailIngestion.finished_at <= cutoff,
-            )
-        )
-        return int(count or 0)
 
     def list_expired_rejected_for_update(
         self,

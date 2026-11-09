@@ -13,7 +13,6 @@ from mevo2glpi_worker_retention.retention.outcomes import (
     GlpiCheckRescheduledOutcome,
     IdleOutcome,
     RejectedIngestionsPurgedOutcome,
-    RejectedIngestionsReportedOutcome,
     RetentionBlockedOutcome,
     RetentionFailure,
     RetentionOperation,
@@ -71,11 +70,6 @@ def test_outcomes_expose_stable_typed_boundaries() -> None:
             job_uuid=JOB_UUID,
             reason=DeletionReason.TICKET_CLOSED,
         ),
-        RejectedIngestionsReportedOutcome(
-            eligible_count=3,
-            cutoff=NOW - timedelta(days=90),
-            next_scan_at=NOW + timedelta(hours=6),
-        ),
         RejectedIngestionsPurgedOutcome(
             purged_count=3,
             cutoff=NOW - timedelta(days=90),
@@ -91,7 +85,6 @@ def test_outcomes_expose_stable_typed_boundaries() -> None:
         RetentionRunStatus.SYSTEM_BLOCKED,
         RetentionRunStatus.RETENTION_BLOCKED,
         RetentionRunStatus.AUDIO_DELETED,
-        RetentionRunStatus.REJECTED_INGESTIONS_REPORTED,
         RetentionRunStatus.REJECTED_INGESTIONS_PURGED,
     ]
 

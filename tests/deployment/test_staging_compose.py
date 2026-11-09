@@ -314,12 +314,13 @@ def test_staging_workers_depend_only_on_database_migrations(
         }
 
 
-def test_staging_rejected_ingestion_retention_starts_in_report_mode(
+def test_staging_rejected_ingestion_retention_uses_shared_interval(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:
     environment = _services(render_staging_compose())["worker-retention"]["environment"]
 
     assert environment["REJECTED_INGESTION_RETENTION_DAYS"] == "90"
-    assert environment["REJECTED_INGESTION_RETENTION_MODE"] == "report"
-    assert environment["REJECTED_INGESTION_RETENTION_BATCH_SIZE"] == "100"
-    assert environment["REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS"] == "6"
+    assert environment["RETENTION_CHECK_INTERVAL_HOURS"] == "6"
+    assert "REJECTED_INGESTION_RETENTION_MODE" not in environment
+    assert "REJECTED_INGESTION_RETENTION_BATCH_SIZE" not in environment
+    assert "REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS" not in environment

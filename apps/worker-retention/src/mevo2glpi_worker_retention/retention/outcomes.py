@@ -26,7 +26,6 @@ class RetentionRunStatus(StrEnum):
     SYSTEM_BLOCKED = "system_blocked"
     RETENTION_BLOCKED = "retention_blocked"
     AUDIO_DELETED = "audio_deleted"
-    REJECTED_INGESTIONS_REPORTED = "rejected_ingestions_reported"
     REJECTED_INGESTIONS_PURGED = "rejected_ingestions_purged"
     STALE_CANDIDATE = "stale_candidate"
 
@@ -209,24 +208,6 @@ class AudioDeletedOutcome:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RejectedIngestionsReportedOutcome:
-    """Report expired rejected ingestions without mutating PostgreSQL."""
-
-    eligible_count: int
-    cutoff: datetime
-    next_scan_at: datetime
-    status: RetentionRunStatus = field(
-        init=False,
-        default=RetentionRunStatus.REJECTED_INGESTIONS_REPORTED,
-    )
-
-    def __post_init__(self) -> None:
-        _validate_non_negative_integer(self.eligible_count, "eligible_count")
-        _validate_aware_datetime(self.cutoff, "cutoff")
-        _validate_aware_datetime(self.next_scan_at, "next_scan_at")
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
 class RejectedIngestionsPurgedOutcome:
     """Report one bounded PostgreSQL purge of rejected ingestions."""
 
@@ -267,7 +248,6 @@ type RetentionRunOutcome = (
     | SystemBlockedOutcome
     | RetentionBlockedOutcome
     | AudioDeletedOutcome
-    | RejectedIngestionsReportedOutcome
     | RejectedIngestionsPurgedOutcome
     | StaleCandidateOutcome
 )
@@ -334,7 +314,6 @@ __all__ = [
     "RetentionFailure",
     "RetentionOperation",
     "RejectedIngestionsPurgedOutcome",
-    "RejectedIngestionsReportedOutcome",
     "RetentionRunOutcome",
     "RetentionRunStatus",
     "RetryScheduledOutcome",

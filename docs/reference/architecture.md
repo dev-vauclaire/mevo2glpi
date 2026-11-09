@@ -58,8 +58,9 @@ suppression du fichier est confirmée, il supprime dans une transaction unique
 l'ingestion acceptée éventuelle, les événements, la rétention et le job liés.
 Indépendamment de GLPI et du volume audio, il applique également la durée de
 conservation des ingestions terminées dans Exchange `Rejected` qui n'ont créé
-aucun job. Ce second traitement commence en mode `report` et ne supprime des
-données que lorsque le mode `apply` est explicitement configuré.
+aucun job. Ce second traitement utilise la cadence générale des contrôles de
+rétention et supprime les agrégats expirés par transactions bornées à 100
+ingestions.
 
 ### Worker automation
 

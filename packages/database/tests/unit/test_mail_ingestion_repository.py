@@ -241,22 +241,6 @@ def test_list_rejected_applies_a_stable_keyset_cursor() -> None:
     assert len(statement._where_criteria) == 2
 
 
-def test_count_expired_rejected_uses_a_strict_utc_cutoff() -> None:
-    session = _session()
-    session.scalar.return_value = 4
-
-    count = MailIngestionRepository(session).count_expired_rejected(NOW)
-
-    assert count == 4
-    session.scalar.assert_called_once()
-    session.flush.assert_not_called()
-
-    with pytest.raises(ValueError, match="UTC"):
-        MailIngestionRepository(session).count_expired_rejected(
-            datetime(2026, 9, 8, 14, tzinfo=timezone(timedelta(hours=2)))
-        )
-
-
 def test_expired_rejected_batch_is_bounded_ordered_and_locked() -> None:
     session = _session()
     rejected = _rejected_failed_ingestion()

@@ -44,7 +44,6 @@ expurgé :
 | `SystemBlockedOutcome` | Une erreur GLPI globale exige une sonde différée. |
 | `RetentionBlockedOutcome` | Une ambiguïté propre à cette rétention exige une décision opérateur. |
 | `AudioDeletedOutcome` | L'audio et l'agrégat PostgreSQL associé sont supprimés. |
-| `RejectedIngestionsReportedOutcome` | Le nombre de rejets expirés est signalé sans mutation. |
 | `RejectedIngestionsPurgedOutcome` | Un lot borné de rejets expirés et de leurs événements est supprimé. |
 | `StaleCandidateOutcome` | Une transition concurrente a rendu la sélection caduque sans action externe. |
 
@@ -68,10 +67,8 @@ flowchart TD
     Select -->|retry de purge dû| Purge
     Select -->|contrôle GLPI dû| Check[Persister checking]
     Select -->|aucun| Rejected{Scan des rejets dû ?}
-    Rejected -->|report| Report[Compter sans supprimer]
-    Rejected -->|apply| RejectedPurge[Supprimer un lot PostgreSQL]
+    Rejected -->|oui| RejectedPurge[Supprimer un lot PostgreSQL]
     Rejected -->|non| Gate{Sonde GLPI future ?}
-    Report --> Select
     RejectedPurge --> Select
     Gate -->|non| Idle[Attendre RETENTION_POLL_INTERVAL_SECONDS]
     Gate -->|oui| Wait[Attendre sans fan-out]
@@ -136,11 +133,13 @@ le service applicatif orchestre leur ordre sans `ON DELETE CASCADE`.
 
 Les ingestions placées dans `Rejected` sans création de job restent observables
 et rejouables pendant 90 jours par défaut. Leur ancienneté est calculée depuis
-`finished_at`, après confirmation du déplacement Exchange. Le mode initial
-`report` ne modifie aucune ligne. En mode `apply`, le worker verrouille au plus
-100 rejets par lot avec `FOR UPDATE SKIP LOCKED`, supprime leurs événements puis
-leurs ingestions dans une transaction unique et ne contacte ni GLPI, ni Graph,
-ni le volume audio. Les ingestions `blocked` sont exclues de cette purge.
+`finished_at`, après confirmation du déplacement Exchange. À chaque scan dû, le
+worker verrouille au plus 100 rejets avec `FOR UPDATE SKIP LOCKED`, supprime
+leurs événements puis leurs ingestions dans une transaction unique et ne
+contacte ni GLPI, ni Graph, ni le volume audio. Un lot complet est suivi
+immédiatement du suivant ; sinon le prochain scan utilise
+`RETENTION_CHECK_INTERVAL_HOURS`. Les ingestions `blocked` sont exclues de cette
+purge.
 
 Après expiration et suppression, le rejeu depuis PostgreSQL et l'idempotence
 durable de ce message ne sont plus disponibles. Le message reste dans le
@@ -214,7 +213,7 @@ src/mevo2glpi_worker_retention/
     ├── outcomes.py         # résultats publics expurgés
     ├── policies.py         # calendrier des contrôles et deadlines
     ├── ports.py            # contrats internes et work items détachés
-    ├── rejected_ingestions.py # planification report/apply des rejets expirés
+    ├── rejected_ingestions.py # planification de la purge des rejets expirés
     ├── runner.py           # boucle avec sommeil injecté
     ├── service.py          # orchestration de run_once()
     └── stages/
@@ -242,11 +241,8 @@ repository. `application.py` reste une frontière de processus testable.
 | `RETENTION_RETRY_INITIAL_SECONDS` | `5` | Premier délai du backoff exponentiel. |
 | `RETENTION_RETRY_MAX_SECONDS` | `300` | Plafond du backoff exponentiel. |
 | `RETENTION_SYSTEM_PROBE_INTERVAL_SECONDS` | `60` | Délai avant une nouvelle sonde après un blocage GLPI global. |
-| `RETENTION_CHECK_INTERVAL_HOURS` | `6` | Intervalle entre deux contrôles GLPI, aussi utilisé avant le premier contrôle. |
+| `RETENTION_CHECK_INTERVAL_HOURS` | `6` | Intervalle entre deux contrôles GLPI, aussi utilisé avant le premier contrôle et entre deux scans des rejets. |
 | `REJECTED_INGESTION_RETENTION_DAYS` | `90` | Durée de conservation des rejets terminaux sans job, calculée depuis `finished_at`. |
-| `REJECTED_INGESTION_RETENTION_MODE` | `report` | `report` compte sans supprimer ; `apply` active la purge. |
-| `REJECTED_INGESTION_RETENTION_BATCH_SIZE` | `100` | Nombre maximal de rejets supprimés dans une transaction, entre 1 et 100. |
-| `REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS` | `6` | Intervalle entre deux scans lorsqu'aucun lot complet ne reste à drainer. |
 | `GLPI_BASE_URL` | obligatoire | URL HTTP(S) de GLPI sans identifiants, query ou fragment. |
 | `GLPI_USERNAME` | obligatoire | Utilisateur GLPI réservé au worker. |
 | `GLPI_PASSWORD` | obligatoire | Mot de passe OAuth, masqué par la configuration. |

@@ -381,9 +381,10 @@ def test_rejected_dashboard_and_retention_use_terminal_finished_at(
         assert second_page.has_more is False
         assert second_page.items[0].rejection_code == "audio_format_not_supported"
 
-        cutoff = NOW - timedelta(days=90)
-        assert repository.count_expired_rejected(cutoff) == 1
-        candidates = repository.list_expired_rejected_for_update(cutoff, 100)
+        candidates = repository.list_expired_rejected_for_update(
+            NOW - timedelta(days=90),
+            100,
+        )
         assert [candidate.uuid for candidate in candidates] == [expired_uuid]
 
 

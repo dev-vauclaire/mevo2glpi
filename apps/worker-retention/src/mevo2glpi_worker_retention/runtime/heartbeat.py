@@ -26,7 +26,6 @@ from ..retention import (
     GlpiCheckRescheduledOutcome,
     IdleOutcome,
     RejectedIngestionsPurgedOutcome,
-    RejectedIngestionsReportedOutcome,
     RetentionBlockedOutcome,
     RetentionOperation,
     RetentionRunOutcome,
@@ -135,7 +134,6 @@ class RetentionRuntimeHeartbeatReporter:
             outcome,
             CheckRecoveredOutcome
             | RejectedIngestionsPurgedOutcome
-            | RejectedIngestionsReportedOutcome
             | StaleCandidateOutcome,
         ):
             pass

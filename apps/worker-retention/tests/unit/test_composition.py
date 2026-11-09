@@ -110,9 +110,8 @@ def test_build_retention_worker_wires_policies_adapters_and_fencing(
     }
     rejected_arguments = captured["rejected_retention"]["kwargs"]
     assert rejected_arguments["lifecycle"] is rejected_lifecycle
-    assert rejected_arguments["mode"] is settings.rejected_ingestion_retention_mode
     assert rejected_arguments["retention_period"].total_seconds() == 90 * 86400
-    assert rejected_arguments["scan_interval"].total_seconds() == 6 * 3600
+    assert rejected_arguments["scan_interval"].total_seconds() == 8 * 3600
     assert rejected_arguments["batch_size"] == 100
 
     glpi_arguments = captured["glpi_client"]["kwargs"]

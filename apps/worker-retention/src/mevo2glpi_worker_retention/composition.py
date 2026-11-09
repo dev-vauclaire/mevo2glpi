@@ -21,7 +21,10 @@ from .retention.policies import RetentionCheckPolicy
 from .retention.rejected_ingestions import RejectedIngestionRetentionService
 from .retention.service import RetentionWorker
 from .retention.stages import CrashSafeAudioPurger, GlpiCheckStage
-from .settings import RetentionWorkerSettings
+from .settings import (
+    REJECTED_INGESTION_RETENTION_BATCH_SIZE,
+    RetentionWorkerSettings,
+)
 
 
 def _no_op() -> None:
@@ -82,12 +85,9 @@ def build_retention_worker(
                 session_factory=session_factory,
                 ownership_guard=ownership_guard,
             ),
-            mode=settings.rejected_ingestion_retention_mode,
             retention_period=timedelta(days=settings.rejected_ingestion_retention_days),
-            scan_interval=timedelta(
-                hours=settings.rejected_ingestion_retention_scan_interval_hours
-            ),
-            batch_size=settings.rejected_ingestion_retention_batch_size,
+            scan_interval=timedelta(hours=settings.retention_check_interval_hours),
+            batch_size=REJECTED_INGESTION_RETENTION_BATCH_SIZE,
         ),
         glpi_check_stage=GlpiCheckStage(
             glpi_client,

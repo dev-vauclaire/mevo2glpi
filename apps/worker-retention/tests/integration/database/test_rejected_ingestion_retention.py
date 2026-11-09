@@ -53,7 +53,6 @@ def test_expired_rejection_purge_removes_events_and_parent_atomically(
     )
 
     cutoff = NOW - timedelta(days=90)
-    assert lifecycle.count_expired(cutoff) == 1
     assert lifecycle.purge_expired(cutoff, limit=100) == 1
 
     with session_factory() as session:

@@ -109,8 +109,7 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
 ### Évolutions prioritaires
 
 - [x] Appliquer une durée de conservation configurable aux ingestions Exchange
-  rejetées sans job associé, avec un déploiement sécurisé en modes `report`
-  puis `apply`.
+  rejetées sans job associé.
 
 ### Sécurité de l'interface web
 

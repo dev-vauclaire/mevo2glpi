@@ -496,20 +496,6 @@ class RejectedIngestionRetentionLifecycleService:
         self._ingestion_repository_factory = ingestion_repository_factory
         self._event_repository_factory = event_repository_factory
 
-    def count_expired(self, cutoff: datetime) -> int:
-        """Count eligible rows for report mode without mutating PostgreSQL."""
-        _require_aware_datetime(cutoff, "cutoff")
-        self._ownership_guard()
-        session = self._session_factory()
-        try:
-            result = self._ingestion_repository_factory(session).count_expired_rejected(
-                cutoff
-            )
-        finally:
-            session.close()
-        self._ownership_guard()
-        return result
-
     def purge_expired(self, cutoff: datetime, *, limit: int) -> int:
         """Delete one locked and bounded batch, including its audit events."""
         _require_aware_datetime(cutoff, "cutoff")

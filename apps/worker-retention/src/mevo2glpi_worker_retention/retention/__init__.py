@@ -14,7 +14,6 @@ from .outcomes import (
     GlpiCheckRescheduledOutcome,
     IdleOutcome,
     RejectedIngestionsPurgedOutcome,
-    RejectedIngestionsReportedOutcome,
     RetentionBlockedOutcome,
     RetentionFailure,
     RetentionOperation,
@@ -26,10 +25,7 @@ from .outcomes import (
 )
 from .policies import RetentionCheckPolicy
 from .ports import RetentionWorkerProtocol
-from .rejected_ingestions import (
-    RejectedIngestionRetentionMode,
-    RejectedIngestionRetentionService,
-)
+from .rejected_ingestions import RejectedIngestionRetentionService
 from .runner import run_forever
 from .service import RetentionWorker
 
@@ -41,10 +37,8 @@ __all__ = [
     "GlpiCheckRescheduledOutcome",
     "IdleOutcome",
     "RejectedIngestionRetentionLifecycleService",
-    "RejectedIngestionRetentionMode",
     "RejectedIngestionRetentionService",
     "RejectedIngestionsPurgedOutcome",
-    "RejectedIngestionsReportedOutcome",
     "RetentionCheckPolicy",
     "RetentionBlockedOutcome",
     "RetentionFailure",

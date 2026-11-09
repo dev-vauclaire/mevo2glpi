@@ -468,15 +468,16 @@ def test_ca_bundle_is_read_only_and_used_without_disabling_tls(
     assert services["worker-publisher"]["environment"]["REQUESTS_CA_BUNDLE"] == target
 
 
-def test_rejected_ingestion_retention_starts_in_report_mode(
+def test_rejected_ingestion_retention_uses_shared_interval(
     render_compose: Callable[[], dict[str, object]],
 ) -> None:
     environment = _services(render_compose())["worker-retention"]["environment"]
 
     assert environment["REJECTED_INGESTION_RETENTION_DAYS"] == "90"
-    assert environment["REJECTED_INGESTION_RETENTION_MODE"] == "report"
-    assert environment["REJECTED_INGESTION_RETENTION_BATCH_SIZE"] == "100"
-    assert environment["REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS"] == "6"
+    assert environment["RETENTION_CHECK_INTERVAL_HOURS"] == "6"
+    assert "REJECTED_INGESTION_RETENTION_MODE" not in environment
+    assert "REJECTED_INGESTION_RETENTION_BATCH_SIZE" not in environment
+    assert "REJECTED_INGESTION_RETENTION_SCAN_INTERVAL_HOURS" not in environment
 
 
 def test_publisher_pem_credentials_are_separate_read_only_bind_mounts(

@@ -16,7 +16,6 @@ from mevo2glpi_glpi import TicketStatus
 
 from .outcomes import (
     RejectedIngestionsPurgedOutcome,
-    RejectedIngestionsReportedOutcome,
     RetentionFailure,
     RetentionRunOutcome,
 )
@@ -121,18 +120,16 @@ class RetentionLifecycleProtocol(Protocol):
 class RejectedIngestionRetentionLifecycleProtocol(Protocol):
     """Bounded PostgreSQL cleanup operations for terminal mail rejections."""
 
-    def count_expired(self, cutoff: datetime) -> int: ...
-
     def purge_expired(self, cutoff: datetime, *, limit: int) -> int: ...
 
 
 class RejectedIngestionRetentionProtocol(Protocol):
-    """Periodically report or purge expired rejected ingestions."""
+    """Periodically purge expired rejected ingestions."""
 
     def run_if_due(
         self,
         now: datetime,
-    ) -> RejectedIngestionsReportedOutcome | RejectedIngestionsPurgedOutcome | None: ...
+    ) -> RejectedIngestionsPurgedOutcome | None: ...
 
 
 class RetryBackoffProtocol(Protocol):
