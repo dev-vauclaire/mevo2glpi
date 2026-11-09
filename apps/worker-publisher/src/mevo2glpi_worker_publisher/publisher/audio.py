@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import struct
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -20,9 +21,69 @@ from ..graph import GraphAttachment, GraphAttachmentKind
 from .outcomes import PublisherFailure
 
 _PUBLISHER_AUDIO_EXTENSIONS = {
+    ".m4a": AudioExtension.M4A,
+    ".mp3": AudioExtension.MP3,
     ".ogg": AudioExtension.OGG,
     ".wav": AudioExtension.WAV,
 }
+_ID3_HEADER_SIZE = 10
+_MP3_FRAME_HEADER_SIZE = 4
+_MP3_FRAME_SYNC_MASK = 0xFFE00000
+_MP3_FRAME_SYNC = 0xFFE00000
+_MP3_MPEG1_LAYER3_BITRATES_KBPS = (
+    0,
+    32,
+    40,
+    48,
+    56,
+    64,
+    80,
+    96,
+    112,
+    128,
+    160,
+    192,
+    224,
+    256,
+    320,
+    0,
+)
+_MP3_MPEG2_LAYER3_BITRATES_KBPS = (
+    0,
+    8,
+    16,
+    24,
+    32,
+    40,
+    48,
+    56,
+    64,
+    80,
+    96,
+    112,
+    128,
+    144,
+    160,
+    0,
+)
+_MP3_SAMPLE_RATES_HZ = {
+    0: (11_025, 12_000, 8_000),
+    2: (22_050, 24_000, 16_000),
+    3: (44_100, 48_000, 32_000),
+}
+_ISO_BOX_HEADER_SIZE = 8
+_ISO_EXTENDED_BOX_HEADER_SIZE = 16
+_M4A_BRANDS = frozenset(
+    {
+        b"M4A ",
+        b"M4B ",
+        b"isom",
+        b"iso2",
+        b"mp41",
+        b"mp42",
+        b"qt  ",
+    }
+)
 _RIFF_HEADER_SIZE = 12
 _CHUNK_HEADER_SIZE = 8
 _MIN_FMT_CHUNK_SIZE = 16
@@ -115,7 +176,7 @@ def select_audio_attachment(
     *,
     maximum_bytes: int,
 ) -> AttachmentValidation:
-    """Require exactly one visible, non-empty WAV or OGG under the byte limit."""
+    """Require exactly one visible, non-empty supported audio under the limit."""
     if not isinstance(attachments, tuple) or any(
         not isinstance(attachment, GraphAttachment) for attachment in attachments
     ):
@@ -180,7 +241,299 @@ def inspect_audio_structure(
         return inspect_wav_structure(source, size_bytes=size_bytes)
     if audio_extension is AudioExtension.OGG:
         return inspect_ogg_structure(source, size_bytes=size_bytes)
+    if audio_extension is AudioExtension.MP3:
+        return inspect_mp3_structure(source, size_bytes=size_bytes)
+    if audio_extension is AudioExtension.M4A:
+        return inspect_m4a_structure(source, size_bytes=size_bytes)
     raise ValueError("audio_extension is not accepted by the publisher")
+
+
+def inspect_mp3_structure(
+    source: BinaryIO, *, size_bytes: int
+) -> PublisherFailure | None:
+    """Validate ID3v2 metadata and complete MPEG Layer III frames.
+
+    The parser never decodes audio. It walks each frame exactly once, so its
+    runtime is O(n frames) and its additional memory usage is O(1).
+    """
+    _validate_audio_source(source, size_bytes=size_bytes)
+    if size_bytes <= 0:
+        return _message_failure("invalid_audio", "audio_empty")
+    if size_bytes < _MP3_FRAME_HEADER_SIZE:
+        return _message_failure("invalid_audio", "mp3_header_invalid")
+
+    try:
+        offset = _skip_id3v2_tag(source, size_bytes=size_bytes)
+        first_frame_offset = offset
+        frame_count = 0
+        stream_profile: tuple[int, int] | None = None
+        while offset < size_bytes:
+            remaining = size_bytes - offset
+            if remaining == 128 and _read_at(source, offset, 3) == b"TAG":
+                offset = size_bytes
+                break
+            if remaining < _MP3_FRAME_HEADER_SIZE:
+                return _message_failure("invalid_audio", "mp3_truncated")
+
+            header = int.from_bytes(
+                _read_at(source, offset, _MP3_FRAME_HEADER_SIZE),
+                byteorder="big",
+            )
+            frame = _mp3_frame_details(header)
+            if frame is None:
+                code = (
+                    "mp3_frame_missing"
+                    if frame_count == 0 and first_frame_offset > 0
+                    else "mp3_header_invalid"
+                )
+                return _message_failure("invalid_audio", code)
+            frame_size, version, sample_rate_hz = frame
+            current_profile = (version, sample_rate_hz)
+            if stream_profile is not None and current_profile != stream_profile:
+                return _message_failure("invalid_audio", "mp3_header_invalid")
+            if offset + frame_size > size_bytes:
+                return _message_failure("invalid_audio", "mp3_truncated")
+            offset += frame_size
+            frame_count += 1
+            stream_profile = current_profile
+    except _AudioStructureError as error:
+        technical_code = (
+            "mp3_truncated"
+            if error.technical_code == "audio_truncated"
+            else error.technical_code
+        )
+        return _message_failure("invalid_audio", technical_code)
+    except OSError as error:
+        raise classify_audio_io_error(error) from None
+
+    if frame_count == 0:
+        return _message_failure("invalid_audio", "mp3_frame_missing")
+    return None
+
+
+def _skip_id3v2_tag(source: BinaryIO, *, size_bytes: int) -> int:
+    if size_bytes < _ID3_HEADER_SIZE:
+        return 0
+    header = _read_at(source, 0, _ID3_HEADER_SIZE)
+    if header[:3] != b"ID3":
+        return 0
+
+    major_version = header[3]
+    flags = header[5]
+    allowed_reserved_mask = {2: 0x3F, 3: 0x1F, 4: 0x0F}.get(major_version)
+    if (
+        allowed_reserved_mask is None
+        or header[4] == 0xFF
+        or flags & allowed_reserved_mask
+        or any(value & 0x80 for value in header[6:10])
+    ):
+        raise _AudioStructureError("mp3_header_invalid")
+    tag_size = (header[6] << 21) | (header[7] << 14) | (header[8] << 7) | header[9]
+    tag_end = _ID3_HEADER_SIZE + tag_size
+    if tag_end > size_bytes:
+        raise _AudioStructureError("mp3_truncated")
+    if major_version == 4 and flags & 0x10:
+        footer_end = tag_end + _ID3_HEADER_SIZE
+        if footer_end > size_bytes:
+            raise _AudioStructureError("mp3_truncated")
+        footer = _read_at(source, tag_end, _ID3_HEADER_SIZE)
+        if footer[:3] != b"3DI" or footer[3:] != header[3:]:
+            raise _AudioStructureError("mp3_header_invalid")
+        return footer_end
+    return tag_end
+
+
+def _mp3_frame_details(header: int) -> tuple[int, int, int] | None:
+    if header & _MP3_FRAME_SYNC_MASK != _MP3_FRAME_SYNC:
+        return None
+    version = (header >> 19) & 0x03
+    layer = (header >> 17) & 0x03
+    bitrate_index = (header >> 12) & 0x0F
+    sample_rate_index = (header >> 10) & 0x03
+    padding = (header >> 9) & 0x01
+    if version == 1 or layer != 1 or sample_rate_index == 3:
+        return None
+
+    bitrate_table = (
+        _MP3_MPEG1_LAYER3_BITRATES_KBPS
+        if version == 3
+        else _MP3_MPEG2_LAYER3_BITRATES_KBPS
+    )
+    bitrate_kbps = bitrate_table[bitrate_index]
+    if bitrate_kbps == 0:
+        return None
+    sample_rate_hz = _MP3_SAMPLE_RATES_HZ[version][sample_rate_index]
+    coefficient = 144 if version == 3 else 72
+    frame_size = coefficient * bitrate_kbps * 1000 // sample_rate_hz + padding
+    return frame_size, version, sample_rate_hz
+
+
+def inspect_m4a_structure(
+    source: BinaryIO, *, size_bytes: int
+) -> PublisherFailure | None:
+    """Validate bounded ISO-BMFF framing and require one audio track.
+
+    Only top-level media data and the ``moov/trak/mdia/hdlr`` path are read.
+    Runtime is O(n boxes), inspection is limited to three known container
+    levels and additional memory usage remains O(1).
+    """
+    _validate_audio_source(source, size_bytes=size_bytes)
+    if size_bytes <= 0:
+        return _message_failure("invalid_audio", "audio_empty")
+    if size_bytes < _ISO_BOX_HEADER_SIZE:
+        return _message_failure("invalid_audio", "m4a_header_invalid")
+
+    try:
+        file_type_found = False
+        metadata_found = False
+        audio_track_found = False
+        media_data_found = False
+        for box_type, payload_start, box_end in _iter_iso_boxes(
+            source,
+            start=0,
+            end=size_bytes,
+        ):
+            if box_type == b"ftyp":
+                _validate_m4a_file_type(source, payload_start, box_end)
+                file_type_found = True
+            elif box_type == b"moov":
+                metadata_found = True
+                audio_track_found = audio_track_found or _moov_has_audio_track(
+                    source,
+                    payload_start,
+                    box_end,
+                )
+            elif box_type == b"mdat" and box_end > payload_start:
+                media_data_found = True
+    except _AudioStructureError as error:
+        technical_code = (
+            "m4a_truncated"
+            if error.technical_code == "audio_truncated"
+            else error.technical_code
+        )
+        return _message_failure("invalid_audio", technical_code)
+    except OSError as error:
+        raise classify_audio_io_error(error) from None
+
+    if not file_type_found:
+        return _message_failure("invalid_audio", "m4a_file_type_missing")
+    if not metadata_found:
+        return _message_failure("invalid_audio", "m4a_metadata_missing")
+    if not audio_track_found:
+        return _message_failure("invalid_audio", "m4a_audio_track_missing")
+    if not media_data_found:
+        return _message_failure("invalid_audio", "m4a_media_data_missing")
+    return None
+
+
+class _AudioStructureError(ValueError):
+    def __init__(self, technical_code: str) -> None:
+        self.technical_code = technical_code
+        super().__init__(technical_code)
+
+
+def _validate_audio_source(source: BinaryIO, *, size_bytes: int) -> None:
+    if not callable(getattr(source, "read", None)) or not callable(
+        getattr(source, "seek", None)
+    ):
+        raise TypeError("source must expose read and seek")
+    if isinstance(size_bytes, bool) or not isinstance(size_bytes, int):
+        raise TypeError("size_bytes must be an integer")
+
+
+def _read_at(source: BinaryIO, offset: int, size: int) -> bytes:
+    source.seek(offset)
+    content = source.read(size)
+    if not isinstance(content, bytes | bytearray) or len(content) != size:
+        raise _AudioStructureError("audio_truncated")
+    return bytes(content)
+
+
+def _iter_iso_boxes(
+    source: BinaryIO,
+    *,
+    start: int,
+    end: int,
+) -> Iterator[tuple[bytes, int, int]]:
+    offset = start
+    while offset < end:
+        if end - offset < _ISO_BOX_HEADER_SIZE:
+            raise _AudioStructureError("m4a_truncated")
+        header = _read_at(source, offset, _ISO_BOX_HEADER_SIZE)
+        box_size = int.from_bytes(header[:4], byteorder="big")
+        box_type = header[4:8]
+        header_size = _ISO_BOX_HEADER_SIZE
+        if box_size == 1:
+            if end - offset < _ISO_EXTENDED_BOX_HEADER_SIZE:
+                raise _AudioStructureError("m4a_truncated")
+            box_size = int.from_bytes(
+                _read_at(source, offset + _ISO_BOX_HEADER_SIZE, 8),
+                byteorder="big",
+            )
+            header_size = _ISO_EXTENDED_BOX_HEADER_SIZE
+        elif box_size == 0:
+            box_size = end - offset
+
+        if box_size < header_size:
+            raise _AudioStructureError("m4a_box_invalid")
+        box_end = offset + box_size
+        if box_end > end:
+            raise _AudioStructureError("m4a_truncated")
+        yield box_type, offset + header_size, box_end
+        offset = box_end
+
+
+def _validate_m4a_file_type(
+    source: BinaryIO,
+    payload_start: int,
+    box_end: int,
+) -> None:
+    payload_size = box_end - payload_start
+    if payload_size < 8 or (payload_size - 8) % 4:
+        raise _AudioStructureError("m4a_file_type_invalid")
+    major_brand = _read_at(source, payload_start, 4)
+    compatible_brand_found = major_brand in _M4A_BRANDS
+    offset = payload_start + 8
+    while offset < box_end:
+        compatible_brand_found = (
+            _read_at(source, offset, 4) in _M4A_BRANDS or compatible_brand_found
+        )
+        offset += 4
+    if not compatible_brand_found:
+        raise _AudioStructureError("m4a_file_type_invalid")
+
+
+def _moov_has_audio_track(source: BinaryIO, start: int, end: int) -> bool:
+    for box_type, payload_start, box_end in _iter_iso_boxes(
+        source,
+        start=start,
+        end=end,
+    ):
+        if box_type == b"trak" and _track_is_audio(source, payload_start, box_end):
+            return True
+    return False
+
+
+def _track_is_audio(source: BinaryIO, start: int, end: int) -> bool:
+    for box_type, payload_start, box_end in _iter_iso_boxes(
+        source,
+        start=start,
+        end=end,
+    ):
+        if box_type != b"mdia":
+            continue
+        for media_type, media_start, media_end in _iter_iso_boxes(
+            source,
+            start=payload_start,
+            end=box_end,
+        ):
+            if media_type != b"hdlr":
+                continue
+            if media_end - media_start < 12:
+                raise _AudioStructureError("m4a_audio_track_invalid")
+            if _read_at(source, media_start + 8, 4) == b"soun":
+                return True
+    return False
 
 
 def inspect_wav_structure(
@@ -487,6 +840,8 @@ __all__ = [
     "AudioPublicationError",
     "classify_audio_io_error",
     "inspect_audio_structure",
+    "inspect_m4a_structure",
+    "inspect_mp3_structure",
     "inspect_ogg_structure",
     "inspect_wav_structure",
     "publish_or_confirm_audio",

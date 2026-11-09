@@ -2,8 +2,9 @@
 
 `mevo2glpi-worker-publisher` ingère les messages vocaux d'une boîte
 Exchange Online dédiée. Il remplace la création HTTP de jobs : un message
-contenant exactement une pièce jointe WAV ou OGG valide produit un audio
-canonique et un job `pending` consommable par le worker d'automatisation.
+contenant exactement une pièce jointe WAV, OGG, MP3 ou M4A valide produit un
+audio canonique et un job `pending` consommable par le worker
+d'automatisation.
 
 Le processus est singleton. PostgreSQL porte son état durable et le volume
 audio partagé porte uniquement les octets publiés. Le web consulte les jobs et
@@ -19,7 +20,7 @@ flowchart LR
     Auth -->|synthetic| S[Jeton fixe du simulateur]
     S --> P
     P -->|Graph v1.0| I[Inbox dédiée ou simulateur]
-    I --> V{Un WAV ou OGG valide<br/>de 1 à 25 Mio ?}
+    I --> V{Un WAV, OGG, MP3 ou M4A<br/>valide, non vide et ≤ 25 Mio ?}
     V -->|oui| A[Publication audio atomique]
     A --> D[(Job et événements PostgreSQL)]
     D --> OK[Dossier Processed]
@@ -34,11 +35,12 @@ Une itération respecte l'ordre suivant :
    plus ancienne à la plus récente ;
 3. dériver un UUIDv5 stable avec `uuid5(mailbox_id, message_id)` à partir de
    l'identifiant immuable, puis enregistrer le message découvert ;
-4. sélectionner exactement une pièce jointe WAV ou OGG, non inline, non vide et dont
-   la taille annoncée ne dépasse pas 25 Mio ;
+4. sélectionner exactement une pièce jointe WAV, OGG, MP3 ou M4A, non inline,
+   non vide et dont la taille annoncée ne dépasse pas 25 Mio ;
 5. télécharger le contenu dans un fichier temporaire non publié, sans écrire
-   au-delà de la limite, puis valider la structure RIFF/WAVE ou le découpage en
-   pages Ogg, selon l'extension persistée ;
+   au-delà de la limite, puis valider selon l'extension la structure RIFF/WAVE,
+   le découpage en pages Ogg, les trames MPEG audio ou le conteneur ISO-BMFF et
+   sa piste audio ;
 6. publier l'audio par écriture atomique sous la clé canonique
    `{ingestion_uuid}.{extension}`, puis créer le job et ses événements dans une
    transaction PostgreSQL ;
@@ -62,11 +64,12 @@ Les statuts d'ingestion sont `pending`, `processing`, `retry_scheduled`,
 - Une indisponibilité temporaire de Graph ou du stockage planifie un retry
   persistant avec backoff exponentiel. Une panne PostgreSQL arrête le processus,
   que Docker relance ; l'état déjà commité est alors repris.
-- Un message sans unique audio WAV/OGG exploitable, vide, corrompu ou trop
-  volumineux est enregistré `failed`, puis déplacé dans `Rejected`.
+- Un message qui ne contient pas exactement un audio WAV, OGG, MP3 ou M4A
+  exploitable, ou dont l'audio est vide, corrompu ou trop volumineux, est
+  enregistré `failed`, puis déplacé dans `Rejected`.
 - L'absence de pièce jointe visible produit
   `invalid_attachment/audio_attachment_missing`. Une unique pièce jointe dont
-  l'extension n'est ni `.wav` ni `.ogg` produit
+  l'extension n'est ni `.wav`, `.ogg`, `.mp3` ni `.m4a` produit
   `invalid_attachment/audio_format_not_supported`. Les autres rejets conservent
   leur code précis, par exemple `attachment_count_invalid`, `audio_empty` ou
   `audio_too_large`.
@@ -152,7 +155,7 @@ racine lorsqu'une commande est lancée depuis celle-ci.
 | `ORIGINATING_PHONE_NUMBER_KEY_PATH` | obligatoire | Fichier Base64 contenant la clé AES-256 partagée avec automation. |
 | `PUBLISHER_LOG_LEVEL` | `INFO` | Niveau applicatif `INFO` ou `DEBUG`. |
 | `PUBLISHER_GRAPH_PAGE_SIZE` | `50` | Taille des pages Graph, de 1 à 1 000. |
-| `PUBLISHER_MAX_ATTACHMENT_BYTES` | `26214400` | Limite WAV/OGG, plafonnée à 25 Mio. |
+| `PUBLISHER_MAX_ATTACHMENT_BYTES` | `26214400` | Limite par audio WAV, OGG, MP3 ou M4A, plafonnée à 25 Mio. |
 | `PUBLISHER_HTTP_TIMEOUT_SECONDS` | `10` | Timeout Entra ID et Graph. |
 | `PUBLISHER_POLL_INTERVAL_SECONDS` | `30` | Attente lorsque la file est vide. |
 | `PUBLISHER_HEARTBEAT_INTERVAL_SECONDS` | `10` | Fréquence du heartbeat. |
@@ -197,7 +200,7 @@ apps/worker-publisher/
 │   │   ├── contracts.py       ports et erreurs expurgées
 │   │   └── models.py          modèles HTTP minimaux
 │   ├── publisher/
-│   │   ├── audio.py           sélection, inspection et publication WAV/OGG
+│   │   ├── audio.py           sélection, inspection et publication audio
 │   │   ├── lifecycle.py       transaction et transitions PostgreSQL
 │   │   ├── outcomes.py        résultats typés d'une itération
 │   │   ├── ports.py           protocoles injectables
@@ -305,6 +308,28 @@ historique `wav_attachment_missing` sert à cibler ce reliquat ; la version
 corrigée ne le produit plus et utilise `audio_format_not_supported` pour une
 extension non prise en charge.
 
+Pour réarmer d'anciens MP3 ou M4A rejetés avant leur prise en charge, utiliser
+le même processus avec le filtre générique suivant :
+
+```bash
+mevo2glpi-worker-publisher-replay \
+  --status failed \
+  --disposition rejected \
+  --rejection-category invalid_attachment \
+  --rejection-code audio_format_not_supported \
+  --job-uuid-is-null \
+  --attachment-id-is-not-null \
+  --received-after 2026-01-01T00:00:00Z \
+  --received-before 2027-01-01T00:00:00Z \
+  --dry-run
+```
+
+Le filtre ne connaît pas l'extension historique : il sélectionne aussi les
+autres formats non pris en charge dans la même fenêtre. Contrôler le dry-run et
+utiliser des lots bornés ; un format toujours non supporté sera simplement
+rejeté de nouveau. Après contrôle, remplacer uniquement `--dry-run` par
+`--apply`.
+
 Depuis la racine d'un hôte Docker Compose, la commande peut être exécutée dans
 l'image du publisher sans démarrer ses appels Graph :
 
@@ -325,11 +350,10 @@ l'audit du rejeu.
 ## Limites du MVP
 
 - un seul publisher est supporté ;
-- une unique pièce jointe WAV ou OGG est acceptée par message ; MP3 et M4A
-  restent refusés ;
-- le contrôle structurel OGG vérifie le framing, les continuations, la fin de
-  flux et le CRC des pages, mais ne décode ni ne qualifie le codec ou le
-  contenu audio ;
+- une unique pièce jointe WAV, OGG, MP3 ou M4A est acceptée par message ;
+- les contrôles structurels bornés détectent les conteneurs ou trames
+  manifestement invalides, mais ne décodent ni ne qualifient le contenu audio ;
+  FFmpeg dans le service de transcription reste l'autorité de décodage ;
 - la liste paginée de l'Inbox est interrogée par polling, sans abonnement
   Graph ni delta query ;
 - les rejets restent traçables en base et dans `Rejected`, mais le dashboard

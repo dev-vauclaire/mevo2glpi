@@ -89,7 +89,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     source.add_argument(
         "--audio-path",
-        help="Path to a non-sensitive WAV or OGG test recording",
+        help="Path to a non-sensitive WAV, OGG, MP3 or M4A test recording",
     )
     seed.add_argument(
         "--received-at",
@@ -200,7 +200,9 @@ def _read_audio_path(raw_path: str) -> tuple[SyntheticAudioExtension, bytes]:
     try:
         extension = SyntheticAudioExtension(path.suffix.removeprefix(".").casefold())
     except ValueError:
-        raise ValueError("audio-path must use the wav or ogg extension") from None
+        raise ValueError(
+            "audio-path must use the wav, ogg, mp3 or m4a extension"
+        ) from None
     size_bytes = path.stat().st_size
     if size_bytes <= 0:
         raise ValueError("audio-path must not be empty")

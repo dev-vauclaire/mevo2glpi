@@ -40,6 +40,8 @@ def _fixture(name: str) -> bytes:
         "valid-speech-alaw.wav",
         "valid-speech-mulaw.wav",
         "valid-speech.ogg",
+        "valid-speech.mp3",
+        "valid-speech.m4a",
     ],
 )
 async def test_real_ffmpeg_normalizes_supported_audio_formats(

@@ -79,7 +79,7 @@ flowchart LR
     PUBLISHER -->|"client_credentials<br/>certificat X.509"| ENTRA
     ENTRA -->|"jeton app-only"| PUBLISHER
     PUBLISHER -->|"Microsoft Graph v1.0"| EXCHANGE
-    EXCHANGE -->|"WAV ou OGG"| PUBLISHER
+    EXCHANGE -->|"WAV, OGG, MP3 ou M4A"| PUBLISHER
     PUBLISHER --> POSTGRES
     PUBLISHER --> AUDIO
     MIGRATIONS --> POSTGRES
@@ -689,8 +689,8 @@ La recette utilise les services réels, mais uniquement des données fictives et
 non sensibles. Prévenir les opérateurs GLPI afin que le ticket de recette soit
 identifiable et traité comme tel.
 
-1. envoyer dans la boîte dédiée un message contenant exactement un WAV ou un
-   OGG fictif de moins de 25 Mio ;
+1. envoyer dans la boîte dédiée un message contenant exactement un WAV, OGG,
+   MP3 ou M4A fictif ne dépassant pas 25 Mio ;
 2. vérifier que le publisher découvre le message et crée un job `pending` ;
 3. vérifier le déplacement du message dans `Processed` ;
 4. suivre les transitions `pending`, `processing`, puis `completed` ;
@@ -742,7 +742,6 @@ pour diagnostiquer la production.
 - toute l'Inbox existante est éligible au premier démarrage ;
 - les changements Exchange RBAC peuvent demander jusqu'à deux heures de
   propagation ;
-- MP3 et M4A ne sont pas encore acceptés par le publisher ;
 - les sauvegardes PostgreSQL et audio ne sont pas automatisées par le dépôt :
   elles doivent être configurées et qualifiées au niveau de l'hyperviseur ;
 - sans point de reprise externe testé, une perte de la VM, de la Database ou du

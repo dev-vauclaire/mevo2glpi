@@ -38,6 +38,20 @@ def test_spoken_ogg_fixture_contains_an_opus_stream() -> None:
     assert b"OpusTags" in content
 
 
+def test_spoken_mp3_fixture_contains_an_id3_header_and_audio_frames() -> None:
+    content = load_synthetic_audio(SyntheticAudioFixture.MP3)
+
+    assert content.startswith(b"ID3")
+    assert b"\xff\xf3" in content
+
+
+def test_spoken_m4a_fixture_contains_an_m4a_container() -> None:
+    content = load_synthetic_audio(SyntheticAudioFixture.M4A_AAC)
+
+    assert content[4:8] == b"ftyp"
+    assert b"M4A " in content[:32]
+
+
 def test_spoken_telephony_fixture_is_alaw_at_8_khz() -> None:
     content = load_synthetic_audio(SyntheticAudioFixture.WAV_ALAW)
 
@@ -60,6 +74,8 @@ def test_catalogue_exposes_the_approved_scenarios() -> None:
     assert tuple(scenario.value for scenario in SeedScenario) == (
         "valid-wav",
         "valid-ogg",
+        "valid-mp3",
+        "valid-m4a",
         "valid-wav-alaw",
         "valid-wav-mulaw",
         "no-attachment",
@@ -68,6 +84,8 @@ def test_catalogue_exposes_the_approved_scenarios() -> None:
         "unsupported-format",
         "corrupt-wav",
         "corrupt-ogg",
+        "corrupt-mp3",
+        "corrupt-m4a",
         "too-large",
         "valid-audio-with-inline",
         "non-file-attachment",
@@ -81,6 +99,8 @@ def test_catalogue_exposes_the_approved_scenarios() -> None:
     [
         (SeedScenario.VALID_WAV, 1),
         (SeedScenario.VALID_OGG, 1),
+        (SeedScenario.VALID_MP3, 1),
+        (SeedScenario.VALID_M4A, 1),
         (SeedScenario.VALID_WAV_ALAW, 1),
         (SeedScenario.VALID_WAV_MULAW, 1),
         (SeedScenario.NO_ATTACHMENT, 0),
@@ -89,6 +109,8 @@ def test_catalogue_exposes_the_approved_scenarios() -> None:
         (SeedScenario.UNSUPPORTED_FORMAT, 1),
         (SeedScenario.CORRUPT_WAV, 1),
         (SeedScenario.CORRUPT_OGG, 1),
+        (SeedScenario.CORRUPT_MP3, 1),
+        (SeedScenario.CORRUPT_M4A, 1),
         (SeedScenario.TOO_LARGE, 1),
         (SeedScenario.VALID_AUDIO_WITH_INLINE, 2),
         (SeedScenario.NON_FILE_ATTACHMENT, 1),

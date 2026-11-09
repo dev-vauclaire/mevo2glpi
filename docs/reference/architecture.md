@@ -65,8 +65,9 @@ finalise le job dès que l'identifiant GLPI est durablement persisté.
 
 ### Worker publisher
 
-Il surveille la boîte Exchange, valide les pièces jointes WAV ou OGG, publie
-l'audio dans le volume partagé, puis crée le job `pending` dans PostgreSQL.
+Il surveille la boîte Exchange, valide les pièces jointes WAV, OGG, MP3 ou M4A,
+publie l'audio dans le volume partagé, puis crée le job `pending` dans
+PostgreSQL.
 
 ### Migration Alembic one-shot
 

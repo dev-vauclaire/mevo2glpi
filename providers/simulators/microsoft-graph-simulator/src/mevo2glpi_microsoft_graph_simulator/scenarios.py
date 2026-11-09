@@ -52,6 +52,8 @@ class SeedScenario(StrEnum):
 
     VALID_WAV = "valid-wav"
     VALID_OGG = "valid-ogg"
+    VALID_MP3 = "valid-mp3"
+    VALID_M4A = "valid-m4a"
     VALID_WAV_ALAW = "valid-wav-alaw"
     VALID_WAV_MULAW = "valid-wav-mulaw"
     NO_ATTACHMENT = "no-attachment"
@@ -60,6 +62,8 @@ class SeedScenario(StrEnum):
     UNSUPPORTED_FORMAT = "unsupported-format"
     CORRUPT_WAV = "corrupt-wav"
     CORRUPT_OGG = "corrupt-ogg"
+    CORRUPT_MP3 = "corrupt-mp3"
+    CORRUPT_M4A = "corrupt-m4a"
     TOO_LARGE = "too-large"
     VALID_AUDIO_WITH_INLINE = "valid-audio-with-inline"
     NON_FILE_ATTACHMENT = "non-file-attachment"
@@ -74,6 +78,8 @@ class SeedScenario(StrEnum):
 _SCENARIO_DESCRIPTIONS = {
     SeedScenario.VALID_WAV: "one spoken PCM16 WAV file",
     SeedScenario.VALID_OGG: "one spoken OGG/Opus file",
+    SeedScenario.VALID_MP3: "one spoken MP3 file",
+    SeedScenario.VALID_M4A: "one spoken M4A/AAC file",
     SeedScenario.VALID_WAV_ALAW: "one spoken telephony G.711 A-law WAV file",
     SeedScenario.VALID_WAV_MULAW: "one spoken telephony G.711 mu-law WAV file",
     SeedScenario.NO_ATTACHMENT: "no attachment",
@@ -82,6 +88,8 @@ _SCENARIO_DESCRIPTIONS = {
     SeedScenario.UNSUPPORTED_FORMAT: "one unsupported FLAC file",
     SeedScenario.CORRUPT_WAV: "one WAV file with an invalid header",
     SeedScenario.CORRUPT_OGG: "one OGG file with an invalid structure",
+    SeedScenario.CORRUPT_MP3: "one MP3 file with an invalid structure",
+    SeedScenario.CORRUPT_M4A: "one M4A file with an invalid structure",
     SeedScenario.TOO_LARGE: "one WAV declared larger than 25 MiB",
     SeedScenario.VALID_AUDIO_WITH_INLINE: (
         "one spoken WAV file and one ignored inline image"
@@ -101,6 +109,10 @@ def build_scenario_attachments(
         return (_fixture_attachment("audio.wav", SyntheticAudioFixture.WAV_PCM),)
     if scenario is SeedScenario.VALID_OGG:
         return (_fixture_attachment("audio.ogg", SyntheticAudioFixture.OGG_OPUS),)
+    if scenario is SeedScenario.VALID_MP3:
+        return (_fixture_attachment("audio.mp3", SyntheticAudioFixture.MP3),)
+    if scenario is SeedScenario.VALID_M4A:
+        return (_fixture_attachment("audio.m4a", SyntheticAudioFixture.M4A_AAC),)
     if scenario is SeedScenario.VALID_WAV_ALAW:
         return (
             _fixture_attachment(
@@ -130,6 +142,16 @@ def build_scenario_attachments(
         return (_file_attachment("audio.wav", "audio/wav", b"not-a-wave-file"),)
     if scenario is SeedScenario.CORRUPT_OGG:
         return (_file_attachment("audio.ogg", "audio/ogg", b"OggS-corrupt"),)
+    if scenario is SeedScenario.CORRUPT_MP3:
+        return (_file_attachment("audio.mp3", "audio/mpeg", b"not-an-mp3"),)
+    if scenario is SeedScenario.CORRUPT_M4A:
+        return (
+            _file_attachment(
+                "audio.m4a",
+                "audio/mp4",
+                struct.pack(">I4s", 4, b"ftyp"),
+            ),
+        )
     if scenario is SeedScenario.TOO_LARGE:
         return (
             SyntheticAttachmentTemplate(
@@ -188,11 +210,14 @@ def _fixture_attachment(
     name: str,
     fixture: SyntheticAudioFixture,
 ) -> SyntheticAttachmentTemplate:
-    extension = (
-        SyntheticAudioExtension.OGG
-        if fixture is SyntheticAudioFixture.OGG_OPUS
-        else SyntheticAudioExtension.WAV
-    )
+    if fixture is SyntheticAudioFixture.OGG_OPUS:
+        extension = SyntheticAudioExtension.OGG
+    elif fixture is SyntheticAudioFixture.MP3:
+        extension = SyntheticAudioExtension.MP3
+    elif fixture is SyntheticAudioFixture.M4A_AAC:
+        extension = SyntheticAudioExtension.M4A
+    else:
+        extension = SyntheticAudioExtension.WAV
     return _file_attachment(
         name,
         extension.media_type,

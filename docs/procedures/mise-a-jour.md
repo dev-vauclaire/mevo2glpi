@@ -224,8 +224,9 @@ Contrôler les logs expurgés :
 - [ ] aucun secret, contenu audio ou transcription n'est journalisé.
 
 Terminer par un traitement synthétique autorisé de bout en bout. En staging,
-utiliser les fixtures WAV et OGG. En production, n'utiliser aucune donnée réelle
-de patient et respecter la fenêtre de recette validée par les opérateurs GLPI.
+utiliser les fixtures WAV, OGG, MP3 et M4A. En production, n'utiliser aucune
+donnée réelle de patient et respecter la fenêtre de recette validée par les
+opérateurs GLPI.
 
 La mise à jour est validée uniquement lorsque l'identité de version, les états
 runtime et le traitement synthétique sont tous conformes.

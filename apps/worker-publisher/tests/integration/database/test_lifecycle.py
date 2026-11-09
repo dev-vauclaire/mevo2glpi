@@ -165,36 +165,50 @@ def test_accepted_message_creates_one_aligned_job_and_complete_audit(
     assert job_events[0].actor == JobEventActor.WORKER_PUBLISHER.value
 
 
-def test_ogg_attachment_creates_an_aligned_ogg_job(migrated_engine: Engine) -> None:
+@pytest.mark.parametrize(
+    ("audio_extension", "content_type"),
+    [
+        (AudioExtension.OGG, "audio/ogg"),
+        (AudioExtension.MP3, "audio/mpeg"),
+        (AudioExtension.M4A, "audio/mp4"),
+    ],
+)
+def test_non_wav_attachment_creates_an_aligned_job(
+    migrated_engine: Engine,
+    audio_extension: AudioExtension,
+    content_type: str,
+) -> None:
     session_factory = create_session_factory(migrated_engine)
-    ingestion_uuid = derive_ingestion_uuid(MAILBOX_ID, "immutable-message-ogg")
+    extension = audio_extension.value
+    message_id = f"immutable-message-{extension}"
+    ingestion_uuid = derive_ingestion_uuid(MAILBOX_ID, message_id)
     lifecycle = PublisherLifecycleService(
         session_factory=session_factory,
         originating_phone_number_cipher=_phone_number_cipher(),
     )
     attachment = GraphAttachment(
-        attachment_id=AttachmentId("ogg-attachment-id"),
-        name="message.ogg",
-        content_type="application/ogg",
+        attachment_id=AttachmentId(f"{extension}-attachment-id"),
+        name=f"message.{extension}",
+        content_type=content_type,
         size_bytes=96,
         is_inline=False,
     )
 
     lifecycle.discover_messages(
         mailbox_id=MAILBOX_ID,
-        messages=(_message("immutable-message-ogg", minutes_ago=1),),
+        messages=(_message(message_id, minutes_ago=1),),
         now=NOW,
     )
     assert lifecycle.resume_or_claim_next(NOW + timedelta(seconds=1)) is not None
     lifecycle.record_attachment_validated(
         ingestion_uuid,
         attachment,
-        AudioExtension.OGG,
+        audio_extension,
         NOW + timedelta(seconds=2),
     )
     lifecycle.record_audio_published(
         ingestion_uuid,
-        storage_key=f"{ingestion_uuid}.ogg",
+        storage_key=f"{ingestion_uuid}.{extension}",
         size_bytes=attachment.size_bytes,
         now=NOW + timedelta(seconds=3),
     )
@@ -204,10 +218,10 @@ def test_ogg_attachment_creates_an_aligned_ogg_job(migrated_engine: Engine) -> N
         job = session.get(TicketCreationJob, ingestion_uuid)
 
     assert ingestion is not None
-    assert ingestion.audio_extension is AudioExtension.OGG
+    assert ingestion.audio_extension is audio_extension
     assert job is not None
-    assert job.audio_extension == AudioExtension.OGG.value
-    assert job.storage_key == f"{ingestion_uuid}.ogg"
+    assert job.audio_extension == extension
+    assert job.storage_key == f"{ingestion_uuid}.{extension}"
 
 
 def test_empty_download_can_be_rejected_after_nonempty_ogg_metadata(

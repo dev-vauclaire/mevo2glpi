@@ -754,7 +754,7 @@ La recette fonctionnelle peut commencer uniquement lorsque :
 
 ## Recette fonctionnelle
 
-### Parcours nominal WAV et OGG
+### Parcours nominaux WAV, OGG, MP3 et M4A
 
 Depuis le terminal du mock Microsoft Graph, injecter un WAV fictif :
 
@@ -772,10 +772,12 @@ Contrôler successivement :
 6. l'identifiant GLPI et les événements expurgés dans le dashboard ;
 7. le téléchargement de l'audio fictif en HTTPS depuis un poste opérateur.
 
-Rejouer le parcours avec OGG :
+Rejouer le parcours avec les trois autres formats acceptés :
 
 ```bash
 mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-ogg
+mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-mp3
+mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-m4a
 ```
 
 ### Rejets contrôlés
@@ -810,7 +812,7 @@ pour les scénarios acceptés.
 
 ### Audio fictif fourni par l'opérateur
 
-Installer uniquement un WAV ou un OGG fictif de moins de 25 Mio :
+Installer uniquement un WAV, OGG, MP3 ou M4A fictif ne dépassant pas 25 Mio :
 
 ```bash
 sudo install -o root -g 10001 -m 0640 ./test-vocal.wav /srv/mevo2glpi-staging/audio-fixtures/test-vocal.wav
@@ -895,7 +897,8 @@ Le staging est valide lorsque :
   sains ;
 - la migration est terminée ;
 - les trois workers ont un heartbeat frais ;
-- les parcours WAV et OGG créent chacun un ticket corrélé dans le GLPI de test ;
+- les parcours WAV, OGG, MP3 et M4A créent chacun un ticket corrélé dans le
+  GLPI de test ;
 - un opérateur peut télécharger l'audio fictif via HTTPS ;
 - aucun service de production, secret de production ou donnée sensible n'a été
   utilisé.

@@ -14,3 +14,5 @@ empreinte SHA-256 avant utilisation.
 | `valid-speech-alaw.wav` | G.711 A-law, mono, 8 kHz | `86086f9f72d66f4b3b59f420e5dfd64a76880a0103a7cff99bfd1aaa7a1e611c` |
 | `valid-speech-mulaw.wav` | G.711 μ-law, mono, 8 kHz | `0efdd63f887ac7e4024ecb7c8c9b6a8d34af0c7f4a674b3568f0d1e2afa2f5f1` |
 | `valid-speech.ogg` | OGG/Opus, mono | `0eb4e93632e8530feba90abbd1e48781ffc920684538bf3c5603d1c87942dedb` |
+| `valid-speech.mp3` | MPEG-2 Layer III, mono, 16 kHz | `054921ab2d3ea04d4a16cb2719a1532f16df32309d972ed4db9a9031d2476044` |
+| `valid-speech.m4a` | M4A/AAC, mono, 16 kHz | `dded73ffcc52faf83dae4f640d68b66c8966839106df070798eddf91beb9d9b3` |

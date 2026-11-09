@@ -88,10 +88,18 @@ async def test_admin_seed_requires_token_without_echoing_it(
 
 
 @pytest.mark.parametrize(
-    ("scenario", "expected_extension", "expected_media_type", "expected_magic"),
+    (
+        "scenario",
+        "expected_extension",
+        "expected_media_type",
+        "magic_offset",
+        "expected_magic",
+    ),
     [
-        ("valid-wav", "wav", "audio/wav", b"RIFF"),
-        ("valid-ogg", "ogg", "audio/ogg", b"OggS"),
+        ("valid-wav", "wav", "audio/wav", 0, b"RIFF"),
+        ("valid-ogg", "ogg", "audio/ogg", 0, b"OggS"),
+        ("valid-mp3", "mp3", "audio/mpeg", 0, b"ID3"),
+        ("valid-m4a", "m4a", "audio/mp4", 4, b"ftyp"),
     ],
 )
 async def test_graph_lists_and_downloads_seeded_audio(
@@ -99,6 +107,7 @@ async def test_graph_lists_and_downloads_seeded_audio(
     scenario: str,
     expected_extension: str,
     expected_media_type: str,
+    magic_offset: int,
     expected_magic: bytes,
 ) -> None:
     seeded = await _seed(client, scenario=scenario)
@@ -132,7 +141,10 @@ async def test_graph_lists_and_downloads_seeded_audio(
     assert attachment["name"].endswith(f".{expected_extension}")
     assert attachment["contentType"] == expected_media_type
     assert download_response.headers["content-type"] == expected_media_type
-    assert download_response.content.startswith(expected_magic)
+    assert (
+        download_response.content[magic_offset : magic_offset + len(expected_magic)]
+        == expected_magic
+    )
     assert attachment["size"] == len(download_response.content)
 
 
@@ -276,7 +288,7 @@ async def test_admin_upload_exposes_exact_operator_audio_under_a_neutral_name(
             "Unauthorized",
         ),
         (
-            {"X-Admin-Token": ADMIN_TOKEN, "X-Audio-Extension": "mp3"},
+            {"X-Admin-Token": ADMIN_TOKEN, "X-Audio-Extension": "flac"},
             b"unsupported",
             422,
             "audio_extension_invalid",

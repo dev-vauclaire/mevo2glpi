@@ -28,6 +28,8 @@ MAXIMUM_ATTACHMENT_BYTES = 25 * 1024 * 1024
     [
         (SeedScenario.VALID_WAV, None),
         (SeedScenario.VALID_OGG, None),
+        (SeedScenario.VALID_MP3, None),
+        (SeedScenario.VALID_M4A, None),
         (SeedScenario.VALID_WAV_ALAW, None),
         (SeedScenario.VALID_WAV_MULAW, None),
         (SeedScenario.NO_ATTACHMENT, "audio_attachment_missing"),
@@ -36,6 +38,8 @@ MAXIMUM_ATTACHMENT_BYTES = 25 * 1024 * 1024
         (SeedScenario.UNSUPPORTED_FORMAT, "audio_format_not_supported"),
         (SeedScenario.CORRUPT_WAV, "wav_header_invalid"),
         (SeedScenario.CORRUPT_OGG, "ogg_header_invalid"),
+        (SeedScenario.CORRUPT_MP3, "mp3_header_invalid"),
+        (SeedScenario.CORRUPT_M4A, "m4a_box_invalid"),
         (SeedScenario.TOO_LARGE, "audio_too_large"),
         (SeedScenario.VALID_AUDIO_WITH_INLINE, None),
         (SeedScenario.NON_FILE_ATTACHMENT, "attachment_kind_invalid"),

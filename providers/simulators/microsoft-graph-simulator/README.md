@@ -2,7 +2,8 @@
 
 Simulateur stateful réservé au développement, au staging et aux tests. Il expose
 le sous-ensemble Graph utilisé par le publisher et une administration permettant d'injecter des
-scénarios déterministes ou un fichier WAV/OGG choisi par l'opérateur.
+scénarios déterministes ou un fichier WAV, OGG, MP3 ou M4A choisi par
+l'opérateur.
 
 Il ne simule pas Microsoft Entra ID. Les fichiers choisis doivent être des
 enregistrements de test fictifs, sans donnée patient ni donnée métier réelle.
@@ -27,6 +28,8 @@ mevo2glpi-microsoft-graph-simulator-admin list-scenarios
 mevo2glpi-microsoft-graph-simulator-admin seed-suite
 mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-wav
 mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-ogg
+mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-mp3
+mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-m4a
 mevo2glpi-microsoft-graph-simulator-admin seed --scenario valid-wav-mulaw
 mevo2glpi-microsoft-graph-simulator-admin seed --audio-path /fixtures/audio/test-vocal.wav
 mevo2glpi-microsoft-graph-simulator-admin reset
@@ -40,23 +43,25 @@ acceptés, de nouveaux jobs et tickets.
 
 | Scénario | Résultat publisher attendu |
 |---|---|
-| `valid-wav`, `valid-ogg`, `valid-wav-alaw`, `valid-wav-mulaw` | accepté, message `Processed` |
+| `valid-wav`, `valid-ogg`, `valid-mp3`, `valid-m4a`, `valid-wav-alaw`, `valid-wav-mulaw` | accepté, message `Processed` |
 | `no-attachment` | rejet `audio_attachment_missing` |
 | `two-audio-attachments` | rejet `attachment_count_invalid` |
 | `empty-audio` | rejet `audio_empty` |
 | `unsupported-format` | rejet `audio_format_not_supported` |
 | `corrupt-wav` | rejet `wav_header_invalid` |
 | `corrupt-ogg` | rejet `ogg_header_invalid` |
+| `corrupt-mp3` | rejet `mp3_header_invalid` |
+| `corrupt-m4a` | rejet `m4a_box_invalid` |
 | `too-large` | rejet `audio_too_large` |
 | `valid-audio-with-inline` | accepté ; l'image inline est ignorée |
 | `non-file-attachment` | rejet `attachment_kind_invalid` |
 | `silent-wav` | accepté par le publisher ; résultat dépendant du transcripteur |
 
 `--scenario` et `--audio-path` sont mutuellement exclusifs. Le fichier indiqué
-doit être visible depuis le conteneur, porter l'extension `.wav` ou `.ogg`, ne
-pas être vide et ne pas dépasser 25 Mio. Son chemin et son nom d'origine ne
-sont pas transmis à l'API Graph simulée. Son contenu reste uniquement en
-mémoire jusqu'au redémarrage ou à la commande `reset`. Cette commande ne
-supprime pas le fichier source monté depuis la VM ; l'opérateur doit le retirer
-après la recette. Aucun audio patient, message de production ou autre donnée
-sensible ne doit être placé dans ce répertoire.
+doit être visible depuis le conteneur, porter l'extension `.wav`, `.ogg`,
+`.mp3` ou `.m4a`, ne pas être vide et ne pas dépasser 25 Mio. Son chemin et son
+nom d'origine ne sont pas transmis à l'API Graph simulée. Son contenu reste
+uniquement en mémoire jusqu'au redémarrage ou à la commande `reset`. Cette
+commande ne supprime pas le fichier source monté depuis la VM ; l'opérateur
+doit le retirer après la recette. Aucun audio patient, message de production ou
+autre donnée sensible ne doit être placé dans ce répertoire.

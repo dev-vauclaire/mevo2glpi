@@ -21,7 +21,7 @@ l'évaluation.
 | --- | --- | --- |
 | GLPI | GLPI 11.0.7, API V2.3.0, OAuth Password | Toute autre version ou méthode d'authentification doit être requalifiée |
 | Messagerie | Exchange Online et Microsoft Graph, application Entra ID authentifiée par certificat et limitée à une boîte dédiée | Un autre système de messagerie nécessite un nouvel adaptateur |
-| Audio entrant | Une unique pièce jointe visible WAV ou OGG par message | MP3, M4A et plusieurs pièces jointes ne sont pas encore pris en charge |
+| Audio entrant | Une unique pièce jointe visible WAV, OGG, MP3 ou M4A par message, limitée à 25 Mio | Les autres formats et plusieurs pièces jointes visibles ne sont pas pris en charge |
 | Transcription nominale | API locale compatible OpenAI, Parakeet Ultra sur CPU | Le contrat permet un autre provider compatible ou l'adaptateur historique |
 | Persistance | PostgreSQL | Le schéma est géré par Alembic |
 | Déploiement de référence | Ubuntu Server 24.04 LTS, Docker et Dokploy | Dokploy est la topologie testée, pas une dépendance du code métier |
@@ -40,7 +40,8 @@ Avant un essai connecté, vérifier explicitement :
 - le format des numéros ; l'implémentation actuelle reconnaît les numéros
   français à dix chiffres et les considère comme un numéro d'origine, pas
   nécessairement comme le numéro de rappel demandé ;
-- la présence d'une seule pièce jointe WAV ou OGG non vide et exploitable ;
+- la présence d'une seule pièce jointe WAV, OGG, MP3 ou M4A non vide,
+  inférieure ou égale à 25 Mio et exploitable ;
 - l'identifiant de la source GLPI locale, le type de ticket et les autres
   valeurs fixes attendues par l'établissement ;
 - le comportement de l'API GLPI, les droits du compte technique et la création
@@ -108,7 +109,8 @@ adoptant doit intégrer les contrôles suivants à sa propre analyse de risques 
 - rétention des ingestions Exchange rejetées sans job non bornée ;
 - parcours E2E nominal Parakeet automatisé mais volontairement lancé hors CI,
   car il construit et charge le modèle réel ;
-- MP3 et M4A non acceptés ;
+- la validation du publisher reste structurelle : le décodage effectif relève
+  de FFmpeg dans le provider de transcription ;
 - suite historique Transcribe AI dépendante d'images qui peuvent ne pas être
   accessibles à un autre établissement ;
 - aucune garantie de compatibilité GLPI au-delà de la version qualifiée ;

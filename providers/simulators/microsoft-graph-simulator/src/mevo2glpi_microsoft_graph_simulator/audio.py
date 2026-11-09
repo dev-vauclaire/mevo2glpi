@@ -14,13 +14,19 @@ class SyntheticAudioExtension(StrEnum):
 
     WAV = "wav"
     OGG = "ogg"
+    MP3 = "mp3"
+    M4A = "m4a"
 
     @property
     def media_type(self) -> str:
         """Return the MIME type exposed by the fake Graph attachment."""
         if self is SyntheticAudioExtension.WAV:
             return "audio/wav"
-        return "audio/ogg"
+        if self is SyntheticAudioExtension.OGG:
+            return "audio/ogg"
+        if self is SyntheticAudioExtension.MP3:
+            return "audio/mpeg"
+        return "audio/mp4"
 
 
 class SyntheticAudioFixture(StrEnum):
@@ -30,6 +36,8 @@ class SyntheticAudioFixture(StrEnum):
     WAV_ALAW = "valid-speech-alaw.wav"
     WAV_MULAW = "valid-speech-mulaw.wav"
     OGG_OPUS = "valid-speech.ogg"
+    MP3 = "valid-speech.mp3"
+    M4A_AAC = "valid-speech.m4a"
 
 
 _FIXTURE_SHA256 = {
@@ -44,6 +52,12 @@ _FIXTURE_SHA256 = {
     ),
     SyntheticAudioFixture.OGG_OPUS: (
         "0eb4e93632e8530feba90abbd1e48781ffc920684538bf3c5603d1c87942dedb"
+    ),
+    SyntheticAudioFixture.MP3: (
+        "054921ab2d3ea04d4a16cb2719a1532f16df32309d972ed4db9a9031d2476044"
+    ),
+    SyntheticAudioFixture.M4A_AAC: (
+        "dded73ffcc52faf83dae4f640d68b66c8966839106df070798eddf91beb9d9b3"
     ),
 }
 

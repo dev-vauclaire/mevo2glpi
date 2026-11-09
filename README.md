@@ -38,8 +38,8 @@
 
 ## Fonctionnalités principales
 
-- récupération et filtrage des pièces jointes d'une boîte Exchange Online via
-  Microsoft Graph, avec des identifiants immuables ;
+- récupération et filtrage des pièces jointes WAV, OGG, MP3 ou M4A d'une boîte
+  Exchange Online via Microsoft Graph, avec des identifiants immuables ;
 - orchestration du pipeline par une base de données PostgreSQL : jobs,
   événements, tentatives, rétentions et heartbeats ;
 - transcription des pièces jointes par un provider interchangeable :
@@ -117,8 +117,6 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
 
 ### Évolutions prioritaires
 
-- [ ] Étendre l'ingestion Exchange aux formats MP3 et M4A après validation de
-  leur structure et de leur compatibilité avec le service de transcription.
 - [ ] Définir puis appliquer une durée de conservation aux ingestions Exchange
   rejetées qui ne possèdent aucun job associé.
 

@@ -221,7 +221,7 @@ au minimum valider :
 - la migration ;
 - l'identité `staging`, `main` et le SHA ;
 - les heartbeats des workers ;
-- le flux synthétique WAV et OGG ;
+- les flux synthétiques WAV, OGG, MP3 et M4A ;
 - la création du ticket dans le GLPI de test ;
 - l'absence de secret ou de contenu métier dans les logs.
 

@@ -60,6 +60,8 @@ def test_seed_scenario_cli_calls_the_loopback_admin_endpoint(
     [
         (".wav", SyntheticAudioExtension.WAV),
         (".OGG", SyntheticAudioExtension.OGG),
+        (".mp3", SyntheticAudioExtension.MP3),
+        (".M4A", SyntheticAudioExtension.M4A),
     ],
 )
 def test_seed_audio_path_uploads_exact_bytes_without_disclosing_the_path(
@@ -129,9 +131,11 @@ def test_list_scenarios_requires_no_admin_token(
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    assert [item["name"] for item in payload][:4] == [
+    assert [item["name"] for item in payload][:6] == [
         "valid-wav",
         "valid-ogg",
+        "valid-mp3",
+        "valid-m4a",
         "valid-wav-alaw",
         "valid-wav-mulaw",
     ]
@@ -266,7 +270,7 @@ def test_invalid_audio_path_does_not_disclose_it(
 @pytest.mark.parametrize(
     ("suffix", "content"),
     [
-        (".mp3", b"unsupported"),
+        (".flac", b"unsupported"),
         (".wav", b""),
         (".wav", b"too-large"),
     ],
