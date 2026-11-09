@@ -14,7 +14,7 @@ L'image :
 
 - charge Parakeet Ultra Q8 une seule fois au démarrage ;
 - vérifie le SHA-256 du GGUF pendant le build ;
-- normalise PCM, G.711 A-law, G.711 mu-law et OGG avec FFmpeg ;
+- normalise PCM, G.711 A-law, G.711 mu-law, OGG, MP3 et M4A avec FFmpeg ;
 - ne télécharge rien au runtime ;
 - s'exécute sans privilège avec un système de fichiers en lecture seule.
 
@@ -82,7 +82,7 @@ avant validation des points suivants :
 - aucune perte de parole sur les messages de plus de 30 secondes présentant
   de fortes variations de volume ;
 - latence, mémoire et démarrage acceptables sur le CPU cible ;
-- PCM16, G.711 A-law, G.711 mu-law et OGG traités de bout en bout.
+- PCM16, G.711 A-law, G.711 mu-law, OGG, MP3 et M4A traités de bout en bout.
 
 Le contrôle des variations de volume couvre notamment le
 [problème long-form connu de transcribe.cpp 0.4.1](https://github.com/handy-computer/transcribe.cpp/issues/235).
