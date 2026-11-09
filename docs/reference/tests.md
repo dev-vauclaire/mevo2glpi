@@ -18,7 +18,8 @@ contenu réel de production ne doit être utilisé.
 | Contrat GLPI | `glpi` | OAuth, API GLPI V2.3.0 et création de ticket | GLPI 11.0.7 et MySQL jetables |
 | Provider historique | `transcribe_ai` | Soumission, polling et réponses du provider historique | Stack Transcribe AI jetable |
 | Modèle local réel | `transcription_model` | Chargement et inférence du GGUF Parakeet Ultra | Modèle fourni localement et CPU |
-| Parcours aval complet | `e2e` | Migration, automation, GLPI, web et rétention | PostgreSQL, GLPI et Transcribe AI jetables |
+| Parcours aval complet | `e2e` | Migration, automation, GLPI, web et rétention | PostgreSQL, GLPI et provider de transcription jetables |
+| Parcours nominal Parakeet | `e2e` et `transcription_model` | Audio synthétique, transcription CPU réelle et ticket GLPI corrélé | Image Parakeet épinglée, modèle GGUF, PostgreSQL et GLPI jetables |
 
 Les marqueurs sont déclarés dans le [`pyproject.toml`](../../pyproject.toml).
 
@@ -119,18 +120,37 @@ représentatifs.
 
 ### Parcours E2E aval
 
-Le passage CPU est obligatoire et séquentiel :
+Le parcours nominal construit l'API CPU Parakeet épinglée, injecte un audio
+français synthétique, attend la fin du job puis vérifie les événements de
+transcription et le ticket GLPI corrélé :
+
+```bash
+uv run pytest -m "e2e and transcription_model" \
+  tests/e2e/test_parakeet_nominal.py -vv --maxfail=1
+```
+
+Le premier build télécharge les couches et le modèle GGUF épinglé, puis
+construit l'image locale. Il exige donc un accès aux sources configurées, du
+temps, de l'espace disque et suffisamment de mémoire. L'inférence reste
+strictement exécutée sur CPU.
+
+La régression du provider historique reste disponible séparément. Son passage
+CPU est séquentiel :
 
 ```bash
 TRANSCRIBE_AI_TEST_DEVICE=cpu \
-uv run pytest -m e2e tests/e2e -vv --maxfail=1
+uv run --all-packages pytest -m "e2e and not transcription_model" \
+  apps/worker-automation/tests/integration/e2e tests/e2e \
+  -vv --maxfail=1
 ```
 
-Le mode GPU est optionnel :
+Son mode GPU est optionnel :
 
 ```bash
 TRANSCRIBE_AI_TEST_DEVICE=gpu \
-uv run pytest -m e2e tests/e2e -vv --maxfail=1
+uv run --all-packages pytest -m "e2e and not transcription_model" \
+  apps/worker-automation/tests/integration/e2e tests/e2e \
+  -vv --maxfail=1
 ```
 
 L'E2E démarre la migration, le web, le worker d'automatisation et le worker de
@@ -139,9 +159,11 @@ réservé aux tests, mais ne contacte pas Microsoft 365 et ne démarre pas le
 publisher réel. Les contrats Microsoft Graph et l'orchestration du publisher
 sont couverts séparément par ses tests et le simulateur stateful.
 
-La recette utilise le provider historique jetable. Elle ne qualifie ni le
-modèle Parakeet Ultra, ni Traefik, ni les certificats TLS, ni un tenant Entra ID
-réel. La topologie et les scénarios sont détaillés dans le
+Le scénario nominal qualifie le contrat OpenAI-compatible et le modèle
+Parakeet Ultra sur un audio synthétique ; les autres scénarios de résilience
+utilisent encore le provider historique jetable. Aucun de ces parcours ne
+qualifie Traefik, les certificats TLS ou un tenant Entra ID réel. La topologie
+et les scénarios sont détaillés dans le
 [README de la suite E2E](../../tests/e2e/README.md).
 
 ## Séquentialité et nettoyage

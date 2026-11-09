@@ -1,8 +1,8 @@
 # Recette E2E du pipeline aval
 
 Cette suite constitue la frontière de validation du déploiement complet. Elle
-ne remplace ni les tests unitaires, ni les contrats GLPI et Transcribe AI, ni le
-smoke test Compose sous `tests/deployment`.
+ne remplace ni les tests unitaires, ni les contrats GLPI et des providers de
+transcription, ni le smoke test Compose sous `tests/deployment`.
 
 ## Topologie
 
@@ -18,7 +18,7 @@ flowchart LR
     Migration[Migration Alembic one-shot] --> PostgreSQL
     Automation[Worker automation] --> PostgreSQL
     Automation --> Audio
-    Automation --> Transcribe[Transcribe AI jetable]
+    Automation --> Transcribe[Provider de transcription jetable]
     Automation --> GLPI[GLPI jetable]
 
     Retention[Worker rétention] --> PostgreSQL
@@ -29,18 +29,20 @@ flowchart LR
 La stack démarre la migration, le web, le worker d'automatisation et le worker
 de rétention du Compose applicatif, puis lui ajoute un PostgreSQL exclusivement
 réservé aux tests. Le vrai publisher n'est volontairement pas démarré : cette
-recette
-aval ne possède ni application Entra ID ni boîte Exchange. Un helper test-only
+recette aval ne possède ni application Entra ID ni boîte Exchange. Un helper
+test-only
 exécuté dans le conteneur de rétention reproduit uniquement sa frontière
 durable : publication atomique de l'audio, création du job et évènement
 `job_created` avec l'acteur `worker_publisher` dans une même séquence compensée.
 Il ne simule ni Graph ni l'orchestration du publisher, couverts par leurs suites
 dédiées.
 
-GLPI, sa base MySQL, Transcribe AI et ses dépendances sont lancés comme services
-de test séparés. Le Traefik de Dokploy n'est pas simulé : la fixture publie
-directement FastAPI sur loopback. Les URLs et identifiants éphémères sont
-injectés dans la stack applicative.
+GLPI, sa base MySQL et le provider sélectionné sont lancés comme services de
+test séparés. Le scénario nominal construit l'API CPU Parakeet épinglée ; les
+scénarios historiques de résilience utilisent encore Transcribe AI. Le Traefik
+de Dokploy n'est pas simulé : la fixture publie directement FastAPI sur
+loopback. Les URLs et identifiants éphémères sont injectés dans la stack
+applicative.
 
 Aucun secret réel ni fichier d'environnement Dokploy ne doit être utilisé. Les
 ports publiés le sont uniquement sur loopback et les réseaux, volumes, bases
@@ -71,18 +73,39 @@ Le sous-jalon 8B complète ce socle avec neuf scénarios :
 - `test_stack.py` : disponibilité et topologie du socle aval, avec publisher
   explicitement absent et signalé par le dashboard.
 
+Le scénario `test_parakeet_nominal.py` complète cette régression historique. Il
+construit le provider Parakeet CPU épinglé, injecte un audio français
+synthétique, attend un job `completed`, vérifie les événements
+`transcription_succeeded` et `ticket_confirmed`, puis contrôle le ticket GLPI
+corrélé et son lien audio.
+
 La stratégie de validation, les commandes communes et les limites de cette
 frontière sont documentées dans la
 [référence des tests](../../docs/reference/tests.md).
 
-## Exécution obligatoire sur CPU
+## Parcours nominal Parakeet sur CPU
 
-Le passage CPU est la validation de référence et reste obligatoire même si un
-hôte GPU est disponible :
+Le passage nominal de référence est strictement CPU :
+
+```bash
+uv run pytest -m "e2e and transcription_model" \
+  tests/e2e/test_parakeet_nominal.py -vv --maxfail=1
+```
+
+Le premier build télécharge les couches et le modèle GGUF épinglé puis
+construit l'image locale. Prévoir un accès aux sources configurées, jusqu'à 45
+minutes pour la première exécution, de l'espace disque et au moins la mémoire
+requise par la stack GLPI, PostgreSQL et Parakeet.
+
+## Régression du provider historique
+
+Le passage CPU historique reste disponible :
 
 ```bash
 TRANSCRIBE_AI_TEST_DEVICE=cpu \
-uv run pytest -m e2e tests/e2e -vv --maxfail=1
+uv run --all-packages pytest -m "e2e and not transcription_model" \
+  apps/worker-automation/tests/integration/e2e tests/e2e \
+  -vv --maxfail=1
 ```
 
 La suite doit rester strictement séquentielle. N'utilisez jamais
@@ -96,7 +119,9 @@ Le GPU complète la validation CPU mais ne la remplace pas :
 
 ```bash
 TRANSCRIBE_AI_TEST_DEVICE=gpu \
-uv run pytest -m e2e tests/e2e -vv --maxfail=1
+uv run --all-packages pytest -m "e2e and not transcription_model" \
+  apps/worker-automation/tests/integration/e2e tests/e2e \
+  -vv --maxfail=1
 ```
 
 Ce mode exige un runtime NVIDIA fonctionnel et vérifie que Transcribe AI voit

@@ -1,0 +1,13 @@
+services:
+  worker-automation:
+    networks:
+      glpi-e2e:
+
+  worker-retention:
+    networks:
+      glpi-e2e:
+
+networks:
+  glpi-e2e:
+    external: true
+    name: ${MEVO2GLPI_E2E_GLPI_NETWORK:?MEVO2GLPI_E2E_GLPI_NETWORK must be set}

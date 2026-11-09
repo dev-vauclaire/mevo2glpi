@@ -54,7 +54,7 @@ markers = [
     "glpi: démarre une instance GLPI jetable avec Testcontainers",
     "transcription_model: exécute une validation CPU avec le modèle de transcription réel",
     "transcribe_ai: démarre une stack Transcribe AI jetable avec Testcontainers",
-    "e2e: assemble la stack MVP complète avec GLPI et Transcribe AI jetables",
+    "e2e: assemble le pipeline aval avec GLPI et un provider de transcription jetables",
 ]
 
 [tool.ruff]
