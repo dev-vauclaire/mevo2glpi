@@ -5,7 +5,7 @@ Ce fichier recense les changements fonctionnels et opérationnels destinés aux
 par les tags Git immuables `vX.Y.Z` ; les versions `0.1.0` des packages Python
 sont des métadonnées internes au workspace et ne constituent pas des releases.
 
-## Non publié
+## v0.8.0 — 2026-11-09
 
 ### Ajouté
 
