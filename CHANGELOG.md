@@ -15,14 +15,18 @@ sont des métadonnées internes au workspace et ne constituent pas des releases.
   sessions et commandes d'administration dédiées ;
 - laboratoire Keycloak local reproductible avec utilisateurs synthétiques pour
   qualifier le parcours OIDC sans donnée réelle ;
-- migration additive `0010_web_authentication` créant la table `web_users`.
+- migration additive `0010_web_authentication` créant la table `web_users` ;
+- favicon cohérent avec l'identité visuelle de mevo2glpi.
 
 ### Modifié
 
 - le web utilise un cookie applicatif signé, `Secure` et `HttpOnly`, avec
-  protection CSRF et journalisation expurgée des échecs d'authentification ;
-- la feuille de route distingue les futures améliorations de l'interface des
-  travaux de simplification de l'infrastructure.
+  protection CSRF et journalisation expurgée des échecs d'authentification.
+
+### Corrigé
+
+- la requête automatique vers `/favicon.ico` ne redirige plus vers la page de
+  connexion et n'invalide plus le jeton CSRF du formulaire affiché.
 
 ### Configuration requise
 

@@ -215,6 +215,38 @@ def test_local_login_issues_minimal_secure_cookie_and_audits_success(
         }
 
 
+def test_favicon_request_never_invalidates_login_csrf_token(tmp_path: Path) -> None:
+    with _local_context(tmp_path) as context:
+        login_page = context.client.get("/auth/login")
+        csrf_token = context.client.cookies.get(LOGIN_CSRF_COOKIE_NAME)
+
+        assert login_page.status_code == 200
+        assert isinstance(csrf_token, str)
+        assert csrf_token in login_page.text
+        assert 'rel="icon"' in login_page.text
+
+        favicon = context.client.get("/favicon.ico", follow_redirects=False)
+
+        assert favicon.status_code == 404
+        assert "location" not in favicon.headers
+        assert favicon.headers.get_list("set-cookie") == []
+        assert context.client.cookies.get(LOGIN_CSRF_COOKIE_NAME) == csrf_token
+
+        login = context.client.post(
+            "/auth/login",
+            data={
+                "username": "operator-authorized",
+                "password": _VALID_PASSWORD,
+                "csrf_token": csrf_token,
+                "next_path": "/",
+            },
+            follow_redirects=False,
+        )
+
+        assert login.status_code == 303
+        assert context.client.cookies.get(SESSION_COOKIE_NAME) is not None
+
+
 def test_local_login_failure_is_generic_and_does_not_issue_session(
     tmp_path: Path,
 ) -> None:

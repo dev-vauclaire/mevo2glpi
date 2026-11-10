@@ -22,6 +22,7 @@ _PUBLIC_EXACT_PATHS = frozenset(
         "/health",
         "/auth/login",
         "/auth/oidc/callback",
+        "/favicon.ico",
     }
 )
 _PUBLIC_PREFIXES = ("/static/",)
