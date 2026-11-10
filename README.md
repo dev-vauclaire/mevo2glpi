@@ -31,6 +31,7 @@
 - [Documentation](#documentation)
 - [Feuille de route](#feuille-de-route)
   - [Simplification et maintenabilité](#simplification-et-maintenabilité)
+  - [Interface utilisateur](#interface-utilisateur)
   - [Résilience de la transcription](#résilience-de-la-transcription)
   - [Génération assistée du ticket par LLM](#génération-assistée-du-ticket-par-llm)
 - [Licence](#licence)
@@ -116,6 +117,10 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
   d'exemple pour les combinaisons de services prises en charge.
 - [ ] Aligner la documentation et les procédures d'exploitation avec cette
   infrastructure simplifiée.
+
+### Interface utilisateur
+
+- [ ] Ajouter un favicon cohérent avec l'identité visuelle de mevo2glpi.
 
 ### Résilience de la transcription
 

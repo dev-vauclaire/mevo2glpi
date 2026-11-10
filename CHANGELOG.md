@@ -5,6 +5,33 @@ Ce fichier recense les changements fonctionnels et opérationnels destinés aux
 par les tags Git immuables `vX.Y.Z` ; les versions `0.1.0` des packages Python
 sont des métadonnées internes au workspace et ne constituent pas des releases.
 
+## v0.11.0 — 2026-11-10
+
+### Ajouté
+
+- authentification obligatoire du dashboard avec un mode exclusif `local` ou
+  un fournisseur OIDC standard compatible avec Authlib ;
+- comptes locaux protégés par Argon2id, verrouillage progressif, révocation des
+  sessions et commandes d'administration dédiées ;
+- laboratoire Keycloak local reproductible avec utilisateurs synthétiques pour
+  qualifier le parcours OIDC sans donnée réelle ;
+- migration additive `0010_web_authentication` créant la table `web_users`.
+
+### Modifié
+
+- le web utilise un cookie applicatif signé, `Secure` et `HttpOnly`, avec
+  protection CSRF et journalisation expurgée des échecs d'authentification ;
+- la feuille de route distingue les futures améliorations de l'interface des
+  travaux de simplification de l'infrastructure.
+
+### Configuration requise
+
+- `WEB_AUTH_MODE` et `WEB_AUTH_SESSION_SECRET` deviennent obligatoires ;
+- le mode OIDC exige une URL d'issuer, un client confidentiel, une URI de
+  redirection HTTPS exacte et une claim de rôle conforme à la configuration du
+  fournisseur d'identité ;
+- aucune bascule automatique n'est effectuée entre les modes `local` et `oidc`.
+
 ## v0.10.0 — 2026-11-09
 
 ### Ajouté
