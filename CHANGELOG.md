@@ -21,7 +21,9 @@ sont des métadonnées internes au workspace et ne constituent pas des releases.
 ### Modifié
 
 - le web utilise un cookie applicatif signé, `Secure` et `HttpOnly`, avec
-  protection CSRF et journalisation expurgée des échecs d'authentification.
+  protection CSRF et journalisation expurgée des échecs d'authentification ;
+- la documentation web référence les commandes de gestion des comptes locaux,
+  leurs prérequis et leur effet sur les sessions.
 
 ### Corrigé
 

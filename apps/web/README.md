@@ -234,18 +234,59 @@ même cookie applicatif signé ; aucun token OIDC n'y est conservé.
 
 ## Commandes
 
-Depuis la racine :
+Le package expose deux exécutables : `mevo2glpi-web` pour servir l'application
+et `mevo2glpi-web-users` pour administrer les comptes locaux.
+
+### Démarrer l'application
+
+Depuis la racine du workspace :
 
 ```bash
 uv sync --all-packages --all-groups
 uv run --package mevo2glpi-web mevo2glpi-web
 ```
 
-Créer un compte synthétique en développement local :
+Dans le conteneur web, l'environnement Python est déjà installé :
+
+```bash
+mevo2glpi-web
+```
+
+Cette commande n'accepte pas d'argument : l'écoute, la base, l'identité de
+release et l'authentification proviennent exclusivement des variables
+d'environnement documentées plus haut.
+
+### Administrer les comptes locaux
+
+Ces commandes sont utiles uniquement avec `WEB_AUTH_MODE=local`. Elles exigent
+une `DATABASE_URL` valide et la migration `0010_web_authentication` déjà
+appliquée. Dans le terminal du conteneur web :
+
+| Commande | Effet |
+| --- | --- |
+| `mevo2glpi-web-users --help` | Afficher l'aide et les sous-commandes disponibles |
+| `mevo2glpi-web-users list` | Lister les identifiants et leur état `enabled` ou `disabled` |
+| `mevo2glpi-web-users create IDENTIFIANT` | Créer un compte actif après saisie interactive du mot de passe |
+| `mevo2glpi-web-users disable IDENTIFIANT` | Désactiver le compte et révoquer ses sessions actives |
+| `mevo2glpi-web-users enable IDENTIFIANT` | Réactiver le compte sans restaurer les sessions déjà révoquées |
+| `mevo2glpi-web-users reset-password IDENTIFIANT` | Remplacer le mot de passe et révoquer les sessions actives |
+
+Depuis la racine du workspace, préfixer la même sous-commande par
+`uv run --package mevo2glpi-web`. Par exemple :
 
 ```bash
 uv run --package mevo2glpi-web mevo2glpi-web-users create operator-local
 ```
+
+L'identifiant normalisé contient entre 3 et 64 caractères ASCII parmi les
+lettres minuscules, les chiffres, `.`, `_` et `-`. Le mot de passe contient
+entre 15 et 128 caractères, diffère de l'identifiant et ne figure pas dans la
+liste de valeurs bloquées. `create` et `reset-password` le lisent et le
+confirment interactivement : il n'est jamais transmis comme argument ni
+affiché. Une commande réussie retourne `0`, une erreur de configuration ou de
+validation retourne `2`, et une interruption interactive retourne `130`.
+
+### Valider l'application
 
 Tests sans service externe :
 
