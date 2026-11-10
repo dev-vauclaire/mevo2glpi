@@ -23,7 +23,6 @@
 
 ## Sommaire
 
-- [Sommaire](#sommaire)
 - [Fonctionnalités principales](#fonctionnalités-principales)
 - [Architecture](#architecture)
   - [mevo2glpi](#mevo2glpi)
@@ -31,7 +30,8 @@
 - [Procédures par environnement](#procédures-par-environnement)
 - [Documentation](#documentation)
 - [Feuille de route](#feuille-de-route)
-  - [Sécurité de l'interface web](#sécurité-de-linterface-web)
+  - [Simplification et maintenabilité](#simplification-et-maintenabilité)
+  - [Résilience de la transcription](#résilience-de-la-transcription)
   - [Génération assistée du ticket par LLM](#génération-assistée-du-ticket-par-llm)
 - [Licence](#licence)
 
@@ -41,6 +41,7 @@
 - transcription des fichiers audio par un service local ou externe ;
 - création automatique des tickets GLPI avec la transcription et l'audio ;
 - suivi des traitements et des messages rejetés depuis un dashboard ;
+- protection du dashboard par des comptes locaux ou un fournisseur OIDC ;
 - gestion configurable de la conservation des audios et des données associées.
 
 ## Architecture
@@ -96,6 +97,7 @@ Les déploiements en staging et en production s'effectuent avec **Dokploy**.
 - [architecture du dépôt et workspace uv](docs/reference/depot.md) ;
 - [cycle CI/CD et convention des tags](docs/reference/ci-cd.md) ;
 - [stratégie de tests](docs/reference/tests.md) ;
+- [authentification locale et OIDC](docs/conception/authentification-oidc-keycloak.md) ;
 - [historique des versions](CHANGELOG.md) ;
 - [contribution](CONTRIBUTING.md), [sécurité](SECURITY.md) et
   [support](SUPPORT.md).
@@ -105,14 +107,22 @@ Les déploiements en staging et en production s'effectuent avec **Dokploy**.
 Cette feuille de route contient uniquement les évolutions prévues. Les
 fonctionnalités déjà disponibles sont décrites dans les sections précédentes.
 
-### Sécurité de l'interface web
+### Simplification et maintenabilité
 
-- [ ] Intégrer ultérieurement une authentification OIDC avec Keycloak et des
-  autorisations applicatives avant d'étendre l'accès aux audios ou les actions
-  opérateur.
+- [ ] Retirer le contrat historique Transcribe AI et son mécanisme de polling
+  pour ne conserver que le contrat compatible avec l'API OpenAI, avec Parakeet
+  local ou un provider externe.
+- [ ] Réorganiser `infra/docker` en briques composables et fournir des recettes
+  d'exemple pour les combinaisons de services prises en charge.
+- [ ] Aligner la documentation et les procédures d'exploitation avec cette
+  infrastructure simplifiée.
 
-En attendant, le web reste strictement limité au réseau interne par le DNS, le
-pare-feu et la configuration Traefik de Dokploy.
+### Résilience de la transcription
+
+- [ ] Permettre de configurer une chaîne ordonnée de providers de transcription
+  et un repli borné uniquement lors d'une indisponibilité technique.
+- [ ] Ne jamais basculer automatiquement vers un autre provider après une
+  erreur métier terminale et rendre chaque tentative observable.
 
 ### Génération assistée du ticket par LLM
 
