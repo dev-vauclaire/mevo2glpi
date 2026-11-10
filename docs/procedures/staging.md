@@ -284,12 +284,14 @@ Après installation :
 - surveiller au minimum l'espace disque, la mémoire et l'expiration des
   certificats.
 
-### Installer la confiance envers GLPI
+### Installer la confiance envers les services HTTPS internes
 
 Le bundle CA sert aux connexions HTTPS des conteneurs vers la cible GLPI. Avec
 une instance externe, le trafic sort de la VM ; avec le Compose optionnel, il
 rejoint le domaine GLPI publié par Traefik sur cette même VM. Ce bundle n'est
-pas le certificat présenté aux opérateurs par le dashboard.
+pas le certificat présenté aux opérateurs par le dashboard. Si le staging
+utilise OIDC plutôt que les comptes locaux proposés par défaut, ce bundle doit
+aussi contenir l'autorité du fournisseur d'identité interne.
 
 À partir d'une CA fournie par l'administrateur système :
 
@@ -624,6 +626,13 @@ Contrôler les invariants suivants :
 - `TRANSCRIPTION_NETWORK_ALIAS=mevo2glpi-staging-transcription` ;
 - `DATABASE_NETWORK_NAME=mevo2glpi-staging-database-network` ;
 - `AUDIO_VOLUME_NAME=mevo2glpi-staging-audio-data` ;
+- `WEB_AUTH_MODE=local` pour qualifier l'authentification autonome ;
+- `WEB_AUTH_SESSION_SECRET` contient un secret aléatoire propre au staging,
+  d'au moins 32 caractères ;
+- `WEB_AUTH_COOKIE_SECURE=true`, car le dashboard est exposé en HTTPS ;
+- les variables `WEB_AUTH_ISSUER_URL`, `WEB_AUTH_CLIENT_ID`,
+  `WEB_AUTH_CLIENT_SECRET` et `WEB_AUTH_REDIRECT_URI` restent vides en mode
+  local ;
 - `TRANSCRIPTION_API_KEY` est identique dans les projets transcription et
   applications ;
 - `TRANSCRIBE_AI_SIMULATOR_API_KEY` est identique dans le service Transcribe AI
@@ -732,12 +741,16 @@ Vérifier dans cet ordre :
 1. `database-migrations` termine avec le code `0` ;
 2. `web`, `worker-publisher`, `worker-automation` et `worker-retention`
    démarrent ;
-3. le dashboard affiche les trois workers avec des heartbeats frais ;
-4. l'environnement, la release et le SHA affichés correspondent au déploiement ;
-5. automation et retention joignent le GLPI de test sans erreur TLS ;
-6. aucun journal ne contient de secret, d'audio, de transcription ou de
+3. depuis le terminal du web, créer le premier compte local synthétique avec
+   `mevo2glpi-web-users create NOM_OPERATEUR_STAGING` ;
+4. la connexion locale donne accès au dashboard, qui affiche les trois workers
+   avec des heartbeats frais ;
+5. l'environnement, la release et le SHA affichés correspondent au déploiement ;
+6. automation et retention joignent le GLPI de test sans erreur TLS ;
+7. aucun journal ne contient de secret, d'identifiant de connexion, d'audio,
+   de transcription ou de
    réponse HTTP brute ;
-7. le worker retention journalise le nombre agrégé d'ingestions rejetées
+8. le worker retention journalise le nombre agrégé d'ingestions rejetées
    purgées, sans identifiant Graph ni contenu de message.
 
 Vérifier que la vue « Messages rejetés » expose les motifs attendus et que les
@@ -754,6 +767,7 @@ La recette fonctionnelle peut commencer uniquement lorsque :
 - [ ] avec le Compose GLPI optionnel, `glpi-db` et `glpi-test` sont sains et
       `glpi-bootstrap` a terminé deux fois avec le code `0` ;
 - [ ] la migration est terminée avec le code `0` ;
+- [ ] un compte local de staging permet d'ouvrir le dashboard ;
 - [ ] le web et les trois workers sont en cours d'exécution ;
 - [ ] les trois heartbeats sont frais ;
 - [ ] `staging`, `main` et le SHA attendu sont affichés ;
@@ -870,7 +884,8 @@ Limites connues :
 - la qualité de Parakeet doit être confirmée avec des audios fictifs
   représentatifs ;
 - le staging dépend du DNS, du routage, de NTP et des CA de la VM ;
-- le web n'applique pas encore d'authentification utilisateur ;
+- le mode local de staging ne valide pas l'intégration au fournisseur OIDC de
+  l'établissement ;
 - le rollback applicatif ne rétrograde pas automatiquement PostgreSQL ;
 - les sauvegardes PostgreSQL et audio relèvent de la politique de
   l'hyperviseur et ne sont pas automatisées par le dépôt ;

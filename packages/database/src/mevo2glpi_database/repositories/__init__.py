@@ -46,6 +46,12 @@ from .ticket_creation_job_event import (
     JobEventSnapshot,
     TicketCreationJobEventRepository,
 )
+from .web_user import (
+    WebUserNotFoundError,
+    WebUserRepository,
+    WebUserSnapshot,
+    normalize_web_username,
+)
 from .worker_runtime_status import (
     StaleWorkerInstanceError,
     WorkerRuntimeSnapshot,
@@ -91,5 +97,9 @@ __all__ = [
     "TicketCreationJobRepository",
     "WorkerRuntimeSnapshot",
     "WorkerRuntimeStatusRepository",
+    "WebUserNotFoundError",
+    "WebUserRepository",
+    "WebUserSnapshot",
+    "normalize_web_username",
     "DiscoveredMail",
 ]

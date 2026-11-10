@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <meta
       name="description"
       content="Suivi opérationnel des demandes de création de tickets GLPI."
@@ -27,14 +28,22 @@
           >
           <h1>mevo2glpi</h1>
         </div>
-        <p
-          class="environment-badge"
-          data-release-identity
-          title="Commit {{ release_commit_sha }}"
-        >
-          {{ release_environment }} · {{ release_name }} ·
-          {{ release_short_commit_sha }}
-        </p>
+        <div class="app-header__actions">
+          <p
+            class="environment-badge"
+            data-release-identity
+            title="Commit {{ release_commit_sha }}"
+          >
+            {{ release_environment }} · {{ release_name }} ·
+            {{ release_short_commit_sha }}
+          </p>
+          <form action="/auth/logout" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button--secondary" type="submit">
+              Se déconnecter
+            </button>
+          </form>
+        </div>
       </div>
     </header>
 

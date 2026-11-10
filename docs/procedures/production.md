@@ -289,11 +289,13 @@ Après installation :
 - limiter SSH et Dokploy aux réseaux d'administration ;
 - surveiller le disque, la mémoire, le CPU et l'expiration des certificats.
 
-### Installer la confiance envers GLPI
+### Installer la confiance envers les services HTTPS internes
 
-Installer uniquement les autorités nécessaires à la validation du certificat
-serveur GLPI. Le bundle système doit conserver les autorités publiques requises
-pour Microsoft, GitHub, les registres et Hugging Face.
+Installer uniquement les autorités nécessaires à la validation des certificats
+du serveur GLPI et du fournisseur OIDC lorsque celui-ci utilise la PKI interne.
+Le même bundle est monté dans le web pour la découverte OIDC et dans les
+workers pour GLPI. Le bundle système doit conserver les autorités publiques
+requises pour Microsoft, GitHub, les registres et Hugging Face.
 
 ```bash
 sudo install -m 0644 /chemin/ca-interne.pem /usr/local/share/ca-certificates/mevo2glpi-internal-ca.crt
@@ -588,6 +590,18 @@ prévalent. Contrôler notamment :
 - `DATABASE_URL` cible exclusivement la Database de production ;
 - `CA_BUNDLE_HOST_PATH=/etc/ssl/certs/ca-certificates.crt` ;
 - `PUBLIC_BASE_URL` contient le domaine HTTPS interne du dashboard ;
+- `WEB_AUTH_MODE=oidc` pour déléguer l'authentification au fournisseur de
+  l'établissement ;
+- `WEB_AUTH_SESSION_SECRET` contient un secret aléatoire propre à la
+  production, d'au moins 32 caractères ;
+- `WEB_AUTH_COOKIE_SECURE=true` ;
+- `WEB_AUTH_ISSUER_URL`, `WEB_AUTH_CLIENT_ID`,
+  `WEB_AUTH_CLIENT_SECRET` et `WEB_AUTH_REDIRECT_URI` correspondent au client
+  OIDC confidentiel de production ;
+- `WEB_AUTH_REDIRECT_URI` cible exactement le domaine HTTPS du web suivi de
+  `/auth/oidc/callback` ;
+- `WEB_AUTH_REQUIRED_ROLE` et `WEB_AUTH_ROLES_CLAIM` correspondent au rôle et
+  à la claim plate configurés chez le fournisseur ;
 - `TRANSCRIPTION_PROVIDER=openai_compatible` ;
 - `OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL=http://mevo2glpi-prod-transcription:5092/v1` ;
 - `OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY` est identique à
@@ -611,6 +625,13 @@ prévalent. Contrôler notamment :
 Le Compose impose `PUBLISHER_GRAPH_AUTH_MODE=entra_certificate` et
 `PUBLISHER_GRAPH_BASE_URL=https://graph.microsoft.com/v1.0`. La passphrase de
 la clé privée reste vide uniquement si la clé n'est pas chiffrée.
+
+Lorsqu'un établissement ne dispose pas encore de fournisseur OIDC, il peut
+choisir `WEB_AUTH_MODE=local`, laisser toutes les variables OIDC absentes et
+créer les comptes opérateurs avec `mevo2glpi-web-users`. Ce choix doit être
+arrêté avant le déploiement : aucune bascule automatique ou combinaison des
+deux modes n'existe. Le mode OIDC reste recommandé lorsqu'un fournisseur
+d'identité administré est disponible.
 
 Les variables `legacy_polling` peuvent rester renseignées pour une bascule
 manuelle ultérieure, mais aucun basculement automatique n'est réalisé. Un
@@ -664,12 +685,15 @@ Vérifier dans cet ordre :
 2. `web`, `worker-publisher`, `worker-automation` et `worker-retention`
    démarrent ;
 3. le dashboard affiche les trois heartbeats ;
-4. l'environnement, le tag et le SHA correspondent au déploiement ;
-5. le publisher obtient un jeton et accède à la boîte sans erreur `401` ou
+4. un opérateur possédant le rôle requis peut ouvrir le dashboard et un compte
+   sans ce rôle reçoit `403` ;
+5. l'environnement, le tag et le SHA correspondent au déploiement ;
+6. le publisher obtient un jeton et accède à la boîte sans erreur `401` ou
    `403` ;
-6. automation et retention joignent GLPI sans erreur TLS ;
-7. aucun journal ne contient de secret, de jeton, d'identifiant de message,
-   d'audio, de transcription ou de réponse HTTP brute.
+7. automation et retention joignent GLPI sans erreur TLS ;
+8. aucun journal ne contient de secret, de jeton, d'identifiant de connexion,
+   d'identifiant de message, d'audio, de transcription ou de réponse HTTP
+   brute.
 
 Le healthcheck du publisher valide PostgreSQL, le volume et son heartbeat, mais
 pas l'accès Entra/Graph. La vérification des journaux et la recette fonctionnelle
@@ -687,6 +711,8 @@ La recette fonctionnelle peut commencer uniquement lorsque :
 - [ ] `production`, le tag et le SHA attendus sont affichés ;
 - [ ] seul le web est accessible via Traefik ;
 - [ ] le certificat HTTPS est accepté depuis un poste opérateur ;
+- [ ] le parcours OIDC autorise le rôle attendu et refuse un compte sans ce
+      rôle ;
 - [ ] GLPI est joignable avec vérification TLS ;
 - [ ] le publisher accède à la seule boîte autorisée sans erreur Entra/Graph ;
 - [ ] aucun traitement antérieur inattendu n'a été déclenché.
@@ -744,8 +770,8 @@ pour diagnostiquer la production.
 
 ## Limites et points de vigilance
 
-- le dashboard ne possède pas encore d'authentification applicative et doit
-  rester limité au réseau interne ;
+- le dashboard reste limité au réseau interne même avec l'authentification
+  applicative ;
 - le healthcheck publisher ne teste pas Entra ID ou Microsoft Graph ;
 - toute l'Inbox existante est éligible au premier démarrage ;
 - les changements Exchange RBAC peuvent demander jusqu'à deux heures de

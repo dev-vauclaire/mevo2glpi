@@ -146,6 +146,7 @@ apps/web/
 │   ├── application.py       # moteur, sessions, services et Uvicorn
 │   ├── web.py               # assemblage FastAPI, controllers et routers
 │   ├── settings.py          # configuration typée et secrets masqués
+│   ├── auth/                # modes local/OIDC, sessions et protections HTTP
 │   ├── routes/              # déclarations URL/méthode et délégation pure
 │   ├── controllers/         # adaptation du protocole HTTP
 │   ├── services/
@@ -153,7 +154,7 @@ apps/web/
 │   │   ├── observability/   # seuils, priorités et projection opérationnelle
 │   │   └── rejections/      # liste expurgée des messages rejetés
 │   ├── schemas/             # contrats HTTP Pydantic
-│   ├── middlewares/         # traitements HTTP transversaux futurs
+│   ├── middlewares/         # authentification et traitements HTTP transversaux
 │   ├── templates/           # pages HTML Jinja
 │   └── static/
 │       ├── css/             # présentation visuelle
@@ -187,8 +188,10 @@ ordonnanceur de rafraîchissement : les lectures jobs, rejets et observabilité
 sont attendues indépendamment, sans `setInterval`, et le polling est suspendu
 lorsque l'onglet est masqué. Les valeurs venant de l'API sont ajoutées au DOM
 avec `textContent` ou `replaceChildren`, jamais interprétées comme du HTML.
-Cette itération suppose un accès limité au réseau interne et n'ajoute pas de
-mécanisme d'authentification applicative.
+Le dashboard et ses API sont protégés par un mode d'authentification explicite,
+`local` ou `oidc`. Il n'existe ni mode désactivé, ni repli automatique d'OIDC
+vers les comptes locaux. Le fonctionnement détaillé est décrit dans la
+[conception de l'authentification](../../docs/conception/authentification-oidc-keycloak.md).
 
 ## Configuration
 
@@ -199,6 +202,16 @@ mécanisme d'authentification applicative.
 | `WEB_HOST` | `127.0.0.1` | adresse IP d'écoute |
 | `WEB_PORT` | `8000` | port Uvicorn |
 | `WEB_TRUST_PROXY_HEADERS` | `false` | confiance explicite dans le reverse proxy |
+| `WEB_AUTH_MODE` | obligatoire | mode exclusif : `local` ou `oidc` |
+| `WEB_AUTH_SESSION_SECRET` | obligatoire | secret de signature des sessions applicatives, 32 caractères minimum |
+| `WEB_AUTH_SESSION_MAX_AGE_SECONDS` | `1800` | durée absolue de la session applicative |
+| `WEB_AUTH_COOKIE_SECURE` | `true` | impose le cookie HTTPS ; `false` autorisé uniquement en développement |
+| `WEB_AUTH_REQUIRED_ROLE` | `mevo2glpi-access` | rôle unique requis pour accéder au web |
+| `WEB_AUTH_ROLES_CLAIM` | `roles` | claim OIDC multivaluée portant les rôles |
+| `WEB_AUTH_ISSUER_URL` | obligatoire en OIDC | issuer découvert via OpenID Connect |
+| `WEB_AUTH_CLIENT_ID` | obligatoire en OIDC | identifiant du client confidentiel |
+| `WEB_AUTH_CLIENT_SECRET` | obligatoire en OIDC | secret du client confidentiel |
+| `WEB_AUTH_REDIRECT_URI` | obligatoire en OIDC | callback exact déclaré auprès du fournisseur |
 | `APP_ENVIRONMENT` | `development` | environnement : `development`, `staging` ou `production` |
 | `APP_RELEASE` | `development` | branche `main` en staging ou tag stable `vX.Y.Z` en production |
 | `APP_COMMIT_SHA` | `unknown` | SHA Git complet obligatoire hors développement local |
@@ -214,6 +227,11 @@ construit de façon paresseuse avec `pool_pre_ping`. `/health` reste une sonde d
 liveness indépendante de PostgreSQL ; une lecture d'observabilité impossible
 retourne séparément un `503` expurgé.
 
+En mode local, les comptes sont administrés par la commande
+`mevo2glpi-web-users`. En mode OIDC, Authlib applique le flux Authorization
+Code, la découverte du fournisseur et PKCE S256. Les deux modes produisent le
+même cookie applicatif signé ; aucun token OIDC n'y est conservé.
+
 ## Commandes
 
 Depuis la racine :
@@ -221,6 +239,12 @@ Depuis la racine :
 ```bash
 uv sync --all-packages --all-groups
 uv run --package mevo2glpi-web mevo2glpi-web
+```
+
+Créer un compte synthétique en développement local :
+
+```bash
+uv run --package mevo2glpi-web mevo2glpi-web-users create operator-local
 ```
 
 Tests sans service externe :
@@ -246,7 +270,9 @@ uv run ruff check apps/web
 
 ## Limites actuelles
 
-- pas d'authentification applicative ;
+- un rôle applicatif global seulement, sans permissions fonctionnelles fines ;
+- la déconnexion OIDC ferme la session mevo2glpi, mais pas la session SSO du
+  fournisseur d'identité ;
 - pas d'acquittement, d'historique ou de notification externe des alertes ;
 - un job `failed` ou `blocked` reste signalé jusqu'à son retry opérateur, même
   si la deadline de son audio a ensuite conduit à une purge ;

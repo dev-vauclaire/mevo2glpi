@@ -21,12 +21,22 @@ export class ApiError extends Error {
 
 async function requestJson(path, options = {}) {
   let response;
+  const method = (options.method ?? "GET").toUpperCase();
+  const headers = { Accept: "application/json", ...options.headers };
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const csrfToken = document
+      .querySelector('meta[name="csrf-token"]')
+      ?.getAttribute("content");
+    if (csrfToken) {
+      headers["X-CSRF-Token"] = csrfToken;
+    }
+  }
 
   try {
     response = await fetch(path, {
       ...options,
       cache: "no-store",
-      headers: { Accept: "application/json", ...options.headers },
+      headers,
     });
   } catch (_error) {
     throw new ApiError(0, DEFAULT_ERROR);

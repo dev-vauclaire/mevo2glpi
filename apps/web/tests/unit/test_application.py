@@ -5,8 +5,10 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from tests.support.web_auth import build_synthetic_web_authentication
 
 from mevo2glpi_web.application import (
+    WebAuthenticationComposition,
     WebExitCode,
     build_application,
     build_server,
@@ -26,6 +28,11 @@ def _settings(tmp_path: Path, **overrides: object) -> WebSettings:
         "database_url": DATABASE_URL,
         "web_host": "127.0.0.1",
         "web_port": 8765,
+        "web_auth_mode": "local",
+        "web_auth_session_secret": (
+            "synthetic-test-session-secret-at-least-32-characters"
+        ),
+        "web_auth_cookie_secure": False,
     }
     values.update(overrides)
     return WebSettings(**values, _env_file=None)
@@ -50,10 +57,15 @@ def test_production_disables_documentation_without_removing_application_routes(
         app_environment="production",
         app_release="v0.5.0",
         app_commit_sha="a" * 40,
+        web_auth_cookie_secure=True,
     )
-    application = build_application(settings)
+    application = build_application(
+        settings,
+        authentication_factory=_synthetic_authentication_factory,
+    )
 
     with TestClient(application) as client:
+        _authenticate_synthetic_client(client)
         for path in ("/docs", "/redoc", "/openapi.json"):
             assert client.get(path).status_code == 404
         for path in ("/", "/health", "/api/version"):
@@ -74,6 +86,7 @@ def test_production_disables_documentation_without_removing_application_routes(
                 "app_environment": "staging",
                 "app_release": "main",
                 "app_commit_sha": "b" * 40,
+                "web_auth_cookie_secure": True,
             },
             id="staging",
         ),
@@ -83,9 +96,13 @@ def test_non_production_environments_expose_documentation(
     tmp_path: Path,
     identity: dict[str, object],
 ) -> None:
-    application = build_application(_settings(tmp_path, **identity))
+    application = build_application(
+        _settings(tmp_path, **identity),
+        authentication_factory=_synthetic_authentication_factory,
+    )
 
     with TestClient(application) as client:
+        _authenticate_synthetic_client(client)
         assert client.get("/docs").status_code == 200
         assert client.get("/redoc").status_code == 200
         assert client.get("/openapi.json").status_code == 200
@@ -98,6 +115,7 @@ def test_build_server_uses_configured_bind_address(tmp_path: Path) -> None:
 
     assert server.config.host == "0.0.0.0"
     assert server.config.port == 9876
+    assert server.config.access_log is False
     assert server.config.proxy_headers is False
     assert server.config.forwarded_allow_ips == []
     assert server.config.app.state.web_config.audio_root == (
@@ -160,6 +178,7 @@ def test_run_cli_logs_only_non_sensitive_release_identity(
         app_environment="production",
         app_release="v0.2.0",
         app_commit_sha="bd88d901f4569ea8ee455c53b20920b0e1140ee2",
+        web_auth_cookie_secure=True,
     )
 
     with caplog.at_level(logging.INFO):
@@ -183,6 +202,11 @@ def test_run_cli_does_not_log_invalid_database_url(
     def invalid_settings() -> WebSettings:
         return WebSettings(
             database_url=f"postgresql://web:{secret}@database/jobs",
+            web_auth_mode="local",
+            web_auth_session_secret=(
+                "synthetic-test-session-secret-at-least-32-characters"
+            ),
+            web_auth_cookie_secure=False,
             _env_file=None,
         )
 
@@ -243,3 +267,25 @@ def test_run_cli_returns_130_for_unhandled_keyboard_interrupt(tmp_path: Path) ->
     )
 
     assert exit_code is WebExitCode.INTERRUPTED
+
+
+_ACTIVE_SYNTHETIC_AUTHENTICATION = None
+
+
+def _synthetic_authentication_factory(
+    _settings: WebSettings,
+    _session_factory: object,
+) -> WebAuthenticationComposition:
+    global _ACTIVE_SYNTHETIC_AUTHENTICATION
+    authentication = build_synthetic_web_authentication()
+    _ACTIVE_SYNTHETIC_AUTHENTICATION = authentication
+    return WebAuthenticationComposition(
+        services=authentication.services,
+        cookie_policy=authentication.cookie_policy,
+        oidc_transaction_secret=authentication.oidc_transaction_secret,
+    )
+
+
+def _authenticate_synthetic_client(client: TestClient) -> None:
+    assert _ACTIVE_SYNTHETIC_AUTHENTICATION is not None
+    _ACTIVE_SYNTHETIC_AUTHENTICATION.authenticate(client)

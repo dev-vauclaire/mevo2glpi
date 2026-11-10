@@ -288,7 +288,7 @@ def test_keycloak_realm_configures_confidential_authorization_code_client(
     assert client["serviceAccountsEnabled"] is False
     assert client["authorizationServicesEnabled"] is False
     assert client["fullScopeAllowed"] is False
-    assert client["redirectUris"] == ["http://127.0.0.1:8000/auth/callback"]
+    assert client["redirectUris"] == ["http://127.0.0.1:8000/auth/oidc/callback"]
     assert client["webOrigins"] == ["http://127.0.0.1:8000"]
     assert all("*" not in uri for uri in client["redirectUris"])
     assert client["attributes"] == {
@@ -361,6 +361,24 @@ def test_keycloak_realm_contains_only_synthetic_test_users(
             "temporary": False,
         }
     ]
+    assert {
+        name: users["operator-authorized"][name]
+        for name in ("email", "emailVerified", "firstName", "lastName")
+    } == {
+        "email": "operator-authorized@example.invalid",
+        "emailVerified": True,
+        "firstName": "Synthetic",
+        "lastName": "Authorized",
+    }
+    assert {
+        name: users["operator-forbidden"][name]
+        for name in ("email", "emailVerified", "firstName", "lastName")
+    } == {
+        "email": "operator-forbidden@example.invalid",
+        "emailVerified": True,
+        "firstName": "Synthetic",
+        "lastName": "Forbidden",
+    }
     for user in users.values():
         assert user["enabled"] is True
-        assert {"email", "firstName", "lastName"}.isdisjoint(user)
+        assert user["email"].endswith("@example.invalid")

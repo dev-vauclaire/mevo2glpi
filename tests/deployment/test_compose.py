@@ -447,6 +447,31 @@ def test_web_receives_no_provider_credentials(
         )
 
 
+def test_production_web_authentication_is_explicit_and_fail_closed(
+    render_compose: Callable[[], dict[str, object]],
+) -> None:
+    services = _services(render_compose())
+    web_environment = services["web"]["environment"]
+
+    assert web_environment["WEB_AUTH_MODE"] == "oidc"
+    assert web_environment["WEB_AUTH_COOKIE_SECURE"] == "true"
+    assert web_environment["WEB_AUTH_REQUIRED_ROLE"] == "mevo2glpi-access"
+    assert web_environment["WEB_AUTH_ROLES_CLAIM"] == "roles"
+    for name in (
+        "WEB_AUTH_SESSION_SECRET",
+        "WEB_AUTH_ISSUER_URL",
+        "WEB_AUTH_CLIENT_ID",
+        "WEB_AUTH_CLIENT_SECRET",
+        "WEB_AUTH_REDIRECT_URI",
+    ):
+        assert web_environment[name]
+    for service_name, service in services.items():
+        if service_name != "web":
+            assert not any(
+                name.startswith("WEB_AUTH_") for name in service["environment"]
+            )
+
+
 def test_ca_bundle_is_read_only_and_used_without_disabling_tls(
     render_compose: Callable[[], dict[str, object]],
 ) -> None:
@@ -465,6 +490,7 @@ def test_ca_bundle_is_read_only_and_used_without_disabling_tls(
         "worker-retention",
     ):
         assert services[worker_name]["environment"]["SSL_CERT_FILE"] == target
+    assert services["web"]["environment"]["SSL_CERT_FILE"] == target
     assert services["worker-publisher"]["environment"]["REQUESTS_CA_BUNDLE"] == target
 
 

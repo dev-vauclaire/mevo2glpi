@@ -77,7 +77,7 @@ def test_page_controller_passes_localized_release_identity_to_template() -> None
             captured.update(kwargs)
             return Response()
 
-    request = object()
+    request = SimpleNamespace(state=SimpleNamespace(auth_csrf_token="csrf-token"))
     controller = PageController(
         templates=FakeTemplates(),  # type: ignore[arg-type]
         version=VERSION_RESPONSE,
@@ -93,7 +93,9 @@ def test_page_controller_passes_localized_release_identity_to_template() -> None
             "release_name": "v0.2.0",
             "release_commit_sha": "bd88d901f4569ea8ee455c53b20920b0e1140ee2",
             "release_short_commit_sha": "bd88d901f456",
+            "csrf_token": "csrf-token",
         },
+        "headers": {"Cache-Control": "private, no-store"},
     }
 
 
@@ -167,6 +169,7 @@ def test_event_history_serializes_supported_event_actors(
         list_audio_job_events=event_service,  # type: ignore[arg-type]
         retry_audio_job=object(),  # type: ignore[arg-type]
         get_downloadable_audio=object(),  # type: ignore[arg-type]
+        csrf_protection=_AllowCsrf(),  # type: ignore[arg-type]
     )
 
     response = controller.list_job_events(AUDIO_UUID, limit=25, cursor=None)
@@ -205,6 +208,7 @@ def test_download_closes_audio_if_response_construction_fails(
         list_audio_job_events=object(),  # type: ignore[arg-type]
         retry_audio_job=object(),  # type: ignore[arg-type]
         get_downloadable_audio=FakeDownloadService(downloadable),  # type: ignore[arg-type]
+        csrf_protection=_AllowCsrf(),  # type: ignore[arg-type]
     )
 
     def fail_response(*_args, **_kwargs):
@@ -279,6 +283,7 @@ def test_download_translates_storage_unavailability_to_503() -> None:
         get_downloadable_audio=FakeDownloadService(
             AudioStorageUnavailableError("private volume failure")
         ),  # type: ignore[arg-type]
+        csrf_protection=_AllowCsrf(),  # type: ignore[arg-type]
     )
 
     with pytest.raises(HTTPException) as captured_error:
@@ -373,6 +378,7 @@ def _controller(
         list_audio_job_events=object(),  # type: ignore[arg-type]
         retry_audio_job=retry_service or FakeRetryService(None),  # type: ignore[arg-type]
         get_downloadable_audio=object(),  # type: ignore[arg-type]
+        csrf_protection=_AllowCsrf(),  # type: ignore[arg-type]
     )
 
 
@@ -382,3 +388,8 @@ def _request() -> SimpleNamespace:
             return f"/api/jobs/{audio_uuid}"
 
     return SimpleNamespace(app=FakeApp())
+
+
+class _AllowCsrf:
+    def validate(self, _request: object) -> None:
+        return None

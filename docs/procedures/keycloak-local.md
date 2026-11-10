@@ -2,15 +2,16 @@
 
 ## Objectif et limites
 
-Ce laboratoire permet de manipuler Keycloak depuis sa console
-d'administration avant toute intégration avec mevo2glpi. Il démarre uniquement :
+Ce laboratoire permet de manipuler Keycloak et de valider le mode OIDC de
+mevo2glpi avec des identités synthétiques. Il démarre uniquement :
 
 - Keycloak en mode de développement ;
 - une base PostgreSQL dédiée à Keycloak ;
 - un réseau Docker dédié et un volume persistant propres au laboratoire.
 
-Il ne protège pas encore le dashboard mevo2glpi et ne modifie ni la base
-applicative, ni les workers, ni les environnements de staging ou de production.
+Le raccordement du web reste une opération locale explicite. Le laboratoire ne
+modifie ni la base applicative, ni les workers, ni les environnements de
+staging ou de production.
 
 Tous les comptes et secrets utilisés ici sont synthétiques. Ne jamais importer
 un compte, un mot de passe, un groupe ou une configuration de l'établissement.
@@ -51,8 +52,9 @@ Les variables `KEYCLOAK_DEV_CLIENT_SECRET`,
 `KEYCLOAK_DEV_AUTHORIZED_PASSWORD` et
 `KEYCLOAK_DEV_FORBIDDEN_PASSWORD` alimentent uniquement le premier import du
 realm synthétique. Elles définissent respectivement le secret du client OIDC et
-les mots de passe des deux opérateurs de test. Elles ne sont jamais lues par
-mevo2glpi dans ce jalon.
+les mots de passe des deux opérateurs de test. Seul le secret du client est
+également reporté dans la configuration OIDC locale du web ; les mots de passe
+restent saisis par l'opérateur dans Keycloak.
 
 Valider le rendu du Compose avant son premier démarrage :
 
@@ -130,7 +132,7 @@ Sa configuration par défaut est la suivante :
 | Service Accounts | désactivé |
 | Full Scope Allowed | désactivé |
 | PKCE Code Challenge Method | `S256` |
-| Valid Redirect URI | `http://127.0.0.1:8000/auth/callback` |
+| Valid Redirect URI | `http://127.0.0.1:8000/auth/oidc/callback` |
 | Web Origin | `http://127.0.0.1:8000` |
 | Valid Post Logout Redirect URI | `http://127.0.0.1:8000/` |
 
@@ -147,22 +149,23 @@ Le client `mevo2glpi-web` possède le rôle :
 mevo2glpi-access
 ```
 
-Ce rôle représentera ultérieurement l'autorisation d'accéder au dashboard. Un
-mapper l'expose dans la claim OIDC multivaluée `roles`. Cette configuration ne
-protège encore aucune route : mevo2glpi n'est pas raccordé dans ce jalon.
+Ce rôle autorise l'accès au dashboard. Un mapper l'expose dans la claim OIDC
+multivaluée `roles`. Le web refuse le callback avec `403` lorsque ce rôle est
+absent.
 
 ### Utilisateurs synthétiques
 
-Le realm contient deux utilisateurs sans adresse électronique ni donnée
-réelle :
+Le realm contient deux utilisateurs avec des profils entièrement synthétiques.
+Leurs adresses utilisent le domaine réservé `example.invalid` afin que
+Keycloak n'impose pas une action de complétion du profil au premier accès :
 
 - `operator-authorized`, auquel le rôle client `mevo2glpi-access` est
   attribué ;
 - `operator-forbidden`, sans ce rôle.
 
 Leurs mots de passe non temporaires proviennent de `keycloak.env`. Ils servent à
-vérifier séparément une authentification autorisée et une authentification qui
-devra être refusée par mevo2glpi avec une réponse `403`.
+vérifier séparément une authentification autorisée et une authentification
+refusée par mevo2glpi avec une réponse `403`.
 
 Ne pas utiliser le compte administrateur du realm `master` comme utilisateur
 applicatif.
@@ -189,6 +192,38 @@ L'`issuer` doit commencer exactement par :
 http://localhost:18084/realms/mevo2glpi-development
 ```
 
+### Raccorder le web mevo2glpi
+
+Préparer d'abord l'environnement applicatif et exécuter les migrations selon
+la [procédure de développement local](developpement-local.md). Dans `.env`,
+configurer ensuite :
+
+```dotenv
+WEB_AUTH_MODE=oidc
+WEB_AUTH_ISSUER_URL=http://localhost:18084/realms/mevo2glpi-development
+WEB_AUTH_CLIENT_ID=mevo2glpi-web
+WEB_AUTH_CLIENT_SECRET=development-only-client-secret
+WEB_AUTH_REDIRECT_URI=http://127.0.0.1:8000/auth/oidc/callback
+WEB_AUTH_ROLES_CLAIM=roles
+WEB_AUTH_REQUIRED_ROLE=mevo2glpi-access
+WEB_AUTH_SESSION_SECRET=development-only-session-secret-at-least-32-characters
+WEB_AUTH_SESSION_MAX_AGE_SECONDS=1800
+WEB_AUTH_COOKIE_SECURE=false
+```
+
+`WEB_AUTH_CLIENT_SECRET` doit correspondre à
+`KEYCLOAK_DEV_CLIENT_SECRET` dans `keycloak.env`. Ces valeurs sont fictives et
+ne doivent jamais être réutilisées dans un environnement partagé.
+
+Lancer le web :
+
+```bash
+uv run --package mevo2glpi-web mevo2glpi-web
+```
+
+Ouvrir `http://127.0.0.1:8000/`. Le web redirige vers Keycloak, puis revient
+sur le callback après authentification.
+
 ### Vérifier les comptes depuis la console utilisateur
 
 Ouvrir :
@@ -197,9 +232,11 @@ Ouvrir :
 http://localhost:18084/realms/mevo2glpi-development/account/
 ```
 
-Se connecter successivement avec les deux comptes synthétiques. Cette étape
-vérifie leurs mots de passe, mais pas encore l'autorisation
-`mevo2glpi-access`, qui sera contrôlée par l'application lors d'un futur jalon.
+Se connecter successivement au web avec les deux comptes synthétiques :
+
+- `operator-authorized` accède au dashboard ;
+- `operator-forbidden` est authentifié par Keycloak mais reçoit `403`, car il
+  ne possède pas `mevo2glpi-access`.
 
 ### Observer la persistance
 
@@ -253,9 +290,8 @@ défaut. Exporter auparavant toute expérimentation que l'on souhaite conserver.
 - ne jamais contourner une erreur de configuration en désactivant une
   vérification de signature, d'issuer ou de redirection.
 
-## Suite possible
+## Conception associée
 
-Après manipulation et validation de ces notions, le prochain jalon pourra
-raccorder le web mevo2glpi à ce realm avec le flux Authorization Code et PKCE.
-La conception envisagée est décrite dans
-[Authentification OIDC avec Keycloak](../conception/authentification-oidc-keycloak.md).
+Le fonctionnement de la session commune, du mode local et du flux OIDC est
+décrit dans
+[Authentification du web : locale ou OIDC](../conception/authentification-oidc-keycloak.md).

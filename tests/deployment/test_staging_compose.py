@@ -240,6 +240,28 @@ def test_staging_uses_the_separated_simulator_and_transcription_services(
     )
 
 
+def test_staging_web_uses_explicit_local_authentication(
+    render_staging_compose: Callable[[], dict[str, object]],
+) -> None:
+    services = _services(render_staging_compose())
+    environment = services["web"]["environment"]
+
+    assert environment["WEB_AUTH_MODE"] == "local"
+    assert environment["WEB_AUTH_COOKIE_SECURE"] == "true"
+    assert environment["WEB_AUTH_SESSION_SECRET"] == "CHANGE_ME"
+    assert environment["WEB_AUTH_REQUIRED_ROLE"] == "mevo2glpi-access"
+    assert environment["WEB_AUTH_ROLES_CLAIM"] == "roles"
+    assert environment.get("WEB_AUTH_ISSUER_URL", "") == ""
+    assert environment.get("WEB_AUTH_CLIENT_ID", "") == ""
+    assert environment.get("WEB_AUTH_CLIENT_SECRET", "") == ""
+    assert environment.get("WEB_AUTH_REDIRECT_URI", "") == ""
+    for service_name, service in services.items():
+        if service_name != "web":
+            assert not any(
+                name.startswith("WEB_AUTH_") for name in service["environment"]
+            )
+
+
 def test_staging_glpi_is_external_https_and_uses_the_ca_bundle(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:

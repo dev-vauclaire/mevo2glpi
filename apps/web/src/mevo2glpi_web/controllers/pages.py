@@ -28,6 +28,9 @@ class PageController:
 
     def index(self, request: Request) -> Response:
         """Render the read-only operations dashboard."""
+        csrf_token = getattr(request.state, "auth_csrf_token", None)
+        if not isinstance(csrf_token, str):
+            raise RuntimeError("authenticated page has no CSRF token")
         return self._templates.TemplateResponse(
             request=request,
             name="index.html",
@@ -36,7 +39,9 @@ class PageController:
                 "release_name": self._version.release,
                 "release_commit_sha": self._version.commit_sha,
                 "release_short_commit_sha": self._version.commit_sha[:12],
+                "csrf_token": csrf_token,
             },
+            headers={"Cache-Control": "private, no-store"},
         )
 
 

@@ -83,9 +83,9 @@ Avant de raccorder mevo2glpi à son système d'information, l'établissement
 adoptant doit intégrer les contrôles suivants à sa propre analyse de risques et
 à ses procédures d'exploitation :
 
-- limiter le dashboard à un réseau de confiance, car l'authentification et les
-  autorisations applicatives ne sont pas encore implémentées ; l'intégration
-  OIDC avec Keycloak reste une évolution future ;
+- sélectionner explicitement l'authentification locale ou OIDC, configurer les
+  rôles minimaux et conserver le dashboard sur un réseau de confiance ; le
+  laboratoire Keycloak fourni par le dépôt reste réservé au développement ;
 - sélectionner un tag Git immuable, auditer son code et appliquer les outils
   internes de contrôle de la chaîne logicielle, notamment la détection de
   secrets, l'analyse des dépendances et l'analyse des images conteneur ;
@@ -105,7 +105,8 @@ adoptant doit intégrer les contrôles suivants à sa propre analyse de risques 
 
 ## Limites connues
 
-- authentification et autorisation du dashboard non implémentées ;
+- déconnexion OIDC limitée à la session mevo2glpi : la session SSO du
+  fournisseur d'identité n'est pas fermée ;
 - parcours E2E nominal Parakeet automatisé mais volontairement lancé hors CI,
   car il construit et charge le modèle réel ;
 - la validation du publisher reste structurelle : le décodage effectif relève

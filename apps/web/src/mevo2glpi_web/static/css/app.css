@@ -94,6 +94,12 @@ h3 {
   gap: 0.8rem;
 }
 
+.app-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .app-brand__logo {
   width: 3.25rem;
   height: 3.25rem;
@@ -137,6 +143,41 @@ h3 {
   border-radius: 0.8rem;
   background: var(--surface);
   box-shadow: 0 0.25rem 1rem rgb(15 23 42 / 5%);
+}
+
+.auth-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1rem;
+  background: #f3f6fa;
+}
+
+.auth-card {
+  display: grid;
+  width: min(100%, 28rem);
+  gap: 1rem;
+  padding: clamp(1.25rem, 4vw, 2rem);
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--surface);
+  box-shadow: 0 0.75rem 2rem rgb(15 23 42 / 10%);
+}
+
+.auth-card__logo {
+  width: 4.5rem;
+  height: 4.5rem;
+  object-fit: contain;
+}
+
+.auth-card > p,
+.auth-form {
+  margin-bottom: 0;
+}
+
+.auth-form {
+  display: grid;
+  gap: 1rem;
 }
 
 .section-heading,
@@ -690,6 +731,7 @@ tbody tr:last-child td {
 
 @media (max-width: 48rem) {
   .app-header__content,
+  .app-header__actions,
   .section-heading,
   .filters,
   .alerts__heading {

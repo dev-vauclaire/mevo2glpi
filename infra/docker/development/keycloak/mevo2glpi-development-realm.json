@@ -31,7 +31,7 @@
       "authorizationServicesEnabled": false,
       "fullScopeAllowed": false,
       "redirectUris": [
-        "http://127.0.0.1:8000/auth/callback"
+        "http://127.0.0.1:8000/auth/oidc/callback"
       ],
       "webOrigins": [
         "http://127.0.0.1:8000"
@@ -84,6 +84,10 @@
   "users": [
     {
       "username": "operator-authorized",
+      "email": "operator-authorized@example.invalid",
+      "emailVerified": true,
+      "firstName": "Synthetic",
+      "lastName": "Authorized",
       "enabled": true,
       "credentials": [
         {
@@ -100,6 +104,10 @@
     },
     {
       "username": "operator-forbidden",
+      "email": "operator-forbidden@example.invalid",
+      "emailVerified": true,
+      "firstName": "Synthetic",
+      "lastName": "Forbidden",
       "enabled": true,
       "credentials": [
         {

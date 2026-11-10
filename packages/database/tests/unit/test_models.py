@@ -34,6 +34,7 @@ from mevo2glpi_database.models import (
     RetentionStatus,
     TicketCreationJob,
     TicketCreationJobEvent,
+    WebUser,
     WorkerRuntimeState,
     WorkerRuntimeStatus,
     WorkerServiceName,
@@ -166,6 +167,7 @@ def test_expected_tables_are_registered() -> None:
         "mail_ingestions",
         "mail_ingestion_events",
         "worker_runtime_status",
+        "web_users",
     }
 
 
@@ -176,6 +178,7 @@ def test_expected_tables_are_registered() -> None:
         (AudioRetention, "audio_retentions"),
         (TicketCreationJobEvent, "ticket_creation_job_events"),
         (WorkerRuntimeStatus, "worker_runtime_status"),
+        (WebUser, "web_users"),
     ],
 )
 def test_public_model_imports_use_shared_metadata(
@@ -280,6 +283,7 @@ def test_persisted_state_columns_use_varchar(
         ("worker_runtime_status", "instance_id"),
         ("worker_runtime_status", "current_job_uuid"),
         ("worker_runtime_status", "current_ingestion_uuid"),
+        ("web_users", "uuid"),
     ],
 )
 def test_uuid_columns_use_native_uuid_mapping(
@@ -314,6 +318,27 @@ def test_database_schema_cannot_store_audio_or_transcription_content() -> None:
     assert "body" not in column_names
     assert "sender" not in column_names
     assert "attachment_filename" not in column_names
+
+
+def test_web_auth_schema_stores_no_session_or_provider_identity() -> None:
+    assert "web_sessions" not in Base.metadata.tables
+    assert "web_auth_events" not in Base.metadata.tables
+
+
+def test_web_auth_invariants_are_enforced_by_database_checks() -> None:
+    users = Base.metadata.tables["web_users"]
+    user_check_names = {
+        constraint.name
+        for constraint in users.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert user_check_names >= {
+        "ck_web_users_normalized_username",
+        "ck_web_users_password_hash_argon2id",
+        "ck_web_users_session_version_non_negative",
+        "ck_web_users_failed_login_count_non_negative",
+        "ck_web_users_updated_at",
+    }
 
 
 def test_mail_source_identity_is_unique_and_case_sensitive() -> None:

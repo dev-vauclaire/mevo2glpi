@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
+from tests.support.web_auth import build_synthetic_web_authentication
 
 from mevo2glpi_common.release_identity import (
     DeploymentEnvironment,
@@ -71,6 +72,7 @@ def job_api_context(
         retry_overdue_grace=60,
         retention_deadline_grace=120,
     )
+    authentication = build_synthetic_web_authentication()
     app = create_app(
         audio_root=audio_root,
         list_audio_jobs=ListAudioJobs(session_factory),
@@ -89,8 +91,13 @@ def job_api_context(
             clock=lambda: OBSERVED_AT,
         ),
         release_identity=RELEASE_IDENTITY,
+        authentication=authentication.services,
+        session_cookie_policy=authentication.cookie_policy,
+        required_auth_role="mevo2glpi-access",
+        oidc_transaction_secret=authentication.oidc_transaction_secret,
     )
     with TestClient(app) as client:
+        authentication.authenticate(client)
         yield JobApiContext(
             client=client,
             audio_root=audio_root,

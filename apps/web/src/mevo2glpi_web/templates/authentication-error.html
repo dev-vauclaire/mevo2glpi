@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Connexion impossible · mevo2glpi</title>
+    <link rel="stylesheet" href="{{ request.url_for('static', path='/css/app.css') }}">
+  </head>
+  <body class="auth-page">
+    <main class="auth-card" aria-labelledby="authentication-error-title">
+      <h1 id="authentication-error-title">Connexion impossible</h1>
+      <p class="notice notice--error" role="alert">{{ message }}</p>
+      <a class="button button--primary" href="/auth/login">Réessayer</a>
+    </main>
+  </body>
+</html>

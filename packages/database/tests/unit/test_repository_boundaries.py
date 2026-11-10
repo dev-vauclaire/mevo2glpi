@@ -15,6 +15,7 @@ ORM_MODELS = {
     "TicketCreationJob",
     "TicketCreationJobEvent",
     "WorkerRuntimeStatus",
+    "WebUser",
 }
 
 
@@ -27,6 +28,7 @@ ORM_MODELS = {
         ("ticket_creation_job.py", "TicketCreationJob"),
         ("ticket_creation_job_event.py", "TicketCreationJobEvent"),
         ("worker_runtime_status.py", "WorkerRuntimeStatus"),
+        ("web_user.py", "WebUser"),
     ],
 )
 def test_each_repository_module_imports_exactly_one_orm_model(

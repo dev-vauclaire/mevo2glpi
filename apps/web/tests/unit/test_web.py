@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from tests.support.web_auth import build_synthetic_web_authentication
 
 import mevo2glpi_web.services.jobs.downloads as jobs_module
 from mevo2glpi_common.release_identity import (
@@ -94,6 +95,7 @@ def web_context(tmp_path: Path) -> Iterator[WebTestContext]:
     audio_root = tmp_path / "audios"
     audio_root.mkdir()
     query = FakeGetAudioJob()
+    authentication = build_synthetic_web_authentication()
     app = create_app(
         audio_root=audio_root,
         list_audio_jobs=FakeListAudioJobs(),
@@ -104,8 +106,13 @@ def web_context(tmp_path: Path) -> Iterator[WebTestContext]:
         get_downloadable_audio=GetDownloadableAudio(audio_root, query),
         get_observability=FakeGetObservability(),  # type: ignore[arg-type]
         release_identity=RELEASE_IDENTITY,
+        authentication=authentication.services,
+        session_cookie_policy=authentication.cookie_policy,
+        required_auth_role="mevo2glpi-access",
+        oidc_transaction_secret=authentication.oidc_transaction_secret,
     )
     with TestClient(app) as client:
+        authentication.authenticate(client)
         yield WebTestContext(
             client=client,
             audio_root=audio_root,

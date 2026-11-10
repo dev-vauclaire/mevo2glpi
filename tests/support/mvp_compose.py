@@ -9,7 +9,8 @@ import secrets
 import socket
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -171,6 +172,8 @@ class MvpComposeEnvironment:
     compose_environment_file: Path
     compose_files: tuple[Path, ...]
     _database_password: str = field(repr=False)
+    _web_username: str = field(repr=False)
+    _web_password: str = field(repr=False)
     _runtime_secrets: tuple[str, ...] = field(repr=False)
     _images: tuple[str, ...] = field(repr=False)
     _port_reservations: tuple[socket.socket, ...] = field(repr=False)
@@ -389,9 +392,28 @@ class MvpComposeEnvironment:
             raise RuntimeError("Web has no unique HTTP binding")
         return f"http://127.0.0.1:{bindings[0]['HostPort']}"
 
-    def client(self) -> httpx.Client:
-        """Build a client for the test-only direct FastAPI binding."""
-        return httpx.Client(base_url=self.base_url, timeout=5)
+    @contextmanager
+    def client(self) -> Iterator[httpx.Client]:
+        """Build and authenticate a client against the test-only web binding."""
+        with httpx.Client(base_url=self.base_url, timeout=5) as client:
+            login_page = client.get("/auth/login")
+            login_page.raise_for_status()
+            csrf_token = client.cookies.get("mevo2glpi_login_csrf")
+            if not csrf_token:
+                raise RuntimeError("The synthetic login CSRF cookie is missing")
+            response = client.post(
+                "/auth/login",
+                data={
+                    "username": self._web_username,
+                    "password": self._web_password,
+                    "csrf_token": csrf_token,
+                    "next_path": "/",
+                },
+                follow_redirects=False,
+            )
+            if response.status_code != 303:
+                raise RuntimeError("The synthetic web account could not authenticate")
+            yield client
 
     @property
     def postgres_port(self) -> int:
@@ -455,6 +477,7 @@ class MvpComposeEnvironment:
             timeout_seconds=240,
         )
         self.wait_for_migration()
+        self._create_test_web_account()
         for service_name in (
             "postgres",
             "web",
@@ -462,6 +485,19 @@ class MvpComposeEnvironment:
             "worker-retention",
         ):
             self.wait_for_health(service_name)
+
+    def _create_test_web_account(self) -> None:
+        """Create one ephemeral local account through the production CLI."""
+        self.compose(
+            "exec",
+            "--no-TTY",
+            "web",
+            "mevo2glpi-web-users",
+            "create",
+            self._web_username,
+            input_text=f"{self._web_password}\n{self._web_password}\n",
+            timeout_seconds=30,
+        )
 
     def _release_port_reservations(self) -> None:
         """Release explicit test ports immediately before Docker binds them."""
@@ -558,6 +594,9 @@ def create_mvp_compose_environment(
     """Materialize private runtime configuration for one disposable MVP project."""
     provider_configuration = providers or ProviderConfiguration.synthetic()
     database_password = secrets.token_hex(24)
+    web_session_secret = secrets.token_urlsafe(48)
+    web_username = "synthetic-e2e-operator"
+    web_password = f"Synthetic-E2E-{secrets.token_urlsafe(24)}"
     postgres_password = runtime_root / "postgres.password"
     postgres_password.write_text(f"{database_password}\n", encoding="utf-8")
     postgres_password.chmod(0o640)
@@ -603,6 +642,12 @@ def create_mvp_compose_environment(
         "DATABASE_READY_TIMEOUT_SECONDS": "60",
         "DATABASE_READY_INTERVAL_SECONDS": "0.25",
         "PUBLIC_BASE_URL": effective_public_base_url,
+        "WEB_AUTH_MODE": "local",
+        "WEB_AUTH_SESSION_SECRET": web_session_secret,
+        "WEB_AUTH_SESSION_MAX_AGE_SECONDS": "1800",
+        "WEB_AUTH_COOKIE_SECURE": "false",
+        "WEB_AUTH_REQUIRED_ROLE": "mevo2glpi-access",
+        "WEB_AUTH_ROLES_CLAIM": "roles",
         "PUBLISHER_ENTRA_TENANT_ID": "00000000-0000-4000-8000-000000000001",
         "PUBLISHER_ENTRA_CLIENT_ID": "00000000-0000-4000-8000-000000000002",
         "PUBLISHER_MAILBOX_ID": "00000000-0000-4000-8000-000000000003",
@@ -679,6 +724,8 @@ def create_mvp_compose_environment(
         raise
     runtime_secrets = (
         database_password,
+        web_session_secret,
+        web_password,
         originating_phone_number_key_value,
         *provider_configuration.secrets,
     )
@@ -687,6 +734,8 @@ def create_mvp_compose_environment(
         compose_environment_file=compose_environment_file,
         compose_files=(BASE_COMPOSE_FILE, test_override, *extra_compose_files),
         _database_password=database_password,
+        _web_username=web_username,
+        _web_password=web_password,
         _runtime_secrets=runtime_secrets,
         _images=tuple(f"{project_name}-{service}" for service in CUSTOM_SERVICES),
         _port_reservations=port_reservations,
@@ -775,6 +824,9 @@ def _write_test_compose_override(runtime_root: Path) -> Path:
     restart: unless-stopped
 
   web:
+    environment:
+      APP_ENVIRONMENT: development
+      WEB_AUTH_COOKIE_SECURE: "false"
     ports:
       - target: 8000
         published: ${MEVO2GLPI_TEST_WEB_PORT}

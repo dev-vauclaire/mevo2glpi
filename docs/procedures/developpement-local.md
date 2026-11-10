@@ -10,10 +10,10 @@ Tous les comptes, messages et contenus utilisés localement doivent être
 fictifs. Aucun secret, certificat interne, audio réel ou donnée sensible ne doit
 être copié dans cet environnement.
 
-Pour découvrir Keycloak indépendamment de l'application avant toute intégration
-OIDC, suivre le [laboratoire Keycloak local](keycloak-local.md). Il utilise son
-propre Compose et sa propre base PostgreSQL ; il n'est pas nécessaire au
-fonctionnement local actuel de mevo2glpi.
+Le web exige une authentification. `.env.example` sélectionne le mode local par
+défaut. Pour tester le mode OIDC générique avec des identités synthétiques,
+suivre le [laboratoire Keycloak local](keycloak-local.md). Il utilise son
+propre Compose et sa propre base PostgreSQL.
 
 ## Prérequis
 
@@ -67,6 +67,35 @@ uv run --package mevo2glpi-database-migrations mevo2glpi-database-migrations
 ```
 
 La commande doit terminer avec le code `0` avant le lancement des applications.
+
+## Préparer l'authentification du web
+
+Le mode local ne nécessite aucun fournisseur externe. Après la migration,
+créer un compte synthétique avec la CLI interactive :
+
+```bash
+uv run --package mevo2glpi-web mevo2glpi-web-users create operator-local
+```
+
+Le mot de passe est demandé deux fois sans être affiché. Il doit contenir entre
+15 et 128 caractères et ne doit jamais reprendre un secret réel. Les autres
+opérations disponibles sont :
+
+```bash
+uv run --package mevo2glpi-web mevo2glpi-web-users list
+uv run --package mevo2glpi-web mevo2glpi-web-users disable operator-local
+uv run --package mevo2glpi-web mevo2glpi-web-users enable operator-local
+uv run --package mevo2glpi-web mevo2glpi-web-users reset-password operator-local
+```
+
+La désactivation et la réinitialisation du mot de passe invalident
+immédiatement les cookies déjà émis pour ce compte.
+
+Pour utiliser OIDC à la place, ne pas créer de compte local : démarrer le
+laboratoire Keycloak, puis remplacer les variables `WEB_AUTH_*` comme indiqué
+dans sa [procédure de raccordement](keycloak-local.md#raccorder-le-web-mevo2glpi).
+Il n'existe ni mode sans authentification, ni bascule automatique entre les
+deux modes.
 
 ## Démarrer les services externes de test
 
@@ -173,6 +202,10 @@ Vérifier le web :
 ```bash
 curl --fail http://127.0.0.1:8000/health
 ```
+
+Ouvrir ensuite `http://127.0.0.1:8000/` et se connecter avec le compte local ou
+OIDC préparé précédemment. Le endpoint `/health` reste volontairement public ;
+il ne valide pas la connexion d'un opérateur.
 
 Une seconde instance d'un même worker est refusée par son verrou PostgreSQL et
 se termine avec le code `3`.

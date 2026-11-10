@@ -32,6 +32,7 @@ from .mail_ingestion import (
 from .mail_ingestion_event import MailIngestionEvent
 from .ticket_creation_job import TicketCreationJob
 from .ticket_creation_job_event import TicketCreationJobEvent
+from .web_user import WebUser
 from .worker_runtime_status import WorkerRuntimeStatus
 
 __all__ = [
@@ -60,4 +61,5 @@ __all__ = [
     "WorkerRuntimeState",
     "WorkerRuntimeStatus",
     "WorkerServiceName",
+    "WebUser",
 ]

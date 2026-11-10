@@ -6,6 +6,10 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request, Response, status
 
+from mevo2glpi_web.auth.http import (
+    AuthenticatedCsrfProtection,
+    CsrfValidationError,
+)
 from mevo2glpi_web.controllers.responses import ManagedStreamingResponse
 from mevo2glpi_web.schemas import (
     AudioFileExtension,
@@ -58,12 +62,14 @@ class JobController:
         list_audio_job_events: ListAudioJobEvents,
         retry_audio_job: RetryAudioJob,
         get_downloadable_audio: GetDownloadableAudio,
+        csrf_protection: AuthenticatedCsrfProtection,
     ) -> None:
         self._list_audio_jobs = list_audio_jobs
         self._get_audio_job = get_audio_job
         self._list_audio_job_events = list_audio_job_events
         self._retry_audio_job = retry_audio_job
         self._get_downloadable_audio = get_downloadable_audio
+        self._csrf_protection = csrf_protection
 
     def list_jobs(
         self,
@@ -138,6 +144,13 @@ class JobController:
         audio_uuid: UUID,
     ) -> JobRetryAcceptedResponse:
         """Atomically rearm one failed or blocked job."""
+        try:
+            self._csrf_protection.validate(request)
+        except CsrfValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid CSRF token",
+            ) from error
         try:
             retried = self._retry_audio_job.execute(audio_uuid)
         except JobRetryConflictError as error:

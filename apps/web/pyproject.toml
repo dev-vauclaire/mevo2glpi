@@ -5,16 +5,22 @@ description = "Tableau web de consultation des traitements audio"
 license = "EUPL-1.2"
 requires-python = ">=3.12"
 dependencies = [
+    "authlib>=1.6.8,<2",
     "fastapi>=0.116,<1",
+    "httpx2>=2,<3",
+    "itsdangerous>=2.2,<3",
     "mevo2glpi-common>=0.1,<0.2",
     "mevo2glpi-database>=0.1,<0.2",
     "jinja2>=3.1,<4",
     "pydantic-settings>=2.10,<3",
+    "pwdlib[argon2]>=0.3,<1",
+    "python-multipart>=0.0.20,<1",
     "uvicorn>=0.35,<1",
 ]
 
 [project.scripts]
 mevo2glpi-web = "mevo2glpi_web.application:main"
+mevo2glpi-web-users = "mevo2glpi_web.auth.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.10.11,<0.11.0"]

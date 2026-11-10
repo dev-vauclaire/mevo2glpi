@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Connexion · mevo2glpi</title>
+    <link rel="stylesheet" href="{{ request.url_for('static', path='/css/app.css') }}">
+  </head>
+  <body class="auth-page">
+    <main class="auth-card" aria-labelledby="login-title">
+      <img
+        class="auth-card__logo"
+        src="{{ request.url_for('static', path='/images/logo_circulaire_claire.png') }}"
+        alt=""
+        width="72"
+        height="72"
+      >
+      <h1 id="login-title">Connexion à mevo2glpi</h1>
+      <p>Utilisez le compte applicatif communiqué par votre administrateur.</p>
+
+      {% if error %}
+      <p class="notice notice--error" role="alert">{{ error }}</p>
+      {% endif %}
+
+      <form class="auth-form" action="/auth/login" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next_path" value="{{ next_path }}">
+        <div class="field">
+          <label for="username">Identifiant</label>
+          <input
+            id="username"
+            name="username"
+            type="text"
+            autocomplete="username"
+            minlength="3"
+            maxlength="64"
+            required
+            autofocus
+          >
+        </div>
+        <div class="field">
+          <label for="password">Mot de passe</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            maxlength="128"
+            required
+          >
+        </div>
+        <button class="button button--primary" type="submit">Se connecter</button>
+      </form>
+    </main>
+  </body>
+</html>

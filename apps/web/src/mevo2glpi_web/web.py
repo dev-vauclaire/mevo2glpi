@@ -10,13 +10,22 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 from mevo2glpi_common.release_identity import (
     DeploymentEnvironment,
     ReleaseIdentity,
 )
 from mevo2glpi_web import __version__
+from mevo2glpi_web.auth.http import (
+    AuthenticatedCsrfProtection,
+    LoginCsrfProtection,
+    SessionCookiePolicy,
+)
+from mevo2glpi_web.auth.models import AuthMode
 from mevo2glpi_web.controllers import (
+    AuthenticationController,
+    AuthenticationServices,
     HealthController,
     JobController,
     ObservabilityController,
@@ -24,7 +33,9 @@ from mevo2glpi_web.controllers import (
     RejectionController,
     VersionController,
 )
+from mevo2glpi_web.middlewares import WebAuthenticationMiddleware
 from mevo2glpi_web.routes import (
+    create_authentication_router,
     create_health_router,
     create_jobs_router,
     create_observability_router,
@@ -64,6 +75,10 @@ def create_app(
     get_downloadable_audio: GetDownloadableAudio,
     get_observability: GetObservability,
     release_identity: ReleaseIdentity,
+    authentication: AuthenticationServices,
+    session_cookie_policy: SessionCookiePolicy,
+    required_auth_role: str,
+    oidc_transaction_secret: str | None = None,
     shutdown_callback: Callable[[], None] | None = None,
 ) -> FastAPI:
     """Compose controllers and routers around injected application services."""
@@ -94,12 +109,14 @@ def create_app(
     app.state.web_config = config
     app.mount("/static", StaticFiles(directory=_STATIC_DIRECTORY), name="static")
 
+    csrf_protection = AuthenticatedCsrfProtection()
     job_controller = JobController(
         list_audio_jobs=list_audio_jobs,
         get_audio_job=get_audio_job,
         list_audio_job_events=list_audio_job_events,
         retry_audio_job=retry_audio_job,
         get_downloadable_audio=get_downloadable_audio,
+        csrf_protection=csrf_protection,
     )
     version = VersionResponse(
         environment=config.release_identity.environment.value,
@@ -113,13 +130,41 @@ def create_app(
     observability_controller = ObservabilityController(get_observability)
     rejection_controller = RejectionController(list_rejected_ingestions)
     version_controller = VersionController(version)
+    authentication_controller = AuthenticationController(
+        templates=_TEMPLATES,
+        services=authentication,
+        cookie_policy=session_cookie_policy,
+        login_csrf=LoginCsrfProtection(secure=session_cookie_policy.secure),
+    )
 
     app.include_router(create_health_router(HealthController()))
+    app.include_router(create_authentication_router(authentication_controller))
     app.include_router(create_pages_router(page_controller))
     app.include_router(create_jobs_router(job_controller))
     app.include_router(create_rejections_router(rejection_controller))
     app.include_router(create_observability_router(observability_controller))
     app.include_router(create_version_router(version_controller))
+
+    app.add_middleware(
+        WebAuthenticationMiddleware,
+        session_manager=authentication.sessions,
+        cookie_policy=session_cookie_policy,
+        required_role=required_auth_role,
+    )
+    if authentication.mode is AuthMode.OIDC:
+        if oidc_transaction_secret is None:
+            raise ValueError("OIDC mode requires a transaction-session secret")
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key=oidc_transaction_secret,
+            session_cookie="mevo2glpi_oidc_transaction",
+            max_age=600,
+            path="/auth",
+            same_site="lax",
+            https_only=session_cookie_policy.secure,
+        )
+    elif oidc_transaction_secret is not None:
+        raise ValueError("local mode cannot configure an OIDC transaction session")
     return app
 
 

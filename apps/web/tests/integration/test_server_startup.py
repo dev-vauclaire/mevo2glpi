@@ -30,6 +30,11 @@ def test_composed_uvicorn_server_is_reachable_on_loopback(tmp_path: Path) -> Non
         database_url=("postgresql+psycopg://web:synthetic@127.0.0.1:5432/jobs"),
         web_host="127.0.0.1",
         web_port=random_port,
+        web_auth_mode="local",
+        web_auth_session_secret=(
+            "synthetic-test-session-secret-at-least-32-characters"
+        ),
+        web_auth_cookie_secure=False,
         _env_file=None,
     )
     server = build_server(settings)

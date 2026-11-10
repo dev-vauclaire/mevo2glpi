@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import timedelta
 from enum import IntEnum
 from typing import Protocol
 
 import uvicorn
+from authlib.integrations.starlette_client import OAuth
 from fastapi import FastAPI
 from pydantic import ValidationError
+from sqlalchemy.orm import Session, sessionmaker
 
 from mevo2glpi_database import (
     DatabaseConfigurationError,
@@ -17,6 +21,25 @@ from mevo2glpi_database import (
     create_session_factory,
 )
 
+from .auth.audit import LoggingAuthAuditRecorder
+from .auth.http import SessionCookiePolicy
+from .auth.local import LocalAuthenticator
+from .auth.models import AuthMode
+from .auth.oidc import (
+    OidcAuthenticator,
+    OidcConfiguration,
+    register_authlib_oidc_client,
+)
+from .auth.passwords import Argon2PasswordHasher
+from .auth.persistence import (
+    SqlAlchemyLocalAccountStore,
+)
+from .auth.sessions import (
+    ItsDangerousSessionSigner,
+    SessionCookieCodec,
+    SessionManager,
+)
+from .controllers import AuthenticationServices
 from .services import (
     GetAudioJob,
     GetDownloadableAudio,
@@ -27,7 +50,7 @@ from .services import (
     ObservabilityThresholds,
     RetryAudioJob,
 )
-from .settings import WebSettings
+from .settings import WebAuthMode, WebSettings
 from .web import create_app
 
 LOGGER = logging.getLogger(__name__)
@@ -55,10 +78,32 @@ class _Server(Protocol):
 class _ServerFactory(Protocol):
     def __call__(self, settings: WebSettings) -> _Server:
         """Return a configured web server."""
+
+
+@dataclass(frozen=True, slots=True)
+class WebAuthenticationComposition:
+    """Authentication dependencies safe to inject into the HTTP assembly."""
+
+    services: AuthenticationServices
+    cookie_policy: SessionCookiePolicy
+    oidc_transaction_secret: str | None
+
+
+class _AuthenticationFactory(Protocol):
+    def __call__(
+        self,
+        settings: WebSettings,
+        session_factory: sessionmaker[Session],
+    ) -> WebAuthenticationComposition:
+        """Build the selected fail-closed authentication mode."""
         ...
 
 
-def build_application(settings: WebSettings) -> FastAPI:
+def build_application(
+    settings: WebSettings,
+    *,
+    authentication_factory: _AuthenticationFactory | None = None,
+) -> FastAPI:
     """Compose FastAPI, canonical storage and lazy PostgreSQL connections."""
     if not isinstance(settings, WebSettings):
         raise TypeError("settings must be WebSettings")
@@ -73,6 +118,10 @@ def build_application(settings: WebSettings) -> FastAPI:
             connect_timeout_seconds=5,
         )
         session_factory = create_session_factory(engine)
+        authentication = (authentication_factory or _build_authentication)(
+            settings,
+            session_factory,
+        )
         get_audio_job = GetAudioJob(session_factory)
         observability_thresholds = ObservabilityThresholds.from_seconds(
             worker_stale_after=settings.dashboard_worker_stale_after_seconds,
@@ -102,6 +151,10 @@ def build_application(settings: WebSettings) -> FastAPI:
                 thresholds=observability_thresholds,
             ),
             release_identity=settings.release_identity,
+            authentication=authentication.services,
+            session_cookie_policy=authentication.cookie_policy,
+            required_auth_role=settings.web_auth_required_role,
+            oidc_transaction_secret=authentication.oidc_transaction_secret,
             shutdown_callback=engine.dispose,
         )
     except (DatabaseConfigurationError, OSError, RuntimeError, ValueError):
@@ -112,6 +165,69 @@ def build_application(settings: WebSettings) -> FastAPI:
         ) from None
 
 
+def _build_authentication(
+    settings: WebSettings,
+    session_factory: sessionmaker[Session],
+) -> WebAuthenticationComposition:
+    secret = settings.web_auth_session_secret.get_secret_value()
+    mode = AuthMode(settings.web_auth_mode.value)
+    account_store = (
+        SqlAlchemyLocalAccountStore(session_factory) if mode is AuthMode.LOCAL else None
+    )
+    session_manager = SessionManager(
+        SessionCookieCodec(ItsDangerousSessionSigner(secret)),
+        auth_mode=mode,
+        local_accounts=account_store,
+        lifetime=timedelta(seconds=settings.web_auth_session_max_age_seconds),
+    )
+    local_authenticator: LocalAuthenticator | None = None
+    oidc_authenticator: OidcAuthenticator | None = None
+    oidc_transaction_secret: str | None = None
+
+    if settings.web_auth_mode is WebAuthMode.LOCAL:
+        assert account_store is not None
+        local_authenticator = LocalAuthenticator(
+            account_store,
+            Argon2PasswordHasher(),
+            access_role=settings.web_auth_required_role,
+        )
+    else:
+        assert settings.web_auth_issuer_url is not None
+        assert settings.web_auth_client_id is not None
+        assert settings.web_auth_client_secret is not None
+        assert settings.web_auth_redirect_uri is not None
+        oidc_configuration = OidcConfiguration(
+            issuer=str(settings.web_auth_issuer_url),
+            client_id=settings.web_auth_client_id,
+            client_secret=settings.web_auth_client_secret.get_secret_value(),
+            redirect_uri=str(settings.web_auth_redirect_uri),
+            pseudonymization_secret=secret,
+            roles_claim=settings.web_auth_roles_claim,
+            required_role=settings.web_auth_required_role,
+        )
+        registry = OAuth()
+        oidc_authenticator = OidcAuthenticator(
+            register_authlib_oidc_client(registry, oidc_configuration),
+            oidc_configuration,
+        )
+        oidc_transaction_secret = secret
+
+    return WebAuthenticationComposition(
+        services=AuthenticationServices(
+            mode=mode,
+            sessions=session_manager,
+            audit=LoggingAuthAuditRecorder(),
+            local=local_authenticator,
+            oidc=oidc_authenticator,
+        ),
+        cookie_policy=SessionCookiePolicy(
+            secure=settings.web_auth_cookie_secure,
+            max_age_seconds=settings.web_auth_session_max_age_seconds,
+        ),
+        oidc_transaction_secret=oidc_transaction_secret,
+    )
+
+
 def build_server(settings: WebSettings) -> uvicorn.Server:
     """Create the single-process Uvicorn server used by the MVP."""
     application = build_application(settings)
@@ -120,6 +236,10 @@ def build_server(settings: WebSettings) -> uvicorn.Server:
         host=settings.web_host,
         port=settings.web_port,
         log_level="info",
+        # Uvicorn logs the complete query string. An OIDC callback carries a
+        # short-lived authorization code and state, so only the sanitized
+        # authentication logger must record this HTTP exchange.
+        access_log=False,
         proxy_headers=settings.web_trust_proxy_headers,
         forwarded_allow_ips="*" if settings.web_trust_proxy_headers else [],
     )
@@ -190,6 +310,7 @@ def main() -> int:
 
 __all__ = [
     "WebConfigurationError",
+    "WebAuthenticationComposition",
     "WebExitCode",
     "build_application",
     "build_server",

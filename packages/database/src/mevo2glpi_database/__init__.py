@@ -32,6 +32,7 @@ from .models import (
     RetentionStatus,
     TicketCreationJob,
     TicketCreationJobEvent,
+    WebUser,
     WorkerRuntimeState,
     WorkerRuntimeStatus,
     WorkerServiceName,
@@ -74,8 +75,12 @@ from .repositories import (
     StaleWorkerInstanceError,
     TicketCreationJobEventRepository,
     TicketCreationJobRepository,
+    WebUserNotFoundError,
+    WebUserRepository,
+    WebUserSnapshot,
     WorkerRuntimeSnapshot,
     WorkerRuntimeStatusRepository,
+    normalize_web_username,
 )
 
 __all__ = [
@@ -145,7 +150,12 @@ __all__ = [
     "WorkerRuntimeStatus",
     "WorkerRuntimeStatusRepository",
     "WorkerServiceName",
+    "WebUser",
+    "WebUserNotFoundError",
+    "WebUserRepository",
+    "WebUserSnapshot",
     "create_database_engine",
     "create_session_factory",
+    "normalize_web_username",
     "try_acquire_advisory_lock",
 ]

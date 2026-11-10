@@ -1,5 +1,6 @@
 """HTTP contract schemas exposed by the web application."""
 
+from .authentication import LocalLoginForm, LogoutForm
 from .jobs import (
     AudioFileExtension,
     JobDetailResponse,
@@ -41,7 +42,9 @@ __all__ = [
     "JobStage",
     "JobState",
     "JobSummaryResponse",
+    "LocalLoginForm",
     "ObservabilityResponse",
+    "LogoutForm",
     "OperationalAlertKind",
     "OperationalAlertResponse",
     "OperationalAlertSeverity",
