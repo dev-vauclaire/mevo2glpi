@@ -1,8 +1,10 @@
 # Authentification OIDC avec Keycloak
 
-> **Statut : évolution future, non planifiée et non implémentée.** Ce document
-> conserve une piste de conception. Il ne décrit pas une capacité disponible
-> ni un jalon engagé en développement, staging ou production.
+> **Statut : intégration applicative future, non implémentée.** Un laboratoire
+> Keycloak autonome est disponible pour l'apprentissage local, mais il ne
+> protège aucune route mevo2glpi. Ce document conserve la conception du futur
+> raccordement OIDC ; il ne décrit pas une capacité disponible en staging ou
+> en production.
 
 ## Contexte et objectif
 
@@ -10,11 +12,11 @@ Le dashboard mevo2glpi est actuellement protégé uniquement par son exposition
 sur le réseau interne. La cible est d'ajouter une authentification applicative
 avant d'étendre son accès ou les actions proposées aux opérateurs.
 
-Si cette évolution est engagée, sa première validation utilisera un Keycloak
-local et reproductible. L'intégration proposée cible le standard OpenID
-Connect (OIDC), et non des API privées de Keycloak, afin de pouvoir raccorder
-ultérieurement le Keycloak de l'établissement sans réécrire le cœur de
-l'authentification.
+Le [laboratoire Keycloak local](../procedures/keycloak-local.md) permet de
+manipuler manuellement les realms, clients, rôles et utilisateurs synthétiques.
+L'intégration applicative proposée cible le standard OpenID Connect (OIDC), et
+non des API privées de Keycloak, afin de pouvoir raccorder ultérieurement le
+Keycloak de l'établissement sans réécrire le cœur de l'authentification.
 
 ## Périmètre proposé pour une première expérimentation
 
@@ -246,7 +248,7 @@ Exemple exclusivement synthétique pour le développement :
 
 ```dotenv
 WEB_AUTH_MODE=oidc
-WEB_AUTH_ISSUER_URL=http://127.0.0.1:18084/realms/mevo2glpi-development
+WEB_AUTH_ISSUER_URL=http://localhost:18084/realms/mevo2glpi-development
 WEB_AUTH_CLIENT_ID=mevo2glpi-web
 WEB_AUTH_CLIENT_SECRET=development-only-client-secret
 WEB_AUTH_REDIRECT_URI=http://127.0.0.1:8000/auth/callback
@@ -261,14 +263,21 @@ Ces valeurs ne doivent jamais être réutilisées sur un environnement partagé.
 
 ## Keycloak de développement
 
-Keycloak rejoindra les services de test définis dans
-`infra/docker/development/docker-compose.test-services.yml`.
+Le laboratoire actuel est isolé dans
+`infra/docker/development/docker-compose.keycloak.yml`. Il démarre Keycloak et
+sa propre base PostgreSQL. Sur une base neuve, il importe la configuration
+versionnée
+`infra/docker/development/keycloak/mevo2glpi-development-realm.json`, puis
+conserve les manipulations dans un volume local. Il permet d'apprendre depuis
+la console d'administration sans modifier mevo2glpi.
 
-La cible locale est la suivante :
+La configuration locale reproductible est la suivante :
 
 - image officielle Keycloak épinglée par version et digest, jamais `latest` ;
 - démarrage avec `start-dev --import-realm` ;
 - port hôte `127.0.0.1:18084` ;
+- issuer exact
+  `http://localhost:18084/realms/mevo2glpi-development` ;
 - realm `mevo2glpi-development` ;
 - client confidentiel `mevo2glpi-web` ;
 - Standard Flow et PKCE activés ;
@@ -278,11 +287,13 @@ La cible locale est la suivante :
 - origine exacte `http://127.0.0.1:8000`, sans joker ;
 - rôle client `mevo2glpi-access` ;
 - un utilisateur synthétique autorisé et un utilisateur synthétique sans rôle ;
-- aucune persistance : le realm est réimporté lorsque le conteneur est recréé ;
+- session SSO expirant après 30 minutes d'inactivité ;
+- persistance PostgreSQL locale : un realm existant n'est jamais écrasé par
+  l'import au démarrage ;
 - aucun compte, secret ou certificat réel dans le dépôt.
 
-Le realm versionné utilisera des variables d'environnement pour ses secrets
-synthétiques. Le fichier d'exemple pourra contenir des valeurs locales
+Le realm versionné utilise des variables d'environnement pour ses secrets
+synthétiques. Le fichier d'exemple contient uniquement des valeurs locales
 explicitement identifiées comme non sensibles.
 
 `start-dev` est strictement réservé au développement. Le futur raccordement à
@@ -322,7 +333,7 @@ l'environnement local :
   déconnexion ;
 - l'ajout du jeton CSRF aux templates et aux appels JavaScript de retry ;
 - les settings conditionnels de l'application web ;
-- le service Keycloak et le realm de développement ;
+- la fixture versionnée du realm de développement ;
 - les tests unitaires, contractuels et d'intégration nécessaires ;
 - la documentation de développement local.
 

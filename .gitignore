@@ -55,6 +55,7 @@ dist/
 /infra/docker/environments/*/compose.env
 /infra/docker/environments/*/services/*.env
 /infra/docker/environments/*/secrets/
+/infra/docker/development/keycloak.env
 
 # Editors and operating systems
 .idea/

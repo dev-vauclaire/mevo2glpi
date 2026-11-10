@@ -10,6 +10,11 @@ Tous les comptes, messages et contenus utilisés localement doivent être
 fictifs. Aucun secret, certificat interne, audio réel ou donnée sensible ne doit
 être copié dans cet environnement.
 
+Pour découvrir Keycloak indépendamment de l'application avant toute intégration
+OIDC, suivre le [laboratoire Keycloak local](keycloak-local.md). Il utilise son
+propre Compose et sa propre base PostgreSQL ; il n'est pas nécessaire au
+fonctionnement local actuel de mevo2glpi.
+
 ## Prérequis
 
 - Git ;
@@ -206,6 +211,7 @@ Valider les manifestes sans démarrer les services :
 
 ```bash
 docker compose --file infra/docker/development/docker-compose.postgres.yml config --quiet
+docker compose --env-file infra/docker/development/keycloak.env.example --file infra/docker/development/docker-compose.keycloak.yml config --quiet
 docker compose --env-file .env.example --file infra/docker/development/docker-compose.test-services.yml config --quiet
 docker compose --env-file ./infra/docker/apps/.env.example --file infra/docker/apps/docker-compose.prod.yml config --quiet
 docker compose --env-file ./infra/docker/apps/staging.env.example --file infra/docker/apps/docker-compose.staging.yml config --quiet

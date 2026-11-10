@@ -1,0 +1,113 @@
+{
+  "realm": "mevo2glpi-development",
+  "enabled": true,
+  "displayName": "mevo2glpi development",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "ssoSessionIdleTimeout": 1800,
+  "clients": [
+    {
+      "clientId": "mevo2glpi-web",
+      "name": "mevo2glpi web",
+      "description": "Confidential OIDC client for the local mevo2glpi web application.",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_DEV_CLIENT_SECRET}",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "http://127.0.0.1:8000/auth/callback"
+      ],
+      "webOrigins": [
+        "http://127.0.0.1:8000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:8000/"
+      },
+      "protocolMappers": [
+        {
+          "name": "mevo2glpi client roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "mevo2glpi-web",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "roles": {
+    "client": {
+      "mevo2glpi-web": [
+        {
+          "name": "mevo2glpi-access",
+          "description": "Allow access to the mevo2glpi dashboard.",
+          "composite": false,
+          "clientRole": true
+        }
+      ]
+    }
+  },
+  "clientScopeMappings": {
+    "mevo2glpi-web": [
+      {
+        "client": "mevo2glpi-web",
+        "roles": [
+          "mevo2glpi-access"
+        ]
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "operator-authorized",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_DEV_AUTHORIZED_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "clientRoles": {
+        "mevo2glpi-web": [
+          "mevo2glpi-access"
+        ]
+      }
+    },
+    {
+      "username": "operator-forbidden",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_DEV_FORBIDDEN_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

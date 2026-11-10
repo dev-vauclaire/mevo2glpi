@@ -1,0 +1,98 @@
+name: mevo2glpi-development-keycloak
+
+# Laboratoire autonome et strictement local. `start-dev` et les identifiants
+# synthétiques ci-dessous ne doivent jamais être utilisés hors développement.
+services:
+  keycloak-db:
+    image: postgres:18.6-alpine3.24@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_DEV_DB_NAME:-keycloak}
+      POSTGRES_USER: ${KEYCLOAK_DEV_DB_USERNAME:-keycloak}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DEV_DB_PASSWORD:-development-only-database}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready --host=127.0.0.1 --username=$$POSTGRES_USER
+          --dbname=$$POSTGRES_DB
+      interval: 1s
+      timeout: 5s
+      retries: 60
+      start_period: 2s
+    volumes:
+      - keycloak-database-data:/var/lib/postgresql
+    networks:
+      - keycloak-database
+    shm_size: 128m
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.0@sha256:0f198be292568439d700cdbfb893e69a6009bb43a94a06a945b1d3d506c76b13
+    command:
+      - start-dev
+      - --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KEYCLOAK_DEV_DB_NAME:-keycloak}
+      KC_DB_USERNAME: ${KEYCLOAK_DEV_DB_USERNAME:-keycloak}
+      KC_DB_PASSWORD: ${KEYCLOAK_DEV_DB_PASSWORD:-development-only-database}
+      KC_HOSTNAME: http://localhost:${MEVO2GLPI_DEV_KEYCLOAK_PORT:-18084}
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_DEV_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_DEV_ADMIN_PASSWORD:-development-only-admin}
+      KEYCLOAK_DEV_CLIENT_SECRET: ${KEYCLOAK_DEV_CLIENT_SECRET:-development-only-client-secret}
+      KEYCLOAK_DEV_AUTHORIZED_PASSWORD: ${KEYCLOAK_DEV_AUTHORIZED_PASSWORD:-development-only-authorized}
+      KEYCLOAK_DEV_FORBIDDEN_PASSWORD: ${KEYCLOAK_DEV_FORBIDDEN_PASSWORD:-development-only-forbidden}
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - >-
+          { printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0;
+          grep 'HTTP/1.0 200'; } 0<>/dev/tcp/127.0.0.1/9000
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    ports:
+      - target: 8080
+        published: "${MEVO2GLPI_DEV_KEYCLOAK_PORT:-18084}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: ./keycloak/mevo2glpi-development-realm.json
+        target: /opt/keycloak/data/import/mevo2glpi-development-realm.json
+        read_only: true
+    networks:
+      - keycloak-database
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  keycloak-database:
+    name: mevo2glpi-development-keycloak-database-network
+
+volumes:
+  keycloak-database-data:
+    name: mevo2glpi-development-keycloak-database-data
