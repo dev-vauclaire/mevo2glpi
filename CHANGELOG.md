@@ -5,6 +5,39 @@ Ce fichier recense les changements fonctionnels et opérationnels destinés aux
 par les tags Git immuables `vX.Y.Z` ; les versions `0.1.0` des packages Python
 sont des métadonnées internes au workspace et ne constituent pas des releases.
 
+## v0.12.0 — 2026-11-11
+
+### Modifié
+
+- le worker d'automatisation utilise exclusivement le contrat synchrone
+  OpenAI-compatible, avec Parakeet local ou un provider externe compatible ;
+- les scénarios E2E aval utilisent le simulateur OpenAI-compatible et couvrent
+  le succès nominal, l'indisponibilité du provider, la reprise GLPI et la
+  rétention ;
+- les recettes Docker, la CI et les procédures d'exploitation sont alignées
+  avec ce contrat unique.
+
+### Supprimé
+
+- le client Transcribe AI historique, son polling et les callbacks de
+  persistance d'un identifiant distant ;
+- le simulateur Transcribe AI, ses images, ses variables d'environnement et
+  ses suites d'intégration spécifiques ;
+- les réglages `LEGACY_TRANSCRIPTION_*`,
+  `TRANSCRIPTION_POLL_INTERVAL_SECONDS` et
+  `TRANSCRIPTION_JOB_TIMEOUT_SECONDS`.
+
+### Migration et configuration requises
+
+- la migration Alembic `0011_drop_legacy_polling` supprime les événements
+  `transcription_submitted`, la colonne `transcription_provider_job_id` et
+  resserre la contrainte des événements ; son downgrade restaure le schéma,
+  mais pas les événements supprimés ;
+- `TRANSCRIPTION_PROVIDER` n'accepte plus que `openai_compatible` et les
+  variables `OPENAI_COMPATIBLE_TRANSCRIPTION_*` doivent être configurées ;
+- la mise à jour doit être effectuée sans job `pending` ou `processing`, après
+  validation du même déploiement en staging.
+
 ## v0.11.0 — 2026-11-10
 
 ### Ajouté
