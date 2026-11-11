@@ -148,20 +148,10 @@ class WorkerRuntimeContext(AbstractContextManager[RuntimeAutomationWorkerProtoco
                     checkpoint=runtime_checkpoint,
                 )
 
-            def guarded_transcription_should_stop() -> bool:
-                # The poller calls this before submission and around every
-                # poll, bounding work after loss of the PostgreSQL session lock.
-                if _stop_requested(self.should_stop):
-                    return True
-                runtime_checkpoint()
-                return False
-
             worker = build_automation_worker(
                 self.settings,
                 http_client=self._http_client,
                 session_factory=self._advisory_lock.open_session,
-                transcription_sleep=cooperative_wait,
-                transcription_should_stop=guarded_transcription_should_stop,
                 ownership_guard=runtime_checkpoint,
                 on_job_started=self._heartbeat.start_job,
             )
@@ -232,13 +222,6 @@ def worker_runtime(
         wait_once=wait_once,
         should_stop=should_stop,
     )
-
-
-def _stop_requested(should_stop: Callable[[], bool]) -> bool:
-    requested = should_stop()
-    if not isinstance(requested, bool):
-        raise TypeError("should_stop must return a boolean")
-    return requested
 
 
 __all__ = [

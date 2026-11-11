@@ -37,24 +37,6 @@ services:
     networks:
       - test-services
 
-  transcribe-ai-simulator:
-    <<: *simulator-runtime
-    image: mevo2glpi-development-transcribe-ai-simulator:0.1.0
-    build:
-      context: ../../..
-      dockerfile: infra/docker/providers/transcribe-ai-simulator/Dockerfile
-    environment:
-      TRANSCRIBE_AI_SIMULATOR_HOST: 0.0.0.0
-      TRANSCRIBE_AI_SIMULATOR_PORT: "8080"
-      TRANSCRIBE_AI_SIMULATOR_API_KEY: ${LEGACY_TRANSCRIPTION_API_KEY:?Set LEGACY_TRANSCRIPTION_API_KEY}
-    ports:
-      - target: 8080
-        published: "${MEVO2GLPI_DEV_TRANSCRIBE_AI_PORT:-18081}"
-        host_ip: 127.0.0.1
-        protocol: tcp
-    networks:
-      - test-services
-
   openai-transcription-simulator:
     <<: *simulator-runtime
     image: mevo2glpi-development-openai-transcription-simulator:0.1.0

@@ -1,16 +1,17 @@
-"""Compose the disposable MVP with the real provider integration stacks."""
+"""Compose the disposable MVP with its provider integration fixtures."""
 
 from __future__ import annotations
 
 import os
+import secrets
 from collections.abc import Iterator
-from importlib import import_module
 from pathlib import Path
 
 import pytest
 from tests.e2e.support.parakeet import (
     ParakeetComposeEnvironment,
     create_parakeet_compose_environment,
+    load_synthetic_speech,
 )
 from tests.support.mvp_compose import (
     MvpComposeEnvironment,
@@ -21,12 +22,6 @@ from tests.support.mvp_compose import (
 E2E_DIRECTORY = Path(__file__).resolve().parent
 E2E_COMPOSE_FILE = E2E_DIRECTORY / "compose.override.yaml"
 PARAKEET_E2E_COMPOSE_FILE = E2E_DIRECTORY / "compose.parakeet.override.yaml"
-
-# Transcribe AI owns a subtree fixture while GLPI is registered by the root plugin.
-_transcribe_ai_fixtures = import_module(
-    "apps.worker-automation.tests.integration.transcribe-ai.conftest"
-)
-transcribe_ai_environment = _transcribe_ai_fixtures.transcribe_ai_environment
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -41,13 +36,13 @@ def _prevent_parallel_e2e_suite() -> Iterator[None]:
 def e2e_environment(
     tmp_path_factory: pytest.TempPathFactory,
     glpi_environment,
-    transcribe_ai_environment,
 ) -> Iterator[MvpComposeEnvironment]:
-    """Start the applications with test-only PostgreSQL and provider networks."""
+    """Start the applications with PostgreSQL and the OpenAI contract double."""
     credentials = glpi_environment.credentials
+    transcription_api_key = secrets.token_urlsafe(32)
     providers = ProviderConfiguration(
-        transcription_base_url=transcribe_ai_environment.internal_base_url,
-        transcription_api_key=(transcribe_ai_environment.api_key.get_secret_value()),
+        transcription_base_url="http://openai-transcription:8080/v1",
+        transcription_api_key=transcription_api_key,
         glpi_base_url=glpi_environment.internal_base_url,
         glpi_username=credentials.username,
         glpi_password=credentials.password,
@@ -63,16 +58,18 @@ def e2e_environment(
         extra_compose_files=(E2E_COMPOSE_FILE,),
         extra_compose_environment={
             "MEVO2GLPI_E2E_GLPI_NETWORK": glpi_environment.network_name,
-            "MEVO2GLPI_E2E_TRANSCRIBE_AI_NETWORK": (
-                transcribe_ai_environment.network_name
-            ),
-            "TRANSCRIPTION_PROVIDER": "legacy_polling",
+            "OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY": transcription_api_key,
         },
-        # Avoid the `postgres` DNS alias owned by the Transcribe AI network.
+        extra_image_services=("openai-transcription-simulator",),
         database_host="mvp-postgres",
     )
     primary_error: BaseException | None = None
     try:
+        environment.compose(
+            "build",
+            "openai-transcription-simulator",
+            timeout_seconds=10 * 60,
+        )
         environment.build()
         environment.start()
         yield environment
@@ -88,6 +85,12 @@ def e2e_environment(
             primary_error.add_note(
                 "MVP E2E cleanup also failed; the primary error was preserved"
             )
+
+
+@pytest.fixture(scope="session")
+def synthetic_audio_bytes() -> bytes:
+    """Return the repository-owned, synthetic French speech fixture."""
+    return load_synthetic_speech()
 
 
 @pytest.fixture(scope="session")

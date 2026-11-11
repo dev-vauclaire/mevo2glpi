@@ -174,7 +174,6 @@ def test_job_detail_maps_retention_without_sensitive_persistence_fields() -> Non
     assert job.audio_deleted_at is None
     exposed_fields = asdict(job)
     assert "storage_key" not in exposed_fields
-    assert "transcription_provider_job_id" not in exposed_fields
 
 
 def test_job_detail_sanitizes_repository_failure_and_closes_session(
@@ -276,7 +275,6 @@ def _snapshot() -> JobSnapshot:
         audio_extension=AudioExtension.WAV,
         audio_size_bytes=20,
         glpi_ticket_id=42,
-        transcription_provider_job_id="provider-private-id",
         attempt_count=3,
         consecutive_retry_count=2,
         next_attempt_at=None,

@@ -16,8 +16,8 @@ La production utilise des services réels :
 - Parakeet comme provider nominal de transcription dans Dokploy ;
 - un volume Docker persistant pour les audios.
 
-Le provider historique `legacy_polling` reste disponible pour une bascule
-manuelle explicitement décidée. Aucun simulateur n'est déployé en production.
+Le worker consomme exclusivement le contrat de transcription
+OpenAI-compatible. Aucun simulateur n'est déployé en production.
 
 Cette procédure ne couvre pas la promotion d'une nouvelle version sur une
 installation existante, la rotation des certificats ou une migration
@@ -61,7 +61,6 @@ flowchart LR
     ENTRA["Microsoft Entra ID<br/>Identité applicative réelle"]
     EXCHANGE["Exchange Online<br/>Boîte vocale dédiée"]
     GLPI["GLPI de production<br/>API V2.3.0"]
-    LEGACY["Transcribe AI historique<br/>Repli manuel optionnel"]
     OPERATEUR["Poste opérateur<br/>Navigateur avec HTTPS"]
 
     subgraph LEGEND["Légende"]
@@ -87,7 +86,6 @@ flowchart LR
     AUTOMATION --> POSTGRES
     RETENTION --> POSTGRES
     AUTOMATION --> TRANSCRIBER
-    AUTOMATION -. "repli legacy explicite" .-> LEGACY
     AUTOMATION --> GLPI
     RETENTION --> GLPI
     AUTOMATION --> AUDIO
@@ -107,7 +105,7 @@ flowchart LR
     class TRANSCRIBER,WEB,MIGRATIONS,PUBLISHER,AUTOMATION,RETENTION container
     class POSTGRES database
     class AUDIO volume
-    class ENTRA,EXCHANGE,GLPI,LEGACY external
+    class ENTRA,EXCHANGE,GLPI external
     class OPERATEUR actor
     class L_VM vm
     class L_DOKPLOY dokploy
@@ -239,9 +237,6 @@ source de celle-ci.
 | `auth.docker.io`, `registry-1.docker.io`, `production.cloudfront.docker.com`, `ghcr.io`, `pkg-containers.githubusercontent.com` | adresses publiées par Docker Hub et GHCR | VM de production | autoriser la résolution pour télécharger les images de base |
 | suffixes `huggingface.co` et `hf.co`, avec leurs sous-domaines | adresses publiées par Hugging Face | VM de production | autoriser la résolution pour télécharger le modèle Parakeet épinglé |
 
-Si le repli `legacy_polling` doit être utilisable, ajouter également le nom du
-provider historique à cette matrice.
-
 #### Matrice des flux à autoriser au pare-feu
 
 | Source | Destination | Protocole | Port destination | Action | Usage |
@@ -256,10 +251,6 @@ provider historique à cette matrice.
 | VM de production | `login.microsoftonline.com` | TCP | 443 | autoriser en sortie | obtenir le jeton applicatif Entra |
 | VM de production | `graph.microsoft.com` | TCP | 443 | autoriser en sortie | lire et déplacer les messages Exchange |
 | VM de production | `NOM_GLPI_PRODUCTION` | TCP | 443 | autoriser en sortie | créer et consulter les tickets GLPI |
-| VM de production | `NOM_TRANSCRIBE_AI_PRODUCTION` | TCP | 443 | autoriser uniquement si le repli `legacy_polling` est maintenu | appeler le provider historique |
-
-Si le provider historique utilise une autorité interne, ajouter cette autorité
-au bundle système et valider sa chaîne TLS avant d'autoriser la bascule.
 
 La politique cible est de refuser tout autre flux. PostgreSQL, les workers et
 le moteur de transcription ne doivent jamais être publiés directement sur
@@ -633,10 +624,6 @@ arrêté avant le déploiement : aucune bascule automatique ou combinaison des
 deux modes n'existe. Le mode OIDC reste recommandé lorsqu'un fournisseur
 d'identité administré est disponible.
 
-Les variables `legacy_polling` peuvent rester renseignées pour une bascule
-manuelle ultérieure, mais aucun basculement automatique n'est réalisé. Un
-changement de provider constitue une opération contrôlée.
-
 Ne jamais créer ou committer un fichier `.env` réel. Les valeurs doivent être
 enregistrées directement dans le gestionnaire d'environnement Dokploy.
 
@@ -745,7 +732,7 @@ Identifier d'abord la frontière défaillante :
 1. authentification par certificat auprès de Microsoft Entra ID ;
 2. autorisation Exchange RBAC et accès Graph à la boîte ;
 3. persistance PostgreSQL et publication sur le volume audio ;
-4. transcription Parakeet ou provider historique ;
+4. transcription par le provider OpenAI-compatible ;
 5. création ou consultation GLPI ;
 6. rétention ;
 7. dashboard, Traefik et certificat opérateur.

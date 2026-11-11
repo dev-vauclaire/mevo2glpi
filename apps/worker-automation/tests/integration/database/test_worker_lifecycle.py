@@ -72,24 +72,15 @@ class MutableClock:
         return self.current
 
 
-class PersistingFakeTranscriber:
-    """Emulate the poller callback before returning a successful result."""
+class FakeTranscriber:
+    """Return one synchronous provider-neutral transcription result."""
 
-    def __init__(self, session_factory, *, provider_job_id: str = "provider-job-1"):
-        self._lifecycle = AutomationJobLifecycleService(
-            session_factory=session_factory,
-        )
-        self._provider_job_id = provider_job_id
+    def __init__(self) -> None:
         self.calls: list[Path] = []
 
     def transcribe(self, audio_path: Path) -> TranscriptionResult:
         self.calls.append(audio_path)
         audio_uuid = UUID(audio_path.stem)
-        self._lifecycle.record_transcription_submitted(
-            audio_uuid,
-            self._provider_job_id,
-            NOW,
-        )
         return TranscriptionResult(
             audio_path=audio_path,
             audio_uuid=audio_uuid,
@@ -126,7 +117,7 @@ class IdempotentFakeGlpiClient:
         return self._ticket_id
 
 
-class InterruptingPersistingFakeTranscriber(PersistingFakeTranscriber):
+class InterruptingFakeTranscriber(FakeTranscriber):
     def transcribe(self, audio_path: Path) -> TranscriptionResult:
         super().transcribe(audio_path)
         raise TranscriptionRetryRequired("shutdown_requested", audio_path)
@@ -173,7 +164,7 @@ def test_pending_job_completes_with_events_retention_and_unchanged_audio(
         originating_phone_number=ORIGINATING_PHONE_NUMBER,
         originating_phone_number_cipher=cipher,
     )
-    transcriber = PersistingFakeTranscriber(session_factory)
+    transcriber = FakeTranscriber()
     glpi_client = FakeGlpiClient(ticket_id=42)
     worker = _worker(
         session_factory,
@@ -208,7 +199,6 @@ def test_pending_job_completes_with_events_retention_and_unchanged_audio(
     assert job.status == JobStatus.COMPLETED.value
     assert job.stage == JobStage.FINALIZATION.value
     assert job.glpi_ticket_id == 42
-    assert job.transcription_provider_job_id == "provider-job-1"
     assert source_ingestion is not None
     assert source_ingestion.originating_phone_number_ciphertext is None
     assert job.attempt_count == 1
@@ -220,7 +210,6 @@ def test_pending_job_completes_with_events_retention_and_unchanged_audio(
     assert [event.event_type for event in events] == [
         JobEventType.JOB_CREATED.value,
         JobEventType.PROCESSING_STARTED.value,
-        JobEventType.TRANSCRIPTION_SUBMITTED.value,
         JobEventType.TRANSCRIPTION_SUCCEEDED.value,
         JobEventType.TICKET_CONFIRMED.value,
         JobEventType.JOB_COMPLETED.value,
@@ -239,7 +228,7 @@ def test_crash_recovery_retranscribes_processing_job_without_ticket(
     assert acquisition is not None
     assert acquisition.previous_status is JobStatus.PENDING
 
-    transcriber = PersistingFakeTranscriber(session_factory)
+    transcriber = FakeTranscriber()
     glpi_client = FakeGlpiClient()
     outcome = _worker(
         session_factory,
@@ -273,11 +262,6 @@ def test_crash_recovery_with_confirmed_ticket_finalizes_without_network(
     audio_uuid, audio_path = _add_pending_job(session_factory, tmp_path)
     lifecycle = AutomationJobLifecycleService(session_factory=session_factory)
     assert lifecycle.resume_or_claim_next(NOW) is not None
-    lifecycle.record_transcription_submitted(
-        audio_uuid,
-        "provider-job-before-crash",
-        NOW,
-    )
     lifecycle.record_transcription_succeeded(
         audio_uuid,
         NOW,
@@ -302,19 +286,15 @@ def test_crash_recovery_with_confirmed_ticket_finalizes_without_network(
         job = session.get(TicketCreationJob, audio_uuid)
     assert job is not None
     assert job.status == JobStatus.COMPLETED.value
-    assert job.transcription_provider_job_id == "provider-job-before-crash"
 
 
-def test_shutdown_after_submission_keeps_processing_then_restarts_cleanly(
+def test_shutdown_during_transcription_keeps_processing_then_restarts_cleanly(
     migrated_engine,
     tmp_path: Path,
 ) -> None:
     session_factory = create_session_factory(migrated_engine)
     audio_uuid, audio_path = _add_pending_job(session_factory, tmp_path)
-    interrupted_transcriber = InterruptingPersistingFakeTranscriber(
-        session_factory,
-        provider_job_id="provider-before-shutdown",
-    )
+    interrupted_transcriber = InterruptingFakeTranscriber()
     first_worker = _worker(
         session_factory,
         tmp_path,
@@ -338,14 +318,10 @@ def test_shutdown_after_submission_keeps_processing_then_restarts_cleanly(
         ).all()
     assert interrupted_job is not None
     assert interrupted_job.status == JobStatus.PROCESSING.value
-    assert interrupted_job.transcription_provider_job_id == ("provider-before-shutdown")
     assert interrupted_job.consecutive_retry_count == 0
     assert JobEventType.RETRY_SCHEDULED.value not in interrupted_events
 
-    restarted_transcriber = PersistingFakeTranscriber(
-        session_factory,
-        provider_job_id="provider-after-restart",
-    )
+    restarted_transcriber = FakeTranscriber()
     second_outcome = _worker(
         session_factory,
         tmp_path,
@@ -360,7 +336,6 @@ def test_shutdown_after_submission_keeps_processing_then_restarts_cleanly(
         completed_job = session.get(TicketCreationJob, audio_uuid)
     assert completed_job is not None
     assert completed_job.attempt_count == 2
-    assert completed_job.transcription_provider_job_id == "provider-after-restart"
 
 
 def test_restart_reconciles_ticket_created_before_local_id_was_persisted(
@@ -375,7 +350,7 @@ def test_restart_reconciles_ticket_created_before_local_id_was_persisted(
         _worker(
             session_factory,
             tmp_path,
-            PersistingFakeTranscriber(session_factory),
+            FakeTranscriber(),
             glpi_client,
             MutableClock(NOW),
             job_repository_factory=TicketPersistenceCrashRepository,
@@ -392,10 +367,7 @@ def test_restart_reconciles_ticket_created_before_local_id_was_persisted(
     outcome = _worker(
         session_factory,
         tmp_path,
-        PersistingFakeTranscriber(
-            session_factory,
-            provider_job_id="provider-after-glpi-crash",
-        ),
+        FakeTranscriber(),
         glpi_client,
         MutableClock(NOW + timedelta(seconds=1)),
     ).run_once()
@@ -430,7 +402,7 @@ def test_system_retry_is_ignored_until_due_then_becomes_eligible(
     )
 
     clock = MutableClock(NOW + timedelta(minutes=4))
-    transcriber = PersistingFakeTranscriber(session_factory)
+    transcriber = FakeTranscriber()
     glpi_client = FakeGlpiClient()
     worker = _worker(
         session_factory,
@@ -536,7 +508,7 @@ def test_completion_event_failure_rolls_back_status_and_retention_together(
     worker = _worker(
         session_factory,
         tmp_path,
-        PersistingFakeTranscriber(session_factory),
+        FakeTranscriber(),
         FakeGlpiClient(ticket_id=42),
         MutableClock(NOW),
     )

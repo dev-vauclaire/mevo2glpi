@@ -1,11 +1,10 @@
 # Simulateurs de staging
 
 Le Compose [`docker-compose.staging.yml`](docker-compose.staging.yml) déploie
-dans une même application Dokploy les trois contrats externes simulés :
+dans une même application Dokploy les deux contrats externes simulés :
 
 - Microsoft Graph, utilisé par le publisher pour découvrir et télécharger les
   messages vocaux ;
-- Transcribe AI, contrat historique asynchrone avec polling ;
 - une API de transcription synchrone OpenAI-compatible.
 
 GLPI de test reste une application Compose distincte dans `glpi-test/`. Le
@@ -16,14 +15,13 @@ de développement complet se trouve dans
 ## Déploiement
 
 Le réseau externe privé `mevo2glpi-staging-simulators-network` doit exister
-avant le déploiement. Dans Dokploy, les trois services rejoignent ce réseau et
+avant le déploiement. Dans Dokploy, les deux services rejoignent ce réseau et
 restent inaccessibles depuis l'hôte et Traefik. Le Compose leur attribue des
 alias DNS stables :
 
 | Service | Alias interne |
 | --- | --- |
 | Microsoft Graph | `mevo2glpi-staging-microsoft-graph` |
-| Transcribe AI | `mevo2glpi-staging-transcribe-ai` |
 | OpenAI-compatible | `mevo2glpi-staging-openai-transcription` |
 
 Copier les variables de [`staging.env.example`](staging.env.example) dans
@@ -48,7 +46,7 @@ docker compose \
 
 ## Garanties d'exécution
 
-Les trois services utilisent un utilisateur non privilégié, une racine en
+Les deux services utilisent un utilisateur non privilégié, une racine en
 lecture seule, un `tmpfs` borné, `cap_drop: ALL`, `no-new-privileges`, une limite
 de processus, un healthcheck et une rotation des journaux. Seul Microsoft Graph
 monte un répertoire hôte.
@@ -69,6 +67,5 @@ uv.lock
 ```
 
 Les contrats HTTP et les commandes d'administration sont décrits dans les
-README des simulateurs [Microsoft Graph](../../../providers/simulators/microsoft-graph-simulator/README.md),
-[Transcribe AI](../../../providers/simulators/transcribe-ai-simulator/README.md)
+README des simulateurs [Microsoft Graph](../../../providers/simulators/microsoft-graph-simulator/README.md)
 et [OpenAI-compatible](../../../providers/simulators/openai-transcription-simulator/README.md).

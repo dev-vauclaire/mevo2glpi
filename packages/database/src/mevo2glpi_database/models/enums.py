@@ -132,7 +132,6 @@ class JobEventType(StrEnum):
     JOB_CREATED = "job_created"
     PROCESSING_STARTED = "processing_started"
     PROCESSING_RESUMED = "processing_resumed"
-    TRANSCRIPTION_SUBMITTED = "transcription_submitted"
     TRANSCRIPTION_SUCCEEDED = "transcription_succeeded"
     TRANSCRIPTION_FAILED = "transcription_failed"
     RETRY_SCHEDULED = "retry_scheduled"

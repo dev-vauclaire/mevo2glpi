@@ -15,10 +15,9 @@ from tests.support.mvp_compose import (
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(45 * 60)]
 
 
-def test_mvp_stack_is_healthy_and_connected_to_real_provider_networks(
+def test_mvp_stack_is_healthy_and_connected_to_provider_networks(
     e2e_environment: MvpComposeEnvironment,
     glpi_environment,
-    transcribe_ai_environment,
 ) -> None:
     """Validate direct HTTP readiness, worker heartbeats and provider topology."""
     environment = e2e_environment
@@ -82,7 +81,7 @@ def test_mvp_stack_is_healthy_and_connected_to_real_provider_networks(
     }
     control_network = f"{environment.project_name}_e2e-control"
     glpi_network = glpi_environment.network_name
-    transcribe_network = transcribe_ai_environment.network_name
+    transcribe_network = f"{environment.project_name}-transcription"
     assert control_network in service_networks["postgres"]
     for service_name in ALL_SERVICES[1:]:
         assert control_network not in service_networks[service_name]
@@ -93,7 +92,12 @@ def test_mvp_stack_is_healthy_and_connected_to_real_provider_networks(
         assert glpi_network not in service_networks[service_name]
         assert transcribe_network not in service_networks[service_name]
 
-    _assert_tcp_reachable(environment, "worker-automation", "api", 5000)
+    _assert_tcp_reachable(
+        environment,
+        "worker-automation",
+        "openai-transcription",
+        8080,
+    )
     _assert_tcp_reachable(environment, "worker-automation", "glpi", 80)
     _assert_tcp_reachable(environment, "worker-retention", "glpi", 80)
 

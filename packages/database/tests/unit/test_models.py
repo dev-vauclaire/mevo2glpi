@@ -127,7 +127,6 @@ from mevo2glpi_database.models import (
                 "job_created",
                 "processing_started",
                 "processing_resumed",
-                "transcription_submitted",
                 "transcription_succeeded",
                 "transcription_failed",
                 "retry_scheduled",

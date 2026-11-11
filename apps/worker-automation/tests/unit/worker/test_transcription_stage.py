@@ -1,4 +1,4 @@
-"""Tests for Transcribe AI stage classification and persistence."""
+"""Tests for provider-independent transcription stage behavior."""
 
 from pathlib import Path
 from uuid import UUID
@@ -11,7 +11,6 @@ from mevo2glpi_worker_automation.transcription import (
     TranscriptionErrorCategory,
     TranscriptionResult,
     TranscriptionRetryRequired,
-    TranscriptionSubmissionCallbackError,
     TranscriptionTerminalError,
 )
 from mevo2glpi_worker_automation.worker import (
@@ -26,7 +25,6 @@ from ._pipeline_fakes import (
     SYNTHETIC_AUDIO,
     TRANSCRIPTION,
     FakeGlpiClient,
-    FakeJob,
     FakeState,
     FakeTranscriber,
     build_worker,
@@ -82,31 +80,6 @@ def test_invalid_transcription_result_type_is_system_blocked(
 
     assert isinstance(outcome, SystemBlockedOutcome)
     assert outcome.failure.technical_code == "invalid_result"
-    assert terminal_repository_calls(state) == []
-    assert state.eligible is True
-
-
-def test_submission_callback_error_latches_processing_without_probe(
-    tmp_path: Path,
-) -> None:
-    state = FakeState()
-    audio_path = write_audio(tmp_path)
-    worker = build_worker(
-        tmp_path,
-        state,
-        FakeTranscriber(
-            state,
-            [TranscriptionSubmissionCallbackError(audio_path)],
-        ),
-        FakeGlpiClient(state, []),
-    )
-
-    outcome = worker.run_once()
-
-    assert isinstance(outcome, SystemBlockedOutcome)
-    assert outcome.failure.category == "persistence"
-    assert outcome.failure.technical_code == "submission_persistence_failed"
-    assert outcome.automatic_probe is False
     assert terminal_repository_calls(state) == []
     assert state.eligible is True
 
@@ -171,26 +144,6 @@ def test_shutdown_during_transcription_keeps_processing_without_retry(
     assert terminal_repository_calls(state) == []
     assert state.eligible is True
     assert audio_path.read_bytes() == SYNTHETIC_AUDIO
-
-
-def test_provider_identifier_is_not_required_by_the_domain_result(
-    tmp_path: Path,
-) -> None:
-    state = FakeState(FakeJob(transcription_provider_job_id="provider-persisted"))
-    audio_path = write_audio(tmp_path)
-    glpi_client = FakeGlpiClient(state, [42])
-    worker = build_worker(
-        tmp_path,
-        state,
-        FakeTranscriber(state, [transcription_result(audio_path)]),
-        glpi_client,
-    )
-
-    outcome = worker.run_once()
-
-    assert isinstance(outcome, CompletedOutcome)
-    assert len(glpi_client.calls) == 1
-    assert "advance_after_transcription" in repository_call_names(state)
 
 
 @pytest.mark.parametrize("transcription", ["", "   ", "unsafe\x00content"])

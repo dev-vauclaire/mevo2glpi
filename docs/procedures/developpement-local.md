@@ -3,8 +3,8 @@
 ## Objectif et périmètre
 
 Cette procédure lance les applications Python depuis le workspace uv et leurs
-dépendances locales dans Docker : PostgreSQL 18, GLPI 11.0.7, Microsoft Graph,
-Transcribe AI et une API de transcription OpenAI-compatible.
+dépendances locales dans Docker : PostgreSQL 18, GLPI 11.0.7, Microsoft Graph
+et une API de transcription OpenAI-compatible.
 
 Tous les comptes, messages et contenus utilisés localement doivent être
 fictifs. Aucun secret, certificat interne, audio réel ou donnée sensible ne doit
@@ -99,11 +99,11 @@ deux modes.
 
 ## Démarrer les services externes de test
 
-Construire puis attendre les quatre services HTTP. MySQL est démarré
+Construire puis attendre les trois services HTTP. MySQL est démarré
 automatiquement comme dépendance privée de GLPI :
 
 ```bash
-docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml up --detach --build --wait microsoft-graph-simulator transcribe-ai-simulator openai-transcription-simulator glpi-test
+docker compose --env-file .env --file infra/docker/development/docker-compose.test-services.yml up --detach --build --wait microsoft-graph-simulator openai-transcription-simulator glpi-test
 ```
 
 Initialiser ensuite l'API V2, le client OAuth Password et la source GLPI
@@ -118,11 +118,10 @@ Les services sont accessibles uniquement depuis la machine locale :
 | Service | URL locale | Usage |
 | --- | --- | --- |
 | Microsoft Graph simulé | `http://127.0.0.1:18080` | boîte Exchange synthétique |
-| Transcribe AI simulé | `http://127.0.0.1:18081` | contrat historique avec polling |
 | Transcription OpenAI simulée | `http://127.0.0.1:18082/v1` | contrat synchrone sans modèle |
 | GLPI 11.0.7 | `http://127.0.0.1:18083` | API et interface de test |
 
-MySQL GLPI n'est jamais publié sur l'hôte. Les quatre ports HTTP peuvent être
+MySQL GLPI n'est jamais publié sur l'hôte. Les trois ports HTTP peuvent être
 modifiés avec les variables `MEVO2GLPI_DEV_*_PORT` documentées dans
 `.env.example` ;
 les URLs applicatives de `.env` doivent alors être adaptées.
@@ -131,7 +130,6 @@ Vérifier les services :
 
 ```bash
 curl --fail http://127.0.0.1:18080/health
-curl --fail http://127.0.0.1:18081/health
 curl --fail http://127.0.0.1:18082/health
 curl --fail http://127.0.0.1:18083/api.php/v2.3.0/doc.json
 ```
@@ -159,21 +157,11 @@ docker compose --env-file .env --file infra/docker/development/docker-compose.te
 
 ## Choisir le provider de transcription
 
-Les deux simulateurs peuvent rester démarrés, mais le worker n'en utilise qu'un
-à la fois.
-
-Le contrat OpenAI-compatible synchrone est sélectionné par défaut :
+Le worker utilise exclusivement le contrat OpenAI-compatible synchrone :
 
 ```dotenv
 TRANSCRIPTION_PROVIDER=openai_compatible
 OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL=http://127.0.0.1:18082/v1
-```
-
-Pour tester l'ancien contrat avec polling :
-
-```dotenv
-TRANSCRIPTION_PROVIDER=legacy_polling
-LEGACY_TRANSCRIPTION_BASE_URL=http://127.0.0.1:18081
 ```
 
 Le simulateur OpenAI-compatible retourne un texte fixe et ne mesure pas la
@@ -235,7 +223,7 @@ un projet staging ou production.
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run --all-packages pytest apps packages tests -m "not database and not deployment and not glpi and not transcription_model and not transcribe_ai and not e2e" --maxfail=1
+uv run --all-packages pytest apps packages tests -m "not database and not deployment and not glpi and not transcription_model and not e2e" --maxfail=1
 uv run pytest providers --maxfail=1
 uv run --all-packages pytest -m database -vv --maxfail=1
 ```

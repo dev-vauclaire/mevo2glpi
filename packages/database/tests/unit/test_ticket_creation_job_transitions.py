@@ -25,7 +25,6 @@ NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
 def test_resume_processing_has_priority_and_increments_real_attempt() -> None:
     session = _session()
     processing = _job(status=JobStatus.PROCESSING, stage=JobStage.GLPI_CREATION)
-    processing.transcription_provider_job_id = "abandoned-provider-job"
     session.scalars.return_value = _scalar_result(processing)
 
     acquisition = TicketCreationJobRepository(session).resume_or_claim_next(NOW)
@@ -39,16 +38,14 @@ def test_resume_processing_has_priority_and_increments_real_attempt() -> None:
     assert acquisition.job.status is JobStatus.PROCESSING
     assert acquisition.job.stage is JobStage.TRANSCRIPTION
     assert acquisition.job.attempt_count == 3
-    assert acquisition.job.transcription_provider_job_id is None
     assert session.scalars.call_count == 1
     session.add.assert_not_called()
 
 
-def test_resume_finalization_preserves_provider_identifier() -> None:
+def test_resume_finalization_preserves_ticket_identifier() -> None:
     session = _session()
     processing = _job(status=JobStatus.PROCESSING, stage=JobStage.FINALIZATION)
     processing.glpi_ticket_id = 42
-    processing.transcription_provider_job_id = "provider-before-crash"
     session.scalars.return_value = _scalar_result(processing)
 
     acquisition = TicketCreationJobRepository(session).resume_or_claim_next(NOW)
@@ -56,7 +53,6 @@ def test_resume_finalization_preserves_provider_identifier() -> None:
     assert acquisition is not None
     assert acquisition.job.stage is JobStage.FINALIZATION
     assert acquisition.job.glpi_ticket_id == 42
-    assert acquisition.job.transcription_provider_job_id == "provider-before-crash"
 
 
 def test_due_retry_is_claimed_before_pending_and_preserves_retry_counter() -> None:
@@ -129,11 +125,6 @@ def test_transcription_and_ticket_boundaries_mutate_only_the_job() -> None:
     session.get.return_value = job
     repository = TicketCreationJobRepository(session)
 
-    submitted = repository.record_transcription_submitted(
-        job.uuid,
-        "provider-123",
-        NOW,
-    )
     succeeded = repository.advance_after_transcription(
         job.uuid,
         NOW + timedelta(seconds=1),
@@ -144,8 +135,6 @@ def test_transcription_and_ticket_boundaries_mutate_only_the_job() -> None:
         NOW + timedelta(seconds=2),
     )
 
-    assert submitted.changed is True
-    assert submitted.job.transcription_provider_job_id == "provider-123"
     assert succeeded.stage is JobStage.GLPI_CREATION
     assert ticketed.stage is JobStage.FINALIZATION
     assert ticketed.glpi_ticket_id == 1234
@@ -153,32 +142,9 @@ def test_transcription_and_ticket_boundaries_mutate_only_the_job() -> None:
     session.add.assert_not_called()
 
 
-def test_provider_submission_is_idempotent_only_for_the_same_identifier() -> None:
+def test_transcription_advance_requires_only_the_processing_stage() -> None:
     session = _session()
     job = _job(status=JobStatus.PROCESSING, stage=JobStage.TRANSCRIPTION)
-    job.transcription_provider_job_id = "provider-123"
-    session.get.return_value = job
-    repository = TicketCreationJobRepository(session)
-
-    mutation = repository.record_transcription_submitted(
-        job.uuid,
-        "provider-123",
-        NOW,
-    )
-
-    assert mutation.job.transcription_provider_job_id == "provider-123"
-    assert mutation.changed is False
-    session.add.assert_not_called()
-    session.flush.assert_not_called()
-
-    with pytest.raises(InvalidJobTransitionError, match="different"):
-        repository.record_transcription_submitted(job.uuid, "provider-456", NOW)
-
-
-def test_transcription_advance_does_not_require_a_remote_identifier() -> None:
-    session = _session()
-    job = _job(status=JobStatus.PROCESSING, stage=JobStage.TRANSCRIPTION)
-    job.transcription_provider_job_id = "provider-persisted"
     session.get.return_value = job
 
     snapshot = TicketCreationJobRepository(session).advance_after_transcription(
@@ -187,7 +153,6 @@ def test_transcription_advance_does_not_require_a_remote_identifier() -> None:
     )
 
     assert snapshot.stage is JobStage.GLPI_CREATION
-    assert snapshot.transcription_provider_job_id == "provider-persisted"
     session.add.assert_not_called()
     session.flush.assert_called_once()
 
@@ -265,11 +230,7 @@ def test_transition_rejects_wrong_persisted_stage_without_mutation() -> None:
     session.get.return_value = job
 
     with pytest.raises(InvalidJobTransitionError):
-        TicketCreationJobRepository(session).record_transcription_submitted(
-            job.uuid,
-            "provider-123",
-            NOW,
-        )
+        TicketCreationJobRepository(session).advance_after_transcription(job.uuid, NOW)
 
     session.add.assert_not_called()
     session.flush.assert_not_called()
@@ -316,7 +277,6 @@ def _job(
         audio_extension=AudioExtension.WAV.value,
         audio_size_bytes=42,
         glpi_ticket_id=None,
-        transcription_provider_job_id=None,
         attempt_count=2,
         consecutive_retry_count=0,
         next_attempt_at=None,

@@ -56,7 +56,6 @@ class JobSnapshot:
     audio_extension: AudioExtension
     audio_size_bytes: int
     glpi_ticket_id: int | None
-    transcription_provider_job_id: str | None
     attempt_count: int
     consecutive_retry_count: int
     next_attempt_at: datetime | None
@@ -93,14 +92,6 @@ class JobAcquisition:
     job: JobSnapshot
     previous_status: JobStatus
     resumed: bool
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class JobMutation:
-    """Describe a job mutation and whether persisted state actually changed."""
-
-    job: JobSnapshot
-    changed: bool
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -304,7 +295,6 @@ class TicketCreationJobRepository:
 
         job.status = JobStatus.PENDING.value
         job.stage = None
-        job.transcription_provider_job_id = None
         job.consecutive_retry_count = 0
         job.next_attempt_at = None
         _clear_job_error(job)
@@ -337,8 +327,6 @@ class TicketCreationJobRepository:
             if job.glpi_ticket_id is not None
             else JobStage.TRANSCRIPTION.value
         )
-        if job.glpi_ticket_id is None:
-            job.transcription_provider_job_id = None
         job.attempt_count += 1
         if job.first_started_at is None:
             job.first_started_at = now
@@ -352,27 +340,6 @@ class TicketCreationJobRepository:
             previous_status=previous_status,
             resumed=resumed,
         )
-
-    def record_transcription_submitted(
-        self,
-        job_uuid: UUID,
-        provider_job_id: str,
-        now: datetime,
-    ) -> JobMutation:
-        """Persist a remote transcription identifier before polling it."""
-        provider_job_id = _validate_provider_job_id(provider_job_id)
-        now = validate_aware_datetime(now, "now")
-        job = self._lock_processing_job(job_uuid, JobStage.TRANSCRIPTION)
-        if job.transcription_provider_job_id is not None:
-            if job.transcription_provider_job_id == provider_job_id:
-                return JobMutation(job=_to_snapshot(job), changed=False)
-            raise InvalidJobTransitionError(
-                "a different transcription provider identifier is already persisted"
-            )
-        job.transcription_provider_job_id = provider_job_id
-        job.updated_at = now
-        self._session.flush()
-        return JobMutation(job=_to_snapshot(job), changed=True)
 
     def advance_after_transcription(
         self,
@@ -623,19 +590,6 @@ def _validate_error_scope(error_scope: ErrorScope) -> ErrorScope:
     return error_scope
 
 
-def _validate_provider_job_id(provider_job_id: str) -> str:
-    if not isinstance(provider_job_id, str):
-        raise TypeError("provider_job_id must be a string")
-    if (
-        not provider_job_id
-        or provider_job_id != provider_job_id.strip()
-        or len(provider_job_id) > 255
-        or any(not character.isprintable() for character in provider_job_id)
-    ):
-        raise ValueError("provider_job_id must be a printable identifier")
-    return provider_job_id
-
-
 def _to_snapshot(job: TicketCreationJob) -> JobSnapshot:
     return JobSnapshot(
         uuid=job.uuid,
@@ -645,7 +599,6 @@ def _to_snapshot(job: TicketCreationJob) -> JobSnapshot:
         audio_extension=AudioExtension(job.audio_extension),
         audio_size_bytes=job.audio_size_bytes,
         glpi_ticket_id=job.glpi_ticket_id,
-        transcription_provider_job_id=job.transcription_provider_job_id,
         attempt_count=job.attempt_count,
         consecutive_retry_count=job.consecutive_retry_count,
         next_attempt_at=job.next_attempt_at,
@@ -668,7 +621,6 @@ __all__ = [
     "JobAcquisition",
     "JobAlertSummary",
     "JobCursor",
-    "JobMutation",
     "JobNotFoundError",
     "JobPage",
     "JobSnapshot",

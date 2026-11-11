@@ -33,7 +33,6 @@ flowchart LR
             subgraph SIMULATORS_APP["Projet Compose<br/>Simulateurs"]
                 direction LR
                 GRAPH["microsoft-graph-simulator"]
-                TRANSCRIBE_AI["transcribe-ai-simulator"]
                 OPENAI_MOCK["openai-transcription-simulator"]
             end
 
@@ -81,7 +80,6 @@ flowchart LR
     end
 
     GRAPH --> PUBLISHER
-    TRANSCRIBE_AI -. "repli legacy" .-> AUTOMATION
     OPENAI_MOCK -. "contrat OpenAI de test" .-> AUTOMATION
     AUTOMATION --> TRANSCRIBER
     MIGRATIONS --> POSTGRES
@@ -111,7 +109,7 @@ flowchart LR
     classDef external fill:#fef2f2,stroke:#b91c1c,color:#111827,stroke-width:2px
     classDef actor fill:#fdf2f8,stroke:#be185d,color:#111827,stroke-width:2px
 
-    class GRAPH,TRANSCRIBE_AI,OPENAI_MOCK,TRANSCRIBER,WEB,MIGRATIONS,PUBLISHER,AUTOMATION,RETENTION,GLPI_LOCAL,GLPI_BOOTSTRAP container
+    class GRAPH,OPENAI_MOCK,TRANSCRIBER,WEB,MIGRATIONS,PUBLISHER,AUTOMATION,RETENTION,GLPI_LOCAL,GLPI_BOOTSTRAP container
     class POSTGRES,GLPI_DB database
     class AUDIO volume
     class GLPI_EXTERNAL external
@@ -135,8 +133,8 @@ flowchart LR
     style LEGEND fill:#ffffff,stroke:#64748b,color:#111827,stroke-dasharray:4 4
 ```
 
-Microsoft Graph, le contrat Transcribe AI historique et le contrat de
-transcription OpenAI-compatible sont réunis dans un Compose de simulateurs. Le
+Microsoft Graph et le contrat de transcription OpenAI-compatible sont réunis
+dans un Compose de simulateurs. Le
 simulateur Graph ne teste donc pas l'authentification Microsoft Entra ID. La
 transcription Parakeet, les services mevo2glpi et PostgreSQL sont déployés dans
 Dokploy. GLPI est soit l'instance de test externe, soit le projet Compose
@@ -144,8 +142,8 @@ autonome optionnel affiché dans le schéma.
 
 Les déploiements Dokploy sont séparés :
 
-1. **Simulateurs**, projet Compose avec Microsoft Graph, Transcribe AI et le
-   contrat OpenAI-compatible ;
+1. **Simulateurs**, projet Compose avec Microsoft Graph et le contrat
+   OpenAI-compatible ;
 2. **Transcription**, projet Compose avec Parakeet ;
 3. **Applications (mevo2glpi)**, projet Compose avec le web, la migration
    one-shot et les trois workers ;
@@ -505,12 +503,11 @@ Watch paths recommandés :
 infra/docker/providers/glpi-test/**
 .dockerignore
 
-# Simulateurs Microsoft Graph, Transcribe AI et OpenAI-compatible
+# Simulateurs Microsoft Graph et OpenAI-compatible
 providers/simulators/**
 infra/docker/providers/docker-compose.staging.yml
 infra/docker/providers/staging.env.example
 infra/docker/providers/microsoft-graph-simulator/**
-infra/docker/providers/transcribe-ai-simulator/**
 infra/docker/providers/openai-transcription-simulator/**
 .dockerignore
 pyproject.toml
@@ -541,7 +538,6 @@ Le projet Compose Simulateurs doit rejoindre
 alias :
 
 - `mevo2glpi-staging-microsoft-graph` pour Microsoft Graph ;
-- `mevo2glpi-staging-transcribe-ai` pour Transcribe AI ;
 - `mevo2glpi-staging-openai-transcription` pour le contrat
   OpenAI-compatible.
 
@@ -635,9 +631,6 @@ Contrôler les invariants suivants :
   local ;
 - `TRANSCRIPTION_API_KEY` est identique dans les projets transcription et
   applications ;
-- `TRANSCRIBE_AI_SIMULATOR_API_KEY` est identique dans le service Transcribe AI
-  du projet Simulateurs et le projet Applications si le repli legacy doit
-  rester testable ;
 - en fonctionnement nominal avec Parakeet,
   `OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY` peut être distincte des autres
   clés ; pour tester ce mock, la synchroniser avec `TRANSCRIPTION_API_KEY` et
@@ -660,9 +653,9 @@ Contrôler les invariants suivants :
 - `RETENTION_CHECK_INTERVAL_HOURS=6` cadence les contrôles GLPI et les scans
   des rejets. La purge traite au plus 100 ingestions par transaction.
 
-Le provider nominal est `openai_compatible`. Le mock Transcribe AI reste
-disponible uniquement pour une bascule legacy explicite ; aucun basculement
-automatique n'est réalisé.
+Le worker n'accepte que le contrat `openai_compatible`. Le mock valide ce
+contrat sans charger de modèle ; Parakeet constitue le provider nominal de la
+recette fonctionnelle.
 
 ### Configurer le domaine du web
 
@@ -689,8 +682,8 @@ est saine avant de continuer.
 ### 2. Déployer les simulateurs
 
 Déployer le projet Compose Simulateurs, qui contient
-`microsoft-graph-simulator`, `transcribe-ai-simulator` et
-`openai-transcription-simulator`, puis attendre que les trois services soient
+`microsoft-graph-simulator` et `openai-transcription-simulator`, puis attendre
+que les deux services soient
 `healthy`. Aucun port ne doit être publié vers l'hôte ou Traefik.
 
 Dans le terminal du mock Microsoft Graph :
@@ -699,19 +692,13 @@ Dans le terminal du mock Microsoft Graph :
 mevo2glpi-microsoft-graph-simulator-admin list-scenarios
 ```
 
-Dans le terminal du mock Transcribe AI :
-
-```bash
-mevo2glpi-transcribe-ai-simulator-smoke
-```
-
 Dans le terminal du mock OpenAI-compatible :
 
 ```bash
 python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=5).read().decode())'
 ```
 
-Ne pas poursuivre si l'un de ces trois contrôles échoue. Le mock
+Ne pas poursuivre si l'un de ces deux contrôles échoue. Le mock
 OpenAI-compatible valide le contrat synchrone sans mesurer la qualité du modèle
 Parakeet ; la stack Transcription reste nécessaire pour cette recette.
 

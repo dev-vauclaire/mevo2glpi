@@ -111,8 +111,6 @@ adoptant doit intégrer les contrôles suivants à sa propre analyse de risques 
   car il construit et charge le modèle réel ;
 - la validation du publisher reste structurelle : le décodage effectif relève
   de FFmpeg dans le provider de transcription ;
-- suite historique Transcribe AI dépendante d'images qui peuvent ne pas être
-  accessibles à un autre établissement ;
 - aucune garantie de compatibilité GLPI au-delà de la version qualifiée ;
 - aucune restauration croisée de PostgreSQL, du volume, d'Exchange et de GLPI
   n'est fournie par l'application.

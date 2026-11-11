@@ -11,9 +11,8 @@ Le MVP reste volontairement mono-worker. Une connexion PostgreSQL dédiée
 conserve un verrou advisory pendant toute la durée du processus ; une seconde
 instance est refusée avant de traiter un job.
 
-Le provider nominal est l'API synchrone OpenAI-compatible déployée avec
-Parakeet. L'adaptateur historique à polling reste disponible par configuration
-explicite, sans basculement automatique entre les deux providers.
+La transcription utilise exclusivement une API synchrone OpenAI-compatible,
+déployée avec Parakeet dans l'infrastructure fournie.
 
 ## Entrées et sorties
 
@@ -41,7 +40,7 @@ sont exclusivement des valeurs PostgreSQL.
 | Résultat | Signification |
 | --- | --- |
 | `IdleOutcome` | Aucun job n'est éligible ; contient l'attente avant une nouvelle sélection. |
-| `InterruptedOutcome` | Un arrêt coopératif a interrompu le polling ; le job reste `processing` sans faux retry. |
+| `InterruptedOutcome` | Un arrêt coopératif a interrompu le traitement ; le job reste `processing` sans faux retry. |
 | `RetryOutcome` | Une indisponibilité est persistée avec sa prochaine échéance. |
 | `CompletedOutcome` | Le ticket est confirmé et le job est durablement finalisé. |
 | `FailedOutcome` | Une erreur terminale propre au job est persistée. |
@@ -91,9 +90,7 @@ flowchart TD
     Read --> TicketKnown{glpi_ticket_id connu ?}
 
     TicketKnown -->|oui| Finalize[Finaliser sans appel réseau]
-    TicketKnown -->|non| Transcribe[Adaptateur de transcription sélectionné]
-    Transcribe -.->|legacy : job distant créé| ProviderId[Persister transcription_provider_job_id]
-    ProviderId --> Transcribe
+    TicketKnown -->|non| Transcribe[API de transcription OpenAI-compatible]
     Transcribe -->|succès| StageGlpi[Persister stage glpi_creation]
     Transcribe -->|échec audio terminal| Fallback[Auditer + contenu explicatif expurgé]
     Fallback --> StageGlpi
@@ -123,13 +120,11 @@ flowchart TD
 ```
 
 Chaque mutation SQL est validée avant l'étape suivante. Aucune transaction ne
-reste ouverte pendant un appel de transcription, un polling, un appel GLPI ou un
-sommeil. Les frontières de reprise importantes sont donc durables :
+reste ouverte pendant un appel de transcription, un appel GLPI ou un sommeil.
+Les frontières de reprise importantes sont donc durables :
 
 - la date de réception Exchange est relue depuis l'ingestion liée au job dans
   la même transaction que son acquisition ;
-- avec le provider historique uniquement, l'identifiant distant est persisté
-  immédiatement après le `POST`, avant le premier `GET` de polling ;
 - l'identifiant GLPI est persisté avant la transition `completed` ;
 - l'état terminal, la rétention et l'événement associé sont écrits dans une
   même transaction.
@@ -148,16 +143,6 @@ ingestion absente ou incohérente bloque le job avec le code expurgé
 `source_received_at_missing`, sans inventer de date de repli et avant tout appel
 au provider de transcription ou à GLPI. Un ticket dont l'identifiant est déjà
 persisté reste finalisé sans dépendre de cette métadonnée.
-
-Si la persistance de l'identifiant distant legacy échoue juste après un `POST`
-accepté, l'exception d'origine est remplacée par le code expurgé
-`submission_persistence_failed`. Le worker traite cette ambiguïté comme un
-blocage **système**, jamais comme un échec terminal du job : celui-ci reste
-`processing`, mais le blocage est verrouillé et aucune nouvelle soumission
-automatique n'est effectuée. Une reprise exige donc une décision opérateur ou
-un redémarrage contrôlé. Le job distant accepté peut devenir orphelin ; cette
-limite est inévitable tant que le provider n'accepte ni UUID fourni par
-l'appelant ni clé d'idempotence.
 
 ## Retries, échecs et blocages
 
@@ -190,10 +175,9 @@ le job en retry d'être repris avant `next_attempt_at`.
 
 ### Transcription dégradée avec création de ticket
 
-Un rejet audio explicite du provider (`400`, `413`, `415`, `422` pour le
-contrat OpenAI compatible), son erreur HTTP `500`, un statut distant legacy
-`FAILED`, une soumission legacy rejetée, un texte vide/invalide ou l'épuisement
-des retries de transcription n'arrête plus le pipeline. Le worker ajoute un
+Un rejet audio explicite du provider (`400`, `413`, `415`, `422`), son erreur
+HTTP `500`, un texte vide ou invalide, ou l'épuisement des retries de
+transcription n'arrête plus le pipeline. Le worker ajoute un
 événement `transcription_failed`, construit un contenu explicatif fixe avec un
 code technique expurgé, puis crée le ticket GLPI. L'audio suit ensuite la
 rétention normale d'un job `completed` afin de rester disponible à l'opérateur.
@@ -223,31 +207,24 @@ explicitement depuis le web après avoir corrigé la cause.
 ### Blocage système
 
 Une erreur d'authentification, de configuration, de contrat global ou
-d'accès à la racine audio produit `SystemBlockedOutcome`. L'échec de
-persistance d'un identifiant distant accepté appartient aussi à cette
-catégorie. Le job reste `processing` et le heartbeat passe à `blocked`.
+d'accès à la racine audio produit `SystemBlockedOutcome`. Le job reste
+`processing` et le heartbeat passe à `blocked`.
 
 Deux politiques sont explicites : une panne sondable sans effet distant
 ambigu, telle qu'une racine audio momentanément indisponible, est réévaluée
 après 60 secondes par défaut ; une réponse acceptée non persistée, une rupture
 de contrat après soumission ou un contrat GLPI incohérent est **latched**. Dans
 ce second cas, le processus reste vivant et observable mais ne rappelle jamais
-le worker avant son arrêt, afin de ne pas créer un job distant toutes les
-60 secondes.
+le worker avant son arrêt, afin de ne pas répéter un effet distant ambigu
+toutes les 60 secondes.
 
 ## Transcription
 
-La couche `transcription` expose un `TranscriberProtocol` indépendant du mode
-synchrone, du polling et des identifiants distants :
-
-- `LegacyTranscriptionClient` et `LegacyPollingTranscriber` encapsulent le
-  `POST /api/batchTranscription/createJob`, le polling et la persistance de
-  l'identifiant distant historique ;
-- `OpenAICompatibleTranscriber` consomme uniquement le sous-ensemble commun
-  `POST /audio/transcriptions` avec `file`, `model`, `language` et
-  `response_format=json` ;
-- `TranscriptionResult` ne transporte que l'identité locale de l'audio, le
-  texte et d'éventuels segments neutres.
+La couche `transcription` expose un `TranscriberProtocol` indépendant de
+l'implémentation du serveur. `OpenAICompatibleTranscriber` consomme uniquement
+le sous-ensemble commun `POST /audio/transcriptions` avec `file`, `model`,
+`language` et `response_format=json`. `TranscriptionResult` ne transporte que
+l'identité locale de l'audio, le texte et d'éventuels segments neutres.
 
 Le fichier reste à sa clé canonique pendant tout ce flux. La transcription est
 gardée uniquement en mémoire le temps de construire le ticket GLPI.
@@ -296,7 +273,7 @@ et les purges sont exécutés par l'application `worker-retention` à partir des
 
 ## Runtime, heartbeat et arrêt
 
-`composition.py` assemble les deux adaptateurs, les politiques, les stages et
+`composition.py` assemble les adaptateurs, les politiques, les stages et
 `AutomationWorker`. `runtime/context.py` possède la base, le verrou et le client
 HTTP partagé, tandis que `application.py` reste limité au CLI et au lancement
 de la boucle. Le runtime :
@@ -306,8 +283,7 @@ de la boucle. Le runtime :
 3. exécute toutes les transactions du worker sur la connexion qui détient le
    verrou, puis le vérifie aussi autour de chaque `run_once()` et de chaque
    appel au provider de transcription ou à GLPI ;
-4. le revalide avant la soumission, autour de chaque lecture du polling et
-   après chaque attente de transcription ;
+4. le revalide avant et après chaque appel externe ;
 5. écrit `degraded` après un retry ou `blocked` après un blocage système ;
 6. écrit `running` après une frontière terminale de job ;
 7. tente d'écrire `stopped`, ferme HTTP, libère le verrou et dispose le moteur.
@@ -317,8 +293,8 @@ elle supplante le résultat du provider et remonte comme une erreur inattendue.
 Une transaction SQL du worker ne peut pas être validée après la perte du verrou,
 car les deux partagent la même connexion PostgreSQL. L'ancienne instance
 n'initie alors pas l'étape externe suivante. Cette garantie clôt les écritures
-locales, mais ne constitue pas un jeton de fencing distribué auprès de
-du provider de transcription ou de GLPI.
+locales, mais ne constitue pas un jeton de fencing distribué auprès du
+provider de transcription ou de GLPI.
 
 Le heartbeat est rafraîchi aux frontières du pipeline et pendant chaque
 attente coopérative. Une attente plus longue que
@@ -345,11 +321,10 @@ doit être strictement supérieur à `WORKER_HEARTBEAT_INTERVAL_SECONDS`. La son
 n'émet qu'un code technique expurgé et ne journalise ni URL SQL ni secret.
 
 `SIGINT` et `SIGTERM` demandent un arrêt coopératif et interrompent les attentes
-injectées. Si le signal survient pendant le polling du provider legacy, le
-worker retourne `InterruptedOutcome` : il ne programme ni retry ni erreur et
-le job reste `processing` pour une reprise prioritaire au prochain démarrage.
-Une requête HTTP synchrone déjà en cours n'est observée qu'à son retour ou à
-l'expiration d'un timeout d'inactivité de phase. Les codes de sortie sont :
+injectées. Une requête HTTP synchrone déjà en cours n'est observée qu'à son
+retour ou à l'expiration d'un timeout d'inactivité de phase ; le job
+`processing` sera repris en priorité au prochain démarrage. Les codes de sortie
+sont :
 
 | Code | Signification |
 | --- | --- |
@@ -384,7 +359,7 @@ apps/worker-automation/
 │   ├── title_generation/
 │   │   ├── contracts.py     # protocole de génération de titre
 │   │   └── default.py       # titre configuré déterministe
-│   ├── transcription/       # client HTTP, polling et contrats
+│   ├── transcription/       # adaptateur HTTP OpenAI-compatible et contrats
 │   └── worker/
 │       ├── audio.py         # inspection du stockage canonique
 │       ├── lifecycle.py     # transactions et coordination des repositories
@@ -400,9 +375,7 @@ apps/worker-automation/
 └── tests/
     ├── unit/
     └── integration/
-        ├── database/        # PostgreSQL migré + stockage réel
-        ├── transcribe-ai/   # contrat provider CPU/GPU
-        └── e2e/             # pipeline complet persistant
+        └── database/        # PostgreSQL migré + stockage réel
 ```
 
 Le client HTTP, les modèles, les contrats et la stack d'intégration GLPI sont
@@ -413,7 +386,7 @@ Les dépendances suivent la direction suivante :
 ```text
 application -> runtime -> composition -> worker service
                                           |
-                                          +-> stages -> contrats Transcribe/GLPI
+                                          +-> stages -> contrats transcription/GLPI
                                           +-> lifecycle -> repositories
                                           +-> audio -> package common
 ```
@@ -434,11 +407,9 @@ Les variables obligatoires sont chargées depuis l'environnement ou `.env` :
 | `DATABASE_URL` | URL `postgresql+psycopg` de la base migrée. |
 | `PUBLIC_BASE_URL` | Base des liens audio insérés dans GLPI. |
 | `ORIGINATING_PHONE_NUMBER_KEY_PATH` | Fichier Base64 contenant la clé AES-256 partagée avec publisher. |
-| `TRANSCRIPTION_PROVIDER` | `openai_compatible` par défaut ; `legacy_polling` reste un choix explicite de repli. |
-| `LEGACY_TRANSCRIPTION_BASE_URL` | Base de l'API batch, obligatoire uniquement avec `legacy_polling`. |
-| `LEGACY_TRANSCRIPTION_API_KEY` | Clé de l'API batch, obligatoire uniquement avec `legacy_polling`. |
-| `OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL` | Base OpenAI compatible terminée par son préfixe `/v1`, obligatoire avec `openai_compatible`. |
-| `OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY` | Clé Bearer du provider synchrone, obligatoire avec `openai_compatible`. |
+| `TRANSCRIPTION_PROVIDER` | Garde de configuration dont l'unique valeur acceptée est `openai_compatible`. |
+| `OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL` | Base OpenAI-compatible terminée par son préfixe `/v1`. |
+| `OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY` | Clé Bearer du provider synchrone. |
 | `OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL` | Identifiant de modèle envoyé au provider synchrone. |
 | `GLPI_BASE_URL` | Base de l'instance GLPI. |
 | `GLPI_USERNAME`, `GLPI_PASSWORD` | Utilisateur du grant OAuth Password. |
@@ -447,10 +418,8 @@ Les variables obligatoires sont chargées depuis l'environnement ou `.env` :
 | `GLPI_TICKET_REQUEST_SOURCE_ID` | Identifiant positif de la source MEVO dans l'instance GLPI ciblée. |
 | `GLPI_TICKET_URGENCY`, `GLPI_TICKET_IMPACT` | Niveaux GLPI de 1 à 5. |
 
-Les configurations des deux providers peuvent coexister. Au démarrage,
-`TRANSCRIPTION_PROVIDER` sélectionne l'unique adaptateur utilisé par le worker ;
-aucune bascule automatique n'est effectuée en cas d'erreur. Changer de provider
-nécessite de modifier cette variable puis de redéployer le worker.
+`TRANSCRIPTION_PROVIDER` reste explicite afin qu'une ancienne configuration
+soit refusée au démarrage plutôt que réinterprétée silencieusement.
 
 Principaux réglages optionnels :
 
@@ -475,8 +444,6 @@ Principaux réglages optionnels :
 | `RETENTION_CHECK_INTERVAL_HOURS` | `6` | Intervalle entre les contrôles d'un ticket terminé, également utilisé avant le premier contrôle. |
 | `OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE` | `fr` | Langue envoyée au provider synchrone. |
 | `TRANSCRIPTION_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une requête de transcription ; le staging CPU utilise `120` et la production CPU `180`. |
-| `TRANSCRIPTION_POLL_INTERVAL_SECONDS` | `2` | Intervalle de polling du provider legacy uniquement. |
-| `TRANSCRIPTION_JOB_TIMEOUT_SECONDS` | `900` | Durée maximale du polling legacy uniquement. |
 | `GLPI_HTTP_TIMEOUT_SECONDS` | `10` | Timeout d'une opération GLPI. |
 | `GLPI_TICKET_TYPE` | `1` | Type GLPI : `1` pour incident par défaut, `2` pour demande. |
 
@@ -530,17 +497,6 @@ uv run pytest -m database \
   apps/worker-automation/tests/integration/database -vv --maxfail=1
 ```
 
-Contrat Transcribe AI conteneurisé, CPU par défaut ou GPU explicite :
-
-```bash
-uv run pytest -m transcribe_ai \
-  apps/worker-automation/tests/integration/transcribe-ai -vv --maxfail=1
-
-TRANSCRIBE_AI_TEST_DEVICE=gpu \
-uv run pytest -m transcribe_ai \
-  apps/worker-automation/tests/integration/transcribe-ai -vv --maxfail=1
-```
-
 Contrat GLPI et pipeline E2E :
 
 ```bash
@@ -548,7 +504,7 @@ uv run --package mevo2glpi-glpi pytest -m glpi \
   packages/glpi-client/tests/integration/glpi -vv --maxfail=1
 
 uv run pytest -m e2e \
-  apps/worker-automation/tests/integration/e2e -vv --maxfail=1
+  tests/e2e -vv --maxfail=1
 ```
 
 Vérifications statiques :
@@ -558,14 +514,11 @@ uv run ruff format --check apps/worker-automation
 uv run ruff check apps/worker-automation
 ```
 
-Les suites `database`, `transcribe_ai`, `glpi` et `e2e` utilisent des
+Les suites `database`, `glpi` et `e2e` utilisent des
 conteneurs jetables et ne doivent pas être parallélisées.
 
 ## Limites actuelles
 
-- Le provider historique ne persiste pas les transcriptions et n'accepte pas encore
-  l'UUID audio lors de la soumission. Une reprise sans ticket confirmé crée
-  donc un nouveau job distant et peut dupliquer le travail de transcription.
 - La transcription n'est jamais persistée. Une reprise GLPI sans
   `glpi_ticket_id` implique elle aussi une nouvelle transcription.
 - `external_id` n'est pas une contrainte d'unicité GLPI. Le verrou mono-worker

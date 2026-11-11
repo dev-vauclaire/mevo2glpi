@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Protocol
 from uuid import UUID
 
 import httpx
@@ -36,19 +34,13 @@ RETENTION_SERVICE = "worker-retention"
 GLPI_SERVICE = "glpi"
 
 
-class TranscribeAiEnvironment(Protocol):
-    """Narrow fixture contract needed to seed one valid synthetic audio."""
-
-    audio_path: Path
-
-
 def test_solved_ticket_keeps_audio_then_closed_ticket_purges_it(
     e2e_environment: MvpComposeEnvironment,
-    transcribe_ai_environment: TranscribeAiEnvironment,
+    synthetic_audio_bytes: bytes,
     glpi_environment: GlpiTestEnvironment,
 ) -> None:
     """Retain a SOLVED ticket audio, then purge it after the CLOSED transition."""
-    audio = transcribe_ai_environment.audio_path.read_bytes()
+    audio = synthetic_audio_bytes
     retention_stopped = False
     primary_error: BaseException | None = None
 
@@ -127,11 +119,11 @@ def test_solved_ticket_keeps_audio_then_closed_ticket_purges_it(
 
 def test_expired_deadline_purges_audio_without_glpi(
     e2e_environment: MvpComposeEnvironment,
-    transcribe_ai_environment: TranscribeAiEnvironment,
+    synthetic_audio_bytes: bytes,
     glpi_environment: GlpiTestEnvironment,
 ) -> None:
     """Apply the hard deadline while GLPI is unavailable."""
-    audio = transcribe_ai_environment.audio_path.read_bytes()
+    audio = synthetic_audio_bytes
     retention_stopped = False
     glpi_stopped = False
     primary_error: BaseException | None = None

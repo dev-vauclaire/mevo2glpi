@@ -14,7 +14,6 @@ members = [
     "mevo2glpi-glpi",
     "mevo2glpi-microsoft-graph-simulator",
     "mevo2glpi-openai-transcription-simulator",
-    "mevo2glpi-transcribe-ai-simulator",
     "mevo2glpi-transcription-api",
     "mevo2glpi-web",
     "mevo2glpi-worker-automation",
@@ -816,23 +815,6 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.116,<1" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
-    { name = "uvicorn", specifier = ">=0.35,<1" },
-]
-
-[[package]]
-name = "mevo2glpi-transcribe-ai-simulator"
-version = "0.1.0"
-source = { editable = "providers/simulators/transcribe-ai-simulator" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "pydantic-settings" },
-    { name = "uvicorn" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.116,<1" },
-    { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "uvicorn", specifier = ">=0.35,<1" },
 ]
 

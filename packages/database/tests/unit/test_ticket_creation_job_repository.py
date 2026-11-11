@@ -146,7 +146,6 @@ def test_get_by_uuid_returns_typed_immutable_snapshot() -> None:
         audio_extension=AudioExtension.MP3,
         audio_size_bytes=84,
         glpi_ticket_id=None,
-        transcription_provider_job_id="provider-job",
         attempt_count=2,
         consecutive_retry_count=1,
         next_attempt_at=now + timedelta(minutes=1),
@@ -277,7 +276,6 @@ def test_rearm_for_operator_retry_clears_transient_state_only() -> None:
     job.status = JobStatus.BLOCKED.value
     job.stage = JobStage.FINALIZATION.value
     job.glpi_ticket_id = 1234
-    job.transcription_provider_job_id = "provider-before-retry"
     job.attempt_count = 7
     job.consecutive_retry_count = 3
     job.next_attempt_at = None
@@ -297,7 +295,6 @@ def test_rearm_for_operator_retry_clears_transient_state_only() -> None:
     assert snapshot.status is JobStatus.PENDING
     assert snapshot.stage is None
     assert snapshot.glpi_ticket_id == 1234
-    assert snapshot.transcription_provider_job_id is None
     assert snapshot.attempt_count == 7
     assert snapshot.consecutive_retry_count == 0
     assert snapshot.next_attempt_at is None
@@ -369,7 +366,6 @@ def _expected_pending_snapshot(
         audio_extension=pending_job.audio_extension,
         audio_size_bytes=pending_job.audio_size_bytes,
         glpi_ticket_id=None,
-        transcription_provider_job_id=None,
         attempt_count=0,
         consecutive_retry_count=0,
         next_attempt_at=None,
@@ -392,7 +388,6 @@ def _persisted_job(job_uuid: UUID, now: datetime) -> TicketCreationJob:
         audio_extension=AudioExtension.MP3.value,
         audio_size_bytes=84,
         glpi_ticket_id=None,
-        transcription_provider_job_id="provider-job",
         attempt_count=2,
         consecutive_retry_count=1,
         next_attempt_at=now + timedelta(minutes=1),
@@ -415,7 +410,6 @@ def _snapshot_for(job: TicketCreationJob) -> JobSnapshot:
         audio_extension=AudioExtension(job.audio_extension),
         audio_size_bytes=job.audio_size_bytes,
         glpi_ticket_id=job.glpi_ticket_id,
-        transcription_provider_job_id=job.transcription_provider_job_id,
         attempt_count=job.attempt_count,
         consecutive_retry_count=job.consecutive_retry_count,
         next_attempt_at=job.next_attempt_at,

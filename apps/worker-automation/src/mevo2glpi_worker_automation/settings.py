@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,8 +11,6 @@ from sqlalchemy.exc import ArgumentError
 
 from mevo2glpi_common import DeploymentEnvironment, ReleaseIdentity
 from mevo2glpi_glpi import TicketLevel, TicketType
-
-from .transcription import TranscriptionProvider
 
 
 class WorkerLogLevel(StrEnum):
@@ -76,11 +74,7 @@ class WorkerSettings(BaseSettings):
     blocked_retention_days: int = Field(default=90, gt=0)
     retention_check_interval_hours: int = Field(default=6, gt=0)
 
-    transcription_provider: TranscriptionProvider = (
-        TranscriptionProvider.OPENAI_COMPATIBLE
-    )
-    legacy_transcription_base_url: HttpUrl | None = None
-    legacy_transcription_api_key: SecretStr | None = Field(default=None, repr=False)
+    transcription_provider: Literal["openai_compatible"] = "openai_compatible"
     openai_compatible_transcription_base_url: HttpUrl | None = None
     openai_compatible_transcription_api_key: SecretStr | None = Field(
         default=None,
@@ -93,17 +87,6 @@ class WorkerSettings(BaseSettings):
         gt=0,
         allow_inf_nan=False,
     )
-    transcription_poll_interval_seconds: float = Field(
-        default=2.0,
-        gt=0,
-        allow_inf_nan=False,
-    )
-    transcription_job_timeout_seconds: float = Field(
-        default=15 * 60.0,
-        gt=0,
-        allow_inf_nan=False,
-    )
-
     glpi_base_url: HttpUrl
     glpi_username: str
     glpi_password: SecretStr = Field(repr=False)
@@ -196,25 +179,6 @@ class WorkerSettings(BaseSettings):
 
         return public_base_url
 
-    @field_validator("legacy_transcription_base_url")
-    @classmethod
-    def validate_legacy_transcription_base_url(
-        cls,
-        base_url: HttpUrl | None,
-    ) -> HttpUrl | None:
-        """Reject credentials and suffixes before constructing provider URLs."""
-        if base_url is None:
-            return None
-        has_credentials = bool(base_url.username or base_url.password)
-        has_suffix = base_url.query is not None or base_url.fragment is not None
-        if has_credentials or has_suffix:
-            msg = (
-                "LEGACY_TRANSCRIPTION_BASE_URL must not contain credentials, "
-                "a query, or a fragment"
-            )
-            raise ValueError(msg)
-        return base_url
-
     @field_validator("openai_compatible_transcription_base_url")
     @classmethod
     def validate_openai_compatible_transcription_base_url(
@@ -234,10 +198,7 @@ class WorkerSettings(BaseSettings):
             raise ValueError(msg)
         return base_url
 
-    @field_validator(
-        "legacy_transcription_api_key",
-        "openai_compatible_transcription_api_key",
-    )
+    @field_validator("openai_compatible_transcription_api_key")
     @classmethod
     def validate_transcription_api_key(
         cls,
@@ -333,32 +294,17 @@ class WorkerSettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_transcription_provider_configuration(self) -> Self:
-        """Require only the credentials used by the selected provider."""
-        if self.transcription_provider is TranscriptionProvider.LEGACY_POLLING:
-            if (
-                self.legacy_transcription_base_url is None
-                or self.legacy_transcription_api_key is None
-            ):
-                raise ValueError(
-                    "The selected legacy polling transcription provider requires "
-                    "LEGACY_TRANSCRIPTION_BASE_URL and "
-                    "LEGACY_TRANSCRIPTION_API_KEY"
-                )
-            return self
-
-        if self.transcription_provider is TranscriptionProvider.OPENAI_COMPATIBLE:
-            if (
-                self.openai_compatible_transcription_base_url is None
-                or self.openai_compatible_transcription_api_key is None
-                or self.openai_compatible_transcription_model is None
-            ):
-                raise ValueError(
-                    "The selected OpenAI-compatible transcription provider "
-                    "requires its base URL, API key and model"
-                )
-            return self
-
-        raise ValueError("Unsupported transcription provider")
+        """Require the synchronous OpenAI-compatible provider configuration."""
+        if (
+            self.openai_compatible_transcription_base_url is None
+            or self.openai_compatible_transcription_api_key is None
+            or self.openai_compatible_transcription_model is None
+        ):
+            raise ValueError(
+                "The OpenAI-compatible transcription provider requires its base "
+                "URL, API key and model"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_release_identity(self) -> Self:

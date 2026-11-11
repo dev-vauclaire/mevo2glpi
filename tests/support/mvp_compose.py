@@ -12,6 +12,7 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from pathlib import Path
 
 import httpx
@@ -37,9 +38,9 @@ CUSTOM_SERVICES = (
     "worker-publisher",
     "worker-retention",
 )
-# The historical disposable stack does not start the publisher until a local
-# Microsoft Graph double is available. Static deployment tests still validate
-# its production image and Compose contract.
+# The disposable stack does not start the publisher until a local Microsoft
+# Graph double is available. Static deployment tests still validate its
+# production image and Compose contract.
 ALL_SERVICES = (
     "postgres",
     "database-migrations",
@@ -47,7 +48,13 @@ ALL_SERVICES = (
     "worker-automation",
     "worker-retention",
 )
-CONTROLLABLE_MVP_SERVICES = frozenset({"worker-automation", "worker-retention"})
+CONTROLLABLE_MVP_SERVICES = frozenset(
+    {
+        "openai-transcription-simulator",
+        "worker-automation",
+        "worker-retention",
+    }
+)
 POLL_INTERVAL_SECONDS = 0.25
 SYNTHETIC_APP_RELEASE = "v0.0.0"
 SYNTHETIC_APP_COMMIT_SHA = "a" * 40
@@ -59,6 +66,34 @@ _SYNTHETIC_PUBLISHER_CERTIFICATE_PEM = """-----BEGIN CERTIFICATE-----
 c3ludGhldGljLXRlc3Qtb25seS1jZXJ0aWZpY2F0ZQ==
 -----END CERTIFICATE-----
 """
+
+
+class _CsrfMetaParser(HTMLParser):
+    """Extract the authenticated CSRF token rendered for the browser."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.token: str | None = None
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        if tag != "meta":
+            return
+        attributes = dict(attrs)
+        if attributes.get("name") == "csrf-token":
+            self.token = attributes.get("content")
+
+
+def _extract_authenticated_csrf_token(document: str) -> str:
+    parser = _CsrfMetaParser()
+    parser.feed(document)
+    parser.close()
+    if parser.token is None or not 32 <= len(parser.token) <= 128:
+        raise RuntimeError("The authenticated page contains no valid CSRF token")
+    return parser.token
 
 
 def _deployment_environment_names() -> frozenset[str]:
@@ -176,6 +211,7 @@ class MvpComposeEnvironment:
     _web_password: str = field(repr=False)
     _runtime_secrets: tuple[str, ...] = field(repr=False)
     _images: tuple[str, ...] = field(repr=False)
+    _extra_services: tuple[str, ...]
     _port_reservations: tuple[socket.socket, ...] = field(repr=False)
     _external_network_names: tuple[str, ...]
 
@@ -413,6 +449,11 @@ class MvpComposeEnvironment:
             )
             if response.status_code != 303:
                 raise RuntimeError("The synthetic web account could not authenticate")
+            dashboard = client.get("/")
+            dashboard.raise_for_status()
+            client.headers["X-CSRF-Token"] = _extract_authenticated_csrf_token(
+                dashboard.text
+            )
             yield client
 
     @property
@@ -455,7 +496,7 @@ class MvpComposeEnvironment:
         )
 
     def build(self, timeout_seconds: float = 10 * 60) -> None:
-        """Build only the applications exercised by the historical E2E suite."""
+        """Build only the applications exercised by the E2E suite."""
         self.compose("build", *CUSTOM_SERVICES, timeout_seconds=timeout_seconds)
 
     def start(self) -> None:
@@ -474,11 +515,13 @@ class MvpComposeEnvironment:
             "--wait-timeout",
             "120",
             *ALL_SERVICES,
+            *self._extra_services,
             timeout_seconds=240,
         )
         self.wait_for_migration()
         self._create_test_web_account()
         for service_name in (
+            *self._extra_services,
             "postgres",
             "web",
             "worker-automation",
@@ -588,6 +631,7 @@ def create_mvp_compose_environment(
     project_prefix: str = "mevo2glpi",
     extra_compose_files: Sequence[Path] = (),
     extra_compose_environment: Mapping[str, str] | None = None,
+    extra_image_services: Sequence[str] = (),
     database_host: str = "mvp-postgres",
     public_base_url: str | None = None,
 ) -> MvpComposeEnvironment:
@@ -675,14 +719,16 @@ def create_mvp_compose_environment(
         "FAILED_RETENTION_DAYS": "30",
         "BLOCKED_RETENTION_DAYS": "90",
         "RETENTION_CHECK_INTERVAL_HOURS": "6",
-        "TRANSCRIPTION_PROVIDER": "legacy_polling",
-        "LEGACY_TRANSCRIPTION_BASE_URL": (
+        "TRANSCRIPTION_PROVIDER": "openai_compatible",
+        "OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL": (
             provider_configuration.transcription_base_url
         ),
-        "LEGACY_TRANSCRIPTION_API_KEY": provider_configuration.transcription_api_key,
+        "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY": (
+            provider_configuration.transcription_api_key
+        ),
+        "OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL": "synthetic-openai-model",
+        "OPENAI_COMPATIBLE_TRANSCRIPTION_LANGUAGE": "fr",
         "TRANSCRIPTION_HTTP_TIMEOUT_SECONDS": "30",
-        "TRANSCRIPTION_POLL_INTERVAL_SECONDS": "0.2",
-        "TRANSCRIPTION_JOB_TIMEOUT_SECONDS": "900",
         "GLPI_BASE_URL": provider_configuration.glpi_base_url,
         "GLPI_USERNAME": provider_configuration.glpi_username,
         "GLPI_PASSWORD": provider_configuration.glpi_password,
@@ -737,7 +783,11 @@ def create_mvp_compose_environment(
         _web_username=web_username,
         _web_password=web_password,
         _runtime_secrets=runtime_secrets,
-        _images=tuple(f"{project_name}-{service}" for service in CUSTOM_SERVICES),
+        _images=tuple(
+            f"{project_name}-{service}"
+            for service in (*CUSTOM_SERVICES, *extra_image_services)
+        ),
+        _extra_services=tuple(extra_image_services),
         _port_reservations=port_reservations,
         _external_network_names=(
             proxy_network_name,

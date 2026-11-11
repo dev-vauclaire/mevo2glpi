@@ -1,4 +1,4 @@
-"""Exercise real clients against the three containerized staging simulators."""
+"""Exercise real clients against the staging simulators."""
 
 from __future__ import annotations
 
@@ -18,8 +18,6 @@ import pytest
 from pydantic import SecretStr
 
 from mevo2glpi_worker_automation.transcription import (
-    JobStatus,
-    LegacyTranscriptionClient,
     OpenAICompatibleTranscriber,
 )
 from mevo2glpi_worker_publisher.graph import (
@@ -43,7 +41,7 @@ pytestmark = [
 
 @dataclass(slots=True)
 class StagingSimulatorEnvironment:
-    """Own three isolated simulator containers and synthetic credentials."""
+    """Own isolated simulator containers and synthetic credentials."""
 
     project_name: str
     environment_file: Path
@@ -51,10 +49,8 @@ class StagingSimulatorEnvironment:
     process_environment: Mapping[str, str] = field(repr=False)
     admin_token: str = field(repr=False)
     openai_api_key: str = field(repr=False)
-    transcription_api_key: str = field(repr=False)
     graph_host_port: int
     openai_host_port: int
-    transcription_host_port: int
     simulators_network_name: str
 
     def compose(
@@ -125,7 +121,7 @@ def _docker_network(command: str, network_name: str, *, check: bool = True) -> N
 def staging_simulator_environment(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[StagingSimulatorEnvironment]:
-    """Build, start and remove three loopback-only staging simulators."""
+    """Build, start and remove the loopback-only staging simulators."""
     if os.environ.get("PYTEST_XDIST_WORKER") is not None:
         pytest.fail("The staging simulator suite must not run with pytest-xdist")
 
@@ -138,10 +134,7 @@ def staging_simulator_environment(
     audio_fixtures_root.mkdir(mode=0o755)
     admin_token = secrets.token_urlsafe(32)
     openai_api_key = secrets.token_urlsafe(32)
-    transcription_api_key = secrets.token_urlsafe(32)
-    graph_host_port, openai_host_port, transcription_host_port = (
-        _reserve_unique_loopback_ports(3)
-    )
+    graph_host_port, openai_host_port = _reserve_unique_loopback_ports(2)
     simulators_network_name = f"{project_name}-simulators"
     values = _read_example_environment()
     values.update(
@@ -153,7 +146,6 @@ def staging_simulator_environment(
             ),
             "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN": admin_token,
             "OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY": openai_api_key,
-            "TRANSCRIBE_AI_SIMULATOR_API_KEY": transcription_api_key,
         }
     )
     _write_private_environment(environment_file, values)
@@ -162,11 +154,6 @@ def staging_simulator_environment(
         "  microsoft-graph-simulator:\n"
         "    ports:\n"
         f'      - "127.0.0.1:{graph_host_port}:8080"\n'
-        "    networks:\n"
-        "      host-test: {}\n"
-        "  transcribe-ai-simulator:\n"
-        "    ports:\n"
-        f'      - "127.0.0.1:{transcription_host_port}:8080"\n'
         "    networks:\n"
         "      host-test: {}\n"
         "  openai-transcription-simulator:\n"
@@ -187,10 +174,8 @@ def staging_simulator_environment(
         process_environment=process_environment,
         admin_token=admin_token,
         openai_api_key=openai_api_key,
-        transcription_api_key=transcription_api_key,
         graph_host_port=graph_host_port,
         openai_host_port=openai_host_port,
-        transcription_host_port=transcription_host_port,
         simulators_network_name=simulators_network_name,
     )
 
@@ -200,7 +185,6 @@ def staging_simulator_environment(
             "build",
             "microsoft-graph-simulator",
             "openai-transcription-simulator",
-            "transcribe-ai-simulator",
         )
         environment.compose(
             "up",
@@ -208,7 +192,6 @@ def staging_simulator_environment(
             "--wait",
             "microsoft-graph-simulator",
             "openai-transcription-simulator",
-            "transcribe-ai-simulator",
         )
         yield environment
     finally:
@@ -222,7 +205,6 @@ def staging_simulator_environment(
         for image_name in (
             f"{project_name}-microsoft-graph-simulator:0.1.0",
             f"{project_name}-openai-transcription-simulator:0.1.0",
-            f"{project_name}-transcribe-ai-simulator:0.1.0",
         ):
             run_command(
                 ["docker", "image", "rm", image_name],
@@ -233,10 +215,6 @@ def staging_simulator_environment(
 
 def _graph_base_url(environment: StagingSimulatorEnvironment) -> str:
     return f"http://127.0.0.1:{environment.graph_host_port}"
-
-
-def _transcription_base_url(environment: StagingSimulatorEnvironment) -> str:
-    return f"http://127.0.0.1:{environment.transcription_host_port}"
 
 
 def _openai_base_url(environment: StagingSimulatorEnvironment) -> str:
@@ -285,30 +263,6 @@ def test_real_graph_client_uses_the_microsoft_graph_simulator(
     assert download.size_bytes == len(audio.getvalue())
     assert audio.getvalue().startswith(b"OggS")
     assert move.outcome is MoveOutcome.MOVED
-
-
-def test_real_transcription_client_uses_the_transcribe_ai_simulator(
-    staging_simulator_environment: StagingSimulatorEnvironment,
-    tmp_path: Path,
-) -> None:
-    base_url = _transcription_base_url(staging_simulator_environment)
-
-    audio_path = tmp_path / "synthetic.ogg"
-    audio_path.write_bytes(b"OggS-synthetic-provider-contract")
-    with httpx.Client() as transcription_http_client:
-        transcription = LegacyTranscriptionClient(
-            base_url=base_url,
-            api_key=SecretStr(staging_simulator_environment.transcription_api_key),
-            http_client=transcription_http_client,
-            timeout=5,
-        )
-        submission = transcription.submit(audio_path)
-        pending = transcription.get_job(submission.job_uuid)
-        completed = transcription.get_job(submission.job_uuid)
-
-    assert pending.status is JobStatus.PENDING
-    assert completed.status is JobStatus.COMPLETED
-    assert completed.transcription == "Transcription synthétique de recette staging."
 
 
 def test_real_openai_transcriber_uses_the_openai_compatible_simulator(

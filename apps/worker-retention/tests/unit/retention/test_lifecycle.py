@@ -625,7 +625,6 @@ def _job_snapshot(
         audio_extension=AudioExtension.WAV,
         audio_size_bytes=42,
         glpi_ticket_id=ticket_id,
-        transcription_provider_job_id=None,
         attempt_count=1,
         consecutive_retry_count=0,
         next_attempt_at=None,

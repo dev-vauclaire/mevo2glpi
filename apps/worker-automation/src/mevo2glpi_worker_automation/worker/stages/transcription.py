@@ -15,7 +15,6 @@ from ...transcription import (
     TranscriptionBlockedError,
     TranscriptionResult,
     TranscriptionRetryRequired,
-    TranscriptionSubmissionCallbackError,
     TranscriptionTerminalError,
 )
 from ..outcomes import (
@@ -48,7 +47,7 @@ type TranscriptionStageResult = TranscriptionSuccess | RunOutcome
 
 
 class TranscriptionStage:
-    """Call Transcribe AI and persist the provider success boundary."""
+    """Call the transcription provider and persist the success boundary."""
 
     def __init__(
         self,
@@ -85,16 +84,6 @@ class TranscriptionStage:
         try:
             result = self._guarded_external_call(
                 lambda: self._transcriber.transcribe(audio_path)
-            )
-        except TranscriptionSubmissionCallbackError as error:
-            technical_code = "submission_persistence_failed"
-            if error.audio_path != audio_path:
-                technical_code = "callback_audio_mismatch"
-            return self._system_block(
-                job,
-                category="persistence",
-                technical_code=technical_code,
-                automatic_probe=False,
             )
         except TranscriptionRetryRequired as error:
             if error.audio_path != audio_path:

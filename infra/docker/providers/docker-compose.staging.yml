@@ -43,23 +43,6 @@ services:
         aliases:
           - mevo2glpi-staging-microsoft-graph
 
-  transcribe-ai-simulator:
-    <<: *simulator-runtime
-    image: ${COMPOSE_PROJECT_NAME:-mevo2glpi-staging-simulators}-transcribe-ai-simulator:0.1.0
-    build:
-      context: ../../..
-      dockerfile: infra/docker/providers/transcribe-ai-simulator/Dockerfile
-    environment:
-      TRANSCRIBE_AI_SIMULATOR_HOST: 0.0.0.0
-      TRANSCRIBE_AI_SIMULATOR_PORT: "8080"
-      TRANSCRIBE_AI_SIMULATOR_API_KEY: ${TRANSCRIBE_AI_SIMULATOR_API_KEY:?Set TRANSCRIBE_AI_SIMULATOR_API_KEY}
-    expose:
-      - "8080"
-    networks:
-      simulators:
-        aliases:
-          - mevo2glpi-staging-transcribe-ai
-
   openai-transcription-simulator:
     <<: *simulator-runtime
     image: ${COMPOSE_PROJECT_NAME:-mevo2glpi-staging-simulators}-openai-transcription-simulator:0.1.0

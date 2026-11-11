@@ -109,9 +109,6 @@ fonctionnalités déjà disponibles sont décrites dans les sections précédent
 
 ### Simplification et maintenabilité
 
-- [ ] Retirer le contrat historique Transcribe AI et son mécanisme de polling
-  pour ne conserver que le contrat compatible avec l'API OpenAI, avec Parakeet
-  local ou un provider externe.
 - [ ] Réorganiser `infra/docker` en briques composables et fournir des recettes
   d'exemple pour les combinaisons de services prises en charge.
 - [ ] Aligner la documentation et les procédures d'exploitation avec cette

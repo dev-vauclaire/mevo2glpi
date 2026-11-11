@@ -1,5 +1,0 @@
-services:
-  mono-voice-stt:
-    environment:
-      CUDA_VISIBLE_DEVICES: ""
-      NVIDIA_VISIBLE_DEVICES: void

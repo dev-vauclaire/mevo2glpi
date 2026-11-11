@@ -148,7 +148,7 @@ Selon le périmètre, la CI exécute :
 6. les contrats ciblés des images et de la stack de transcription ;
 7. l'existence des cibles des liens Markdown relatifs.
 
-Les suites `glpi`, `transcribe_ai`, `transcription_model`, `e2e` et certains
+Les suites `glpi`, `transcription_model`, `e2e` et certains
 tests `deployment` restent des validations manuelles. La CI ne démontre donc
 pas le fonctionnement des services réels de l'établissement.
 

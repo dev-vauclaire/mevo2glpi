@@ -15,7 +15,6 @@ from mevo2glpi_database import (
     JobAcquisition,
     JobEventActor,
     JobEventType,
-    JobMutation,
     JobSnapshot,
     JobStage,
     JobStatus,
@@ -226,31 +225,6 @@ def test_claim_reports_sanitized_error_for_untrusted_phone_ciphertext() -> None:
     )
 
 
-def test_idempotent_submission_does_not_duplicate_its_event() -> None:
-    session = create_autospec(Session, instance=True)
-    job_repository = MagicMock()
-    event_repository = MagicMock()
-    snapshot = _snapshot(
-        status=JobStatus.PROCESSING,
-        stage=JobStage.TRANSCRIPTION,
-        provider_job_id="provider-1",
-    )
-    job_repository.record_transcription_submitted.return_value = JobMutation(
-        job=snapshot,
-        changed=False,
-    )
-    service = _service(
-        session,
-        job_repository=job_repository,
-        event_repository=event_repository,
-    )
-
-    result = service.record_transcription_submitted(JOB_UUID, "provider-1", NOW)
-
-    assert result == snapshot
-    event_repository.append.assert_not_called()
-
-
 def test_terminal_transcription_failure_is_audited_before_ticketing() -> None:
     session = create_autospec(Session, instance=True)
     job_repository = MagicMock()
@@ -459,7 +433,6 @@ def _snapshot(
     *,
     status: JobStatus,
     stage: JobStage | None,
-    provider_job_id: str | None = None,
     ticket_id: int | None = None,
     error_scope: ErrorScope | None = None,
     error_category: str | None = None,
@@ -473,7 +446,6 @@ def _snapshot(
         audio_extension=AudioExtension.WAV,
         audio_size_bytes=42,
         glpi_ticket_id=ticket_id,
-        transcription_provider_job_id=provider_job_id,
         attempt_count=1,
         consecutive_retry_count=0,
         next_attempt_at=None,

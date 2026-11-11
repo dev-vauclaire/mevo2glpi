@@ -144,29 +144,6 @@ class AutomationJobLifecycleService:
 
         return self._transaction(operation)
 
-    def record_transcription_submitted(
-        self,
-        job_uuid: UUID,
-        provider_job_id: str,
-        now: datetime,
-    ) -> JobSnapshot:
-        """Persist a provider identifier and its event exactly once."""
-
-        def operation(session: Session) -> JobSnapshot:
-            mutation = self._job_repository_factory(
-                session
-            ).record_transcription_submitted(job_uuid, provider_job_id, now)
-            if mutation.changed:
-                self._append_event(
-                    session,
-                    mutation.job,
-                    event_type=JobEventType.TRANSCRIPTION_SUBMITTED,
-                    occurred_at=now,
-                )
-            return mutation.job
-
-        return self._transaction(operation)
-
     def record_transcription_succeeded(
         self,
         job_uuid: UUID,

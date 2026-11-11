@@ -260,12 +260,6 @@ def _add_completed_retention(
         )
         acquisition = job_repository.resume_or_claim_next(ACTIVATED_AT)
         assert acquisition is not None
-        provider_job_id = f"provider-{job_uuid}"
-        job_repository.record_transcription_submitted(
-            job_uuid,
-            provider_job_id,
-            ACTIVATED_AT,
-        )
         job_repository.advance_after_transcription(
             job_uuid,
             ACTIVATED_AT,

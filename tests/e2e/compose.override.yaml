@@ -1,8 +1,22 @@
 services:
+  openai-transcription-simulator:
+    image: ${COMPOSE_PROJECT_NAME}-openai-transcription-simulator
+    build:
+      context: ../../..
+      dockerfile: infra/docker/providers/openai-transcription-simulator/Dockerfile
+    environment:
+      OPENAI_TRANSCRIPTION_SIMULATOR_HOST: 0.0.0.0
+      OPENAI_TRANSCRIPTION_SIMULATOR_PORT: "8080"
+      OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY: ${OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY:?OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY must be set}
+      OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES: "26214400"
+    networks:
+      transcription:
+        aliases:
+          - openai-transcription
+
   worker-automation:
     networks:
       glpi-e2e:
-      transcribe-ai-e2e:
 
   worker-retention:
     networks:
@@ -12,6 +26,3 @@ networks:
   glpi-e2e:
     external: true
     name: ${MEVO2GLPI_E2E_GLPI_NETWORK:?MEVO2GLPI_E2E_GLPI_NETWORK must be set}
-  transcribe-ai-e2e:
-    external: true
-    name: ${MEVO2GLPI_E2E_TRANSCRIBE_AI_NETWORK:?MEVO2GLPI_E2E_TRANSCRIBE_AI_NETWORK must be set}

@@ -197,15 +197,6 @@ def test_worker_runtime_owns_resources_and_guards_each_iteration(
         assert runtime_worker.run_once() is outcome
         runtime_worker.wait(25)
         assert harness.build_arguments is not None
-        assert (
-            harness.build_arguments["transcription_sleep"]
-            is runtime_worker.wait_callback
-        )
-        guarded_should_stop = cast(
-            Callable[[], bool],
-            harness.build_arguments["transcription_should_stop"],
-        )
-        assert guarded_should_stop() is False
         on_job_started = cast(
             Callable[[UUID], None],
             harness.build_arguments["on_job_started"],
@@ -219,12 +210,11 @@ def test_worker_runtime_owns_resources_and_guards_each_iteration(
     assert harness.build_arguments is not None
     assert harness.build_arguments["http_client"] is harness.http_client
     assert callable(harness.build_arguments["session_factory"])
-    assert callable(harness.build_arguments["transcription_sleep"])
     assert callable(harness.build_arguments["ownership_guard"])
     assert harness.heartbeat is not None
     assert harness.heartbeat.heartbeat_interval_seconds == 10
     assert harness.heartbeat.started_jobs == [AUDIO_UUID]
-    assert harness.heartbeat.pulses == 5
+    assert harness.heartbeat.pulses == 4
     assert injected_sleep == [10, 10, 5]
     assert harness.heartbeat.states == [
         WorkerRuntimeState.STARTING,
@@ -343,27 +333,6 @@ def test_runtime_wait_fails_closed_when_lock_is_lost_at_checkpoint(
     assert harness.http_client.closed
     assert harness.engine.disposed
     assert "lock.release" not in harness.events
-
-
-def test_transcription_stop_callback_must_return_boolean(
-    worker_settings_factory: Callable[..., WorkerSettings],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _RuntimeHarness(IdleOutcome(wait_seconds=1))
-    harness.install(monkeypatch)
-
-    with worker_runtime(
-        worker_settings_factory(),
-        http_client_factory=cast(Any, harness.create_http_client),
-        should_stop=cast(Callable[[], bool], lambda: 1),
-    ):
-        assert harness.build_arguments is not None
-        guarded_should_stop = cast(
-            Callable[[], bool],
-            harness.build_arguments["transcription_should_stop"],
-        )
-        with pytest.raises(TypeError, match="should_stop must return a boolean"):
-            guarded_should_stop()
 
 
 def test_worker_runtime_refuses_second_singleton_before_http_start(

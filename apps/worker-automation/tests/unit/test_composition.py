@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -19,10 +18,8 @@ from mevo2glpi_worker_automation.composition import (
     build_public_audio_url,
 )
 from mevo2glpi_worker_automation.settings import WorkerSettings
-from mevo2glpi_worker_automation.transcription import JobUuid
 
 AUDIO_UUID = UUID("123e4567-e89b-42d3-a456-426614174000")
-PROVIDER_JOB_ID = JobUuid("provider-job-42")
 
 
 def test_public_audio_url_preserves_base_path_without_double_slash(
@@ -41,15 +38,13 @@ def test_public_audio_url_preserves_base_path_without_double_slash(
         )
 
 
-def test_build_automation_worker_wires_stages_and_submission_callback(
+def test_build_automation_worker_wires_stages_and_openai_transcriber(
     worker_settings_factory: Callable[..., WorkerSettings],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = worker_settings_factory()
     http_client = httpx.Client()
     captured: dict[str, Any] = {}
-    recorded_submissions: list[tuple[UUID, str, datetime]] = []
-    transcription_client = object()
     transcriber = object()
     glpi_client = object()
     audio_inspector = object()
@@ -61,14 +56,6 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     class RecordingLifecycle:
         def __init__(self, **kwargs: object) -> None:
             captured["lifecycle"] = kwargs
-
-        def record_transcription_submitted(
-            self,
-            audio_uuid: UUID,
-            provider_job_id: str,
-            now: datetime,
-        ) -> None:
-            recorded_submissions.append((audio_uuid, provider_job_id, now))
 
     def capture(name: str, result: object) -> Callable[..., object]:
         def factory(*args: object, **kwargs: object) -> object:
@@ -89,13 +76,8 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
     )
     monkeypatch.setattr(
         composition_module,
-        "LegacyTranscriptionClient",
-        capture("transcription_client", transcription_client),
-    )
-    monkeypatch.setattr(
-        composition_module,
-        "LegacyPollingTranscriber",
-        capture("poller", transcriber),
+        "OpenAICompatibleTranscriber",
+        capture("transcriber", transcriber),
     )
     monkeypatch.setattr(
         composition_module,
@@ -133,15 +115,11 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
 
     ownership_checks: list[str] = []
     started_jobs: list[UUID] = []
-    transcription_sleeps: list[float] = []
-
     try:
         result = build_automation_worker(
             settings,
             http_client=http_client,
             session_factory=cast(Any, session_factory),
-            transcription_sleep=transcription_sleeps.append,
-            transcription_should_stop=lambda: False,
             ownership_guard=lambda: ownership_checks.append("checked"),
             on_job_started=started_jobs.append,
         )
@@ -156,29 +134,15 @@ def test_build_automation_worker_wires_stages_and_submission_callback(
         lifecycle_arguments["originating_phone_number_cipher"],
         OriginatingPhoneNumberCipher,
     )
-    transcription_arguments = captured["transcription_client"]["kwargs"]
+    transcription_arguments = captured["transcriber"]["kwargs"]
     assert transcription_arguments == {
-        "base_url": "https://transcribe.example.test/prefix",
-        "api_key": settings.legacy_transcription_api_key,
+        "base_url": "https://transcribe.example.test/v1",
+        "api_key": settings.openai_compatible_transcription_api_key,
+        "model": "synthetic-model",
+        "language": "fr",
         "http_client": http_client,
         "timeout": 4.5,
     }
-    poller_arguments = captured["poller"]["kwargs"]
-    assert poller_arguments["client"] is transcription_client
-    assert poller_arguments["poll_interval_seconds"] == 2.5
-    assert poller_arguments["job_timeout_seconds"] == 120.0
-    assert poller_arguments["sleep"] == transcription_sleeps.append
-    assert callable(poller_arguments["should_stop"])
-
-    callback = poller_arguments["on_job_submitted"]
-    assert callable(callback)
-    callback(AUDIO_UUID, PROVIDER_JOB_ID)
-
-    assert len(recorded_submissions) == 1
-    recorded_uuid, recorded_provider_id, recorded_at = recorded_submissions[0]
-    assert recorded_uuid == AUDIO_UUID
-    assert recorded_provider_id == PROVIDER_JOB_ID
-    assert recorded_at.tzinfo is UTC
 
     transitions_arguments = captured["transitions"]["kwargs"]
     assert transitions_arguments["lifecycle"] is captured["lifecycle_instance"]
@@ -230,8 +194,6 @@ def test_openai_compatible_provider_is_composed_without_polling(
 ) -> None:
     settings = worker_settings_factory(
         transcription_provider="openai_compatible",
-        legacy_transcription_base_url=None,
-        legacy_transcription_api_key=None,
         openai_compatible_transcription_base_url=(
             "http://transcription-provider.test/v1"
         ),
@@ -255,9 +217,6 @@ def test_openai_compatible_provider_is_composed_without_polling(
         result = composition_module._build_transcriber(
             settings,
             http_client=http_client,
-            transcription_sleep=lambda _seconds: None,
-            transcription_should_stop=lambda: False,
-            record_transcription_submission=lambda _uuid, _provider_id: None,
         )
 
     assert result is transcriber

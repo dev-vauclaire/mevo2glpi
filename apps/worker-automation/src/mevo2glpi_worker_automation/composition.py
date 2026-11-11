@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from uuid import UUID
@@ -22,11 +21,8 @@ from mevo2glpi_glpi import GlpiClient, GlpiTicketDefaults
 from .settings import WorkerSettings
 from .title_generation import DefaultTitleGenerator
 from .transcription import (
-    LegacyPollingTranscriber,
-    LegacyTranscriptionClient,
     OpenAICompatibleTranscriber,
     TranscriberProtocol,
-    TranscriptionProvider,
 )
 from .worker import (
     AudioInspector,
@@ -38,10 +34,6 @@ from .worker import (
     TicketCreationStage,
     TranscriptionStage,
 )
-
-
-def _never_stop() -> bool:
-    return False
 
 
 def _no_op() -> None:
@@ -68,8 +60,6 @@ def build_automation_worker(
     *,
     http_client: httpx.Client,
     session_factory: Callable[[], Session],
-    transcription_sleep: Callable[[float], None] = time.sleep,
-    transcription_should_stop: Callable[[], bool] = _never_stop,
     ownership_guard: Callable[[], None] = _no_op,
     on_job_started: Callable[[UUID], None] = _no_op_job_started,
 ) -> AutomationWorker:
@@ -85,10 +75,6 @@ def build_automation_worker(
         raise TypeError("http_client must be an httpx.Client")
     if not callable(session_factory):
         raise TypeError("session_factory must be callable")
-    if not callable(transcription_sleep):
-        raise TypeError("transcription_sleep must be callable")
-    if not callable(transcription_should_stop):
-        raise TypeError("transcription_should_stop must be callable")
     if not callable(ownership_guard):
         raise TypeError("ownership_guard must be callable")
     if not callable(on_job_started):
@@ -111,22 +97,9 @@ def build_automation_worker(
         originating_phone_number_cipher=originating_phone_number_cipher,
     )
 
-    def record_transcription_submission(
-        audio_uuid: UUID,
-        provider_job_id: str,
-    ) -> None:
-        lifecycle.record_transcription_submitted(
-            audio_uuid,
-            provider_job_id,
-            datetime.now(UTC),
-        )
-
     transcriber = _build_transcriber(
         settings,
         http_client=http_client,
-        transcription_sleep=transcription_sleep,
-        transcription_should_stop=transcription_should_stop,
-        record_transcription_submission=record_transcription_submission,
     )
     glpi_client = GlpiClient(
         base_url=str(settings.glpi_base_url),
@@ -192,51 +165,23 @@ def _build_transcriber(
     settings: WorkerSettings,
     *,
     http_client: httpx.Client,
-    transcription_sleep: Callable[[float], None],
-    transcription_should_stop: Callable[[], bool],
-    record_transcription_submission: Callable[[UUID, str], None],
 ) -> TranscriberProtocol:
-    """Select one adapter while keeping provider details at the composition root."""
-    if settings.transcription_provider is TranscriptionProvider.LEGACY_POLLING:
-        base_url = settings.legacy_transcription_base_url
-        api_key = settings.legacy_transcription_api_key
-        if base_url is None or api_key is None:
-            raise WorkerConfigurationError(
-                "legacy transcription provider configuration is incomplete"
-            )
-        client = LegacyTranscriptionClient(
-            base_url=str(base_url),
-            api_key=api_key,
-            http_client=http_client,
-            timeout=settings.transcription_http_timeout_seconds,
+    """Build the only supported synchronous transcription adapter."""
+    base_url = settings.openai_compatible_transcription_base_url
+    api_key = settings.openai_compatible_transcription_api_key
+    model = settings.openai_compatible_transcription_model
+    if base_url is None or api_key is None or model is None:
+        raise WorkerConfigurationError(
+            "OpenAI-compatible transcription provider configuration is incomplete"
         )
-        return LegacyPollingTranscriber(
-            client=client,
-            poll_interval_seconds=settings.transcription_poll_interval_seconds,
-            job_timeout_seconds=settings.transcription_job_timeout_seconds,
-            sleep=transcription_sleep,
-            should_stop=transcription_should_stop,
-            on_job_submitted=record_transcription_submission,
-        )
-
-    if settings.transcription_provider is TranscriptionProvider.OPENAI_COMPATIBLE:
-        base_url = settings.openai_compatible_transcription_base_url
-        api_key = settings.openai_compatible_transcription_api_key
-        model = settings.openai_compatible_transcription_model
-        if base_url is None or api_key is None or model is None:
-            raise WorkerConfigurationError(
-                "OpenAI-compatible transcription provider configuration is incomplete"
-            )
-        return OpenAICompatibleTranscriber(
-            base_url=str(base_url),
-            api_key=api_key,
-            model=model,
-            language=settings.openai_compatible_transcription_language,
-            http_client=http_client,
-            timeout=settings.transcription_http_timeout_seconds,
-        )
-
-    raise WorkerConfigurationError("unsupported transcription provider")
+    return OpenAICompatibleTranscriber(
+        base_url=str(base_url),
+        api_key=api_key,
+        model=model,
+        language=settings.openai_compatible_transcription_language,
+        http_client=http_client,
+        timeout=settings.transcription_http_timeout_seconds,
+    )
 
 
 def _resolve_existing_directory(directory: object) -> Path:

@@ -1,14 +1,13 @@
 # Simulateurs de fournisseurs
 
 Ce dossier appartient au workspace uv racine et reste strictement réservé au
-développement, au staging et aux tests. Il contient trois services HTTP
+développement, au staging et aux tests. Il contient deux services HTTP
 indépendants et sans donnée réelle :
 
 - `microsoft-graph-simulator` reproduit le sous-ensemble de Microsoft Graph
   utilisé pour lire et classer les messages d'une boîte fictive ;
 - `openai-transcription-simulator` reproduit le contrat synchrone minimal
-  `POST /v1/audio/transcriptions` sans charger de modèle ;
-- `transcribe-ai-simulator` reproduit le contrat asynchrone de Transcribe AI.
+  `POST /v1/audio/transcriptions` sans charger de modèle.
 
 Les états sont éphémères et disparaissent au redémarrage. Le simulateur
 Microsoft ne reproduit pas Microsoft Entra ID : le publisher staging utilise

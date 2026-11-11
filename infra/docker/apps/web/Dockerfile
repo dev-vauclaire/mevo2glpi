@@ -28,7 +28,6 @@ COPY packages/database/pyproject.toml packages/database/pyproject.toml
 COPY packages/glpi-client/pyproject.toml packages/glpi-client/pyproject.toml
 COPY providers/simulators/microsoft-graph-simulator/pyproject.toml providers/simulators/microsoft-graph-simulator/pyproject.toml
 COPY providers/simulators/openai-transcription-simulator/pyproject.toml providers/simulators/openai-transcription-simulator/pyproject.toml
-COPY providers/simulators/transcribe-ai-simulator/pyproject.toml providers/simulators/transcribe-ai-simulator/pyproject.toml
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \

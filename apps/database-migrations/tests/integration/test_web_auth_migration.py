@@ -24,6 +24,7 @@ pytestmark = pytest.mark.database
 
 PREVIOUS_REVISION = "0009_rejected_retention"
 WEB_AUTH_REVISION = "0010_web_authentication"
+CURRENT_REVISION = "0011_drop_legacy_polling"
 
 
 @pytest.fixture
@@ -48,8 +49,8 @@ def test_fresh_database_creates_local_user_schema_without_session_or_event_table
     assert "web_users" in table_names
     assert "web_auth_events" not in table_names
     assert "web_sessions" not in table_names
-    assert _current_revision(database_engine) == WEB_AUTH_REVISION
-    assert _head_revision() == WEB_AUTH_REVISION
+    assert _current_revision(database_engine) == CURRENT_REVISION
+    assert _head_revision() == CURRENT_REVISION
 
     user_columns = {
         column["name"]: column for column in inspector.get_columns("web_users")
@@ -88,7 +89,7 @@ def test_existing_0009_database_preserves_jobs_and_adds_empty_user_table(
             == 1
         )
         assert connection.scalar(select(func.count()).select_from(WebUser)) == 0
-    assert _current_revision(database_engine) == WEB_AUTH_REVISION
+    assert _current_revision(database_engine) == CURRENT_REVISION
 
 
 def test_empty_web_auth_schema_can_downgrade_and_upgrade_again(
@@ -104,7 +105,7 @@ def test_empty_web_auth_schema_can_downgrade_and_upgrade_again(
     assert _current_revision(database_engine) == PREVIOUS_REVISION
 
     upgrade_to_head(database_engine)
-    assert _current_revision(database_engine) == WEB_AUTH_REVISION
+    assert _current_revision(database_engine) == CURRENT_REVISION
 
 
 def test_downgrade_refuses_to_discard_local_accounts(
@@ -124,7 +125,7 @@ def test_downgrade_refuses_to_discard_local_accounts(
     with pytest.raises(RuntimeError, match="web users"):
         _migrate(database_engine, PREVIOUS_REVISION, downgrade=True)
 
-    assert _current_revision(database_engine) == WEB_AUTH_REVISION
+    assert _current_revision(database_engine) == CURRENT_REVISION
 
 
 def _head_revision() -> str:

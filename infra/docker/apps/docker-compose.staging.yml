@@ -19,8 +19,6 @@ services:
       service: worker-automation
     environment:
       TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-openai_compatible}
-      LEGACY_TRANSCRIPTION_BASE_URL: ${LEGACY_TRANSCRIPTION_BASE_URL:-http://mevo2glpi-staging-transcribe-ai:8080}
-      LEGACY_TRANSCRIPTION_API_KEY: ${TRANSCRIBE_AI_SIMULATOR_API_KEY:?Set TRANSCRIBE_AI_SIMULATOR_API_KEY}
       OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL: ${OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL:-http://mevo2glpi-staging-transcription:5092/v1}
       OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY: ${TRANSCRIPTION_API_KEY:?Set TRANSCRIPTION_API_KEY}
       OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL: parakeet-ultra
@@ -33,7 +31,6 @@ services:
       GLPI_HTTP_TIMEOUT_SECONDS: ${GLPI_HTTP_TIMEOUT_SECONDS:-10}
       SSL_CERT_FILE: /etc/ssl/certs/mevo2glpi-ca-bundle.pem
     networks:
-      - simulators
       - transcription
 
   worker-publisher:

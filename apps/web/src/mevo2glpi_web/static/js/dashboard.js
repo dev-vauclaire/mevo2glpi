@@ -33,7 +33,6 @@ const EVENT_LABELS = new Map([
   ["job_created", "Traitement créé"],
   ["processing_started", "Traitement démarré"],
   ["processing_resumed", "Traitement repris"],
-  ["transcription_submitted", "Transcription soumise"],
   ["transcription_succeeded", "Transcription validée"],
   ["transcription_failed", "Transcription en échec — ticket explicatif"],
   ["retry_scheduled", "Nouvelle tentative planifiée"],

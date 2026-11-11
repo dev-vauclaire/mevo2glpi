@@ -52,8 +52,6 @@ def render_compose() -> Callable[[], dict[str, object]]:
                 "postgresql+psycopg://mevo2glpi:synthetic@postgres:5432/mevo2glpi"
             ),
             "PUBLIC_BASE_URL": "https://tickets.example.invalid",
-            "LEGACY_TRANSCRIPTION_BASE_URL": providers.transcription_base_url,
-            "LEGACY_TRANSCRIPTION_API_KEY": providers.transcription_api_key,
             "GLPI_BASE_URL": providers.glpi_base_url,
             "GLPI_USERNAME": providers.glpi_username,
             "GLPI_PASSWORD": providers.glpi_password,

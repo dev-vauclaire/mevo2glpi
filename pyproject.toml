@@ -23,7 +23,6 @@ members = [
     "packages/glpi-client",
     "providers/simulators/microsoft-graph-simulator",
     "providers/simulators/openai-transcription-simulator",
-    "providers/simulators/transcribe-ai-simulator",
 ]
 
 [tool.uv.sources]
@@ -53,7 +52,6 @@ markers = [
     "deployment: valide le Compose Dokploy et les images runtime du MVP",
     "glpi: démarre une instance GLPI jetable avec Testcontainers",
     "transcription_model: exécute une validation CPU avec le modèle de transcription réel",
-    "transcribe_ai: démarre une stack Transcribe AI jetable avec Testcontainers",
     "e2e: assemble le pipeline aval avec GLPI et un provider de transcription jetables",
 ]
 
@@ -72,7 +70,6 @@ src = [
     "packages/glpi-client/src",
     "providers/simulators/microsoft-graph-simulator/src",
     "providers/simulators/openai-transcription-simulator/src",
-    "providers/simulators/transcribe-ai-simulator/src",
 ]
 
 [tool.ruff.lint]

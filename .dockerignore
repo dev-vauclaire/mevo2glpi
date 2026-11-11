@@ -58,10 +58,6 @@
 !providers/simulators/openai-transcription-simulator/pyproject.toml
 !providers/simulators/openai-transcription-simulator/src/
 !providers/simulators/openai-transcription-simulator/src/**
-!providers/simulators/transcribe-ai-simulator/
-!providers/simulators/transcribe-ai-simulator/pyproject.toml
-!providers/simulators/transcribe-ai-simulator/src/
-!providers/simulators/transcribe-ai-simulator/src/**
 
 **/__pycache__/
 **/*.py[cod]

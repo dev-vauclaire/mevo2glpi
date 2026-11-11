@@ -58,7 +58,6 @@ class FakeJob:
     storage_key: str = STORAGE_KEY
     audio_size_bytes: int = len(SYNTHETIC_AUDIO)
     glpi_ticket_id: int | None = None
-    transcription_provider_job_id: str | None = "provider-job-1"
     consecutive_retry_count: int = 0
 
 

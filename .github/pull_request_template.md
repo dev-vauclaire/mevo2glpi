@@ -23,7 +23,7 @@ ou sensible.
       révision précédente
 - [ ] la configuration, le déploiement et la documentation sont adaptés si
       leur contrat change
-- [ ] les impacts sur GLPI, Exchange, Transcribe AI, PostgreSQL et le stockage
+- [ ] les impacts sur GLPI, Exchange, le provider de transcription, PostgreSQL et le stockage
       audio sont explicités
 
 ## Déploiement et retour arrière

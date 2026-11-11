@@ -29,9 +29,16 @@ def configure_required_worker_settings(
     tmp_path: Path,
 ) -> None:
     """Provide baseline settings unless a test explicitly removes one."""
-    monkeypatch.setenv("TRANSCRIPTION_PROVIDER", "legacy_polling")
-    monkeypatch.setenv("LEGACY_TRANSCRIPTION_BASE_URL", TRANSCRIPTION_BASE_URL)
-    monkeypatch.setenv("LEGACY_TRANSCRIPTION_API_KEY", TRANSCRIPTION_API_KEY)
+    monkeypatch.setenv("TRANSCRIPTION_PROVIDER", "openai_compatible")
+    monkeypatch.setenv(
+        "OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL",
+        TRANSCRIPTION_BASE_URL,
+    )
+    monkeypatch.setenv(
+        "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY",
+        TRANSCRIPTION_API_KEY,
+    )
+    monkeypatch.setenv("OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL", "synthetic-model")
     monkeypatch.setenv("GLPI_BASE_URL", GLPI_BASE_URL)
     monkeypatch.setenv("GLPI_USERNAME", GLPI_USERNAME)
     monkeypatch.setenv("GLPI_PASSWORD", GLPI_PASSWORD)
@@ -341,8 +348,10 @@ def test_secrets_are_not_in_worker_settings_repr() -> None:
         database_url=database_url,
         glpi_password=password,
         glpi_client_secret=client_secret,
-        legacy_transcription_base_url="http://transcription.example.test",
-        legacy_transcription_api_key=transcription_api_key,
+        openai_compatible_transcription_base_url=(
+            "http://transcription.example.test/v1"
+        ),
+        openai_compatible_transcription_api_key=transcription_api_key,
         _env_file=None,
     )
 
@@ -555,30 +564,6 @@ def test_glpi_http_timeout_defaults_to_ten_seconds(
     assert settings.glpi_http_timeout_seconds == 10.0
 
 
-def test_legacy_transcription_settings_are_typed() -> None:
-    settings = WorkerSettings(
-        public_base_url="http://localhost:8000",
-        transcription_provider="legacy_polling",
-        legacy_transcription_base_url="https://transcription.example.test/prefix",
-        legacy_transcription_api_key="synthetic-api-key",
-        transcription_http_timeout_seconds=4.5,
-        transcription_poll_interval_seconds=1.5,
-        transcription_job_timeout_seconds=120,
-        _env_file=None,
-    )
-
-    assert settings.transcription_provider.value == "legacy_polling"
-    assert settings.legacy_transcription_base_url is not None
-    assert settings.legacy_transcription_base_url.path == "/prefix"
-    assert settings.legacy_transcription_api_key is not None
-    assert (
-        settings.legacy_transcription_api_key.get_secret_value() == "synthetic-api-key"
-    )
-    assert settings.transcription_http_timeout_seconds == 4.5
-    assert settings.transcription_poll_interval_seconds == 1.5
-    assert settings.transcription_job_timeout_seconds == 120
-
-
 def test_openai_compatible_transcription_is_the_default_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -594,23 +579,11 @@ def test_openai_compatible_transcription_is_the_default_provider(
         _env_file=None,
     )
 
-    assert settings.transcription_provider.value == "openai_compatible"
+    assert settings.transcription_provider == "openai_compatible"
 
 
-@pytest.mark.parametrize(
-    "missing_environment_variable",
-    [
-        "LEGACY_TRANSCRIPTION_BASE_URL",
-        "LEGACY_TRANSCRIPTION_API_KEY",
-    ],
-)
-def test_selected_legacy_transcription_credentials_are_required(
-    monkeypatch: pytest.MonkeyPatch,
-    missing_environment_variable: str,
-) -> None:
-    monkeypatch.delenv(missing_environment_variable)
-
-    with pytest.raises(ValidationError, match="legacy polling"):
+def test_legacy_polling_provider_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="openai_compatible"):
         WorkerSettings(
             public_base_url="http://localhost:8000",
             transcription_provider="legacy_polling",
@@ -618,12 +591,7 @@ def test_selected_legacy_transcription_credentials_are_required(
         )
 
 
-def test_openai_compatible_provider_requires_only_its_configuration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("LEGACY_TRANSCRIPTION_BASE_URL")
-    monkeypatch.delenv("LEGACY_TRANSCRIPTION_API_KEY")
-
+def test_openai_compatible_provider_configuration_is_typed() -> None:
     settings = WorkerSettings(
         public_base_url="http://localhost:8000",
         transcription_provider="openai_compatible",
@@ -635,9 +603,14 @@ def test_openai_compatible_provider_requires_only_its_configuration(
         _env_file=None,
     )
 
-    assert settings.transcription_provider.value == "openai_compatible"
-    assert settings.legacy_transcription_base_url is None
-    assert settings.legacy_transcription_api_key is None
+    assert settings.transcription_provider == "openai_compatible"
+    assert settings.openai_compatible_transcription_base_url is not None
+    assert settings.openai_compatible_transcription_base_url.path == "/v1"
+    assert settings.openai_compatible_transcription_api_key is not None
+    assert (
+        settings.openai_compatible_transcription_api_key.get_secret_value()
+        == "synthetic-provider-key"
+    )
     assert settings.openai_compatible_transcription_language == "fr"
 
 
@@ -653,8 +626,9 @@ def test_selected_openai_compatible_configuration_is_required(
     monkeypatch: pytest.MonkeyPatch,
     missing_field: str,
 ) -> None:
-    monkeypatch.delenv("LEGACY_TRANSCRIPTION_BASE_URL")
-    monkeypatch.delenv("LEGACY_TRANSCRIPTION_API_KEY")
+    monkeypatch.delenv("OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL")
+    monkeypatch.delenv("OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY")
+    monkeypatch.delenv("OPENAI_COMPATIBLE_TRANSCRIPTION_MODEL")
     values: dict[str, object] = {
         "openai_compatible_transcription_base_url": (
             "http://transcription-provider.test/v1"
@@ -677,20 +651,17 @@ def test_transcription_api_key_rejects_control_characters() -> None:
     with pytest.raises(ValidationError, match="control characters"):
         WorkerSettings(
             public_base_url="http://localhost:8000",
-            transcription_provider="legacy_polling",
-            legacy_transcription_base_url="http://transcription.example.test",
-            legacy_transcription_api_key="synthetic\napi-key",
+            openai_compatible_transcription_base_url=(
+                "http://transcription.example.test/v1"
+            ),
+            openai_compatible_transcription_api_key="synthetic\napi-key",
             _env_file=None,
         )
 
 
 @pytest.mark.parametrize(
     "field_name",
-    [
-        "transcription_http_timeout_seconds",
-        "transcription_poll_interval_seconds",
-        "transcription_job_timeout_seconds",
-    ],
+    ["transcription_http_timeout_seconds"],
 )
 def test_transcription_durations_must_be_positive_and_finite(
     field_name: str,

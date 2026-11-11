@@ -22,12 +22,10 @@ SIMULATORS_ENV_FILE = SIMULATORS_DOCKER_ROOT / "staging.env.example"
 SIMULATOR_SERVICES = {
     "microsoft-graph-simulator",
     "openai-transcription-simulator",
-    "transcribe-ai-simulator",
 }
 DOCUMENTED_SECRET_NAMES = {
     "MICROSOFT_GRAPH_SIMULATOR_ADMIN_TOKEN",
     "OPENAI_TRANSCRIPTION_SIMULATOR_API_KEY",
-    "TRANSCRIBE_AI_SIMULATOR_API_KEY",
 }
 
 
@@ -134,12 +132,10 @@ def test_simulator_services_are_isolated_and_have_stable_network_aliases(
     expected_aliases = {
         "microsoft-graph-simulator": "mevo2glpi-staging-microsoft-graph",
         "openai-transcription-simulator": ("mevo2glpi-staging-openai-transcription"),
-        "transcribe-ai-simulator": "mevo2glpi-staging-transcribe-ai",
     }
     expected_ports = {
         "microsoft-graph-simulator": "8080",
         "openai-transcription-simulator": "8080",
-        "transcribe-ai-simulator": "8080",
     }
 
     for service_name, alias in expected_aliases.items():
@@ -180,12 +176,11 @@ def test_graph_simulator_mounts_only_operator_audio_fixtures_read_only(
     graph_service_source = active_compose_source.split(
         "  microsoft-graph-simulator:",
         maxsplit=1,
-    )[1].split("\n  transcribe-ai-simulator:", maxsplit=1)[0]
+    )[1].split("\n  openai-transcription-simulator:", maxsplit=1)[0]
     assert re.search(
         r"(?m)^        bind:\s*\n          create_host_path: false\s*$",
         graph_service_source,
     )
-    assert services["transcribe-ai-simulator"].get("volumes", []) == []
     assert services["openai-transcription-simulator"].get("volumes", []) == []
 
 
@@ -230,15 +225,12 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
         "!providers/simulators/microsoft-graph-simulator/src/**",
         "!providers/simulators/openai-transcription-simulator/pyproject.toml",
         "!providers/simulators/openai-transcription-simulator/src/**",
-        "!providers/simulators/transcribe-ai-simulator/pyproject.toml",
-        "!providers/simulators/transcribe-ai-simulator/src/**",
     ):
         assert required_path in dockerignore
 
     for simulator_name in (
         "microsoft-graph-simulator",
         "openai-transcription-simulator",
-        "transcribe-ai-simulator",
     ):
         dockerfile = (SIMULATORS_DOCKER_ROOT / simulator_name / "Dockerfile").read_text(
             encoding="utf-8"

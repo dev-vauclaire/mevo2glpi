@@ -43,8 +43,8 @@ La stack exige :
 Le service rejoint ce réseau avec `TRANSCRIPTION_NETWORK_ALIAS`, expose
 uniquement le port conteneur `5092` et ne rejoint jamais Traefik. Le projet
 applicatif sélectionne `TRANSCRIPTION_PROVIDER=openai_compatible` et utilise
-une URL de base terminée par `/v1`. Aucun basculement automatique avec
-`legacy_polling` n'est réalisé.
+une URL de base terminée par `/v1`. Aucun autre contrat de transcription n'est
+activé au runtime.
 
 Watch path recommandé :
 

@@ -41,12 +41,6 @@ NOMINAL_EVENTS = (
     ("job_created", "pending", None, "worker_publisher"),
     ("processing_started", "processing", "transcription", "worker_automation"),
     (
-        "transcription_submitted",
-        "processing",
-        "transcription",
-        "worker_automation",
-    ),
-    (
         "transcription_succeeded",
         "processing",
         "glpi_creation",
@@ -60,11 +54,11 @@ NOMINAL_EVENTS = (
 def test_three_publisher_seeded_jobs_complete_with_exact_artifacts(
     e2e_environment: MvpComposeEnvironment,
     glpi_environment,
-    transcribe_ai_environment,
+    synthetic_audio_bytes: bytes,
 ) -> None:
     """Process three durable publisher outputs through every downstream app."""
     assert httpx.URL(e2e_environment.base_url).scheme == "http"
-    expected_audio = transcribe_ai_environment.audio_path.read_bytes()
+    expected_audio = synthetic_audio_bytes
     audios = tuple(
         SyntheticAudio(
             filename=f"batch-{index}.wav",
@@ -111,10 +105,10 @@ def test_three_publisher_seeded_jobs_complete_with_exact_artifacts(
 def test_audio_size_mismatch_blocks_then_operator_retry_completes(
     e2e_environment: MvpComposeEnvironment,
     glpi_environment,
-    transcribe_ai_environment,
+    synthetic_audio_bytes: bytes,
 ) -> None:
     """Expose a storage invariant, repair only the bytes, then rearm via HTTP."""
-    expected_audio = transcribe_ai_environment.audio_path.read_bytes()
+    expected_audio = synthetic_audio_bytes
     with _automation_stopped(e2e_environment):
         accepted = seed_audio_job(
             e2e_environment,
@@ -197,10 +191,10 @@ def test_audio_size_mismatch_blocks_then_operator_retry_completes(
 def test_application_failed_transition_alerts_then_operator_retry_completes(
     e2e_environment: MvpComposeEnvironment,
     glpi_environment,
-    transcribe_ai_environment,
+    synthetic_audio_bytes: bytes,
 ) -> None:
     """Materialize one terminal job error through the real lifecycle service."""
-    expected_audio = transcribe_ai_environment.audio_path.read_bytes()
+    expected_audio = synthetic_audio_bytes
     with _automation_stopped(e2e_environment):
         accepted = seed_audio_job(
             e2e_environment,
@@ -438,7 +432,6 @@ def _assert_recovered_events(
         terminal_event,
         "operator_retry_requested",
         "processing_started",
-        "transcription_submitted",
         "transcription_succeeded",
         "ticket_confirmed",
         "job_completed",

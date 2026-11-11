@@ -37,7 +37,6 @@ class TicketCreationJob(Base):
     audio_extension: Mapped[str] = mapped_column(String(4), nullable=False)
     audio_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     glpi_ticket_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
-    transcription_provider_job_id: Mapped[str | None] = mapped_column(String(255))
     attempt_count: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,

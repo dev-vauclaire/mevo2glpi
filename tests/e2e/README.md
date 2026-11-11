@@ -39,7 +39,7 @@ dédiées.
 
 GLPI, sa base MySQL et le provider sélectionné sont lancés comme services de
 test séparés. Le scénario nominal construit l'API CPU Parakeet épinglée ; les
-scénarios historiques de résilience utilisent encore Transcribe AI. Le Traefik
+scénarios de résilience utilisent le simulateur OpenAI-compatible. Le Traefik
 de Dokploy n'est pas simulé : la fixture publie directement FastAPI sur
 loopback. Les URLs et identifiants éphémères sont injectés dans la stack
 applicative.
@@ -66,8 +66,8 @@ Le sous-jalon 8B complète ce socle avec neuf scénarios :
 
 - `test_job_lifecycle.py` : trois sorties publisher synthétiques, pipeline nominal,
   `blocked`, `failed`, alertes et retries opérateur ;
-- `test_resilience.py` : pannes Transcribe AI et GLPI, barrière anti-fan-out,
-  retranscription, reprise après `SIGKILL` et unicité du ticket ;
+- `test_resilience.py` : pannes du provider OpenAI-compatible et de GLPI,
+  barrière anti-fan-out, retranscription et unicité du ticket ;
 - `test_retention.py` : conservation `SOLVED`, purge `CLOSED` et purge par
   deadline sans GLPI ;
 - `test_stack.py` : disponibilité et topologie du socle aval, avec publisher
@@ -97,37 +97,20 @@ construit l'image locale. Prévoir un accès aux sources configurées, jusqu'à 
 minutes pour la première exécution, de l'espace disque et au moins la mémoire
 requise par la stack GLPI, PostgreSQL et Parakeet.
 
-## Régression du provider historique
+## Régression du contrat OpenAI-compatible
 
-Le passage CPU historique reste disponible :
+Le passage avec le simulateur stateless reste disponible :
 
 ```bash
-TRANSCRIBE_AI_TEST_DEVICE=cpu \
 uv run --all-packages pytest -m "e2e and not transcription_model" \
-  apps/worker-automation/tests/integration/e2e tests/e2e \
+  tests/e2e \
   -vv --maxfail=1
 ```
 
 La suite doit rester strictement séquentielle. N'utilisez jamais
 `pytest-xdist`, l'option `-n` ou une exécution concurrente avec les suites
-`deployment`, `glpi` ou `transcribe_ai` : leurs stacks de session sont
+`deployment` ou `glpi` : leurs stacks de session sont
 volumineuses et partagent le même daemon Docker.
-
-## Validation GPU optionnelle
-
-Le GPU complète la validation CPU mais ne la remplace pas :
-
-```bash
-TRANSCRIBE_AI_TEST_DEVICE=gpu \
-uv run --all-packages pytest -m "e2e and not transcription_model" \
-  apps/worker-automation/tests/integration/e2e tests/e2e \
-  -vv --maxfail=1
-```
-
-Ce mode exige un runtime NVIDIA fonctionnel et vérifie que Transcribe AI voit
-réellement CUDA. Le premier lancement CPU ou GPU peut télécharger les images et
-le modèle Whisper `tiny` ; l'hôte doit donc disposer de suffisamment de temps,
-d'espace disque et de mémoire.
 
 ## Nettoyage et diagnostic
 

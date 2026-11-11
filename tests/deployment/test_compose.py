@@ -169,7 +169,6 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     )
 
     secret_names = {
-        "LEGACY_TRANSCRIPTION_API_KEY",
         "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY",
         "GLPI_USERNAME",
         "GLPI_PASSWORD",
@@ -412,13 +411,8 @@ def test_web_receives_no_provider_credentials(
     web_environment = services["web"]["environment"]
     assert "DATABASE_URL" in web_environment
     assert not any(
-        name.startswith(
-            ("GLPI_", "LEGACY_TRANSCRIPTION_", "OPENAI_COMPATIBLE_TRANSCRIPTION_")
-        )
+        name.startswith(("GLPI_", "OPENAI_COMPATIBLE_TRANSCRIPTION_"))
         for name in web_environment
-    )
-    assert (
-        "LEGACY_TRANSCRIPTION_API_KEY" in services["worker-automation"]["environment"]
     )
     assert (
         "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY"
@@ -428,17 +422,12 @@ def test_web_receives_no_provider_credentials(
     assert automation_environment["WORKER_LOG_LEVEL"] == "INFO"
     assert automation_environment["GLPI_TICKET_TYPE"] == "1"
     assert automation_environment["GLPI_TICKET_REQUEST_SOURCE_ID"] == "42"
-    assert (
-        "LEGACY_TRANSCRIPTION_API_KEY"
-        not in services["worker-retention"]["environment"]
-    )
     assert web_environment["WEB_TRUST_PROXY_HEADERS"] == "true"
     publisher_environment = services["worker-publisher"]["environment"]
     assert "PUBLISHER_ENTRA_PRIVATE_KEY_PEM_PATH" in publisher_environment
     assert "PUBLISHER_ENTRA_CERTIFICATE_PEM_PATH" in publisher_environment
     assert not any(
-        name.startswith(("GLPI_", "LEGACY_TRANSCRIPTION_"))
-        or name.startswith("OPENAI_COMPATIBLE_TRANSCRIPTION_")
+        name.startswith("GLPI_") or name.startswith("OPENAI_COMPATIBLE_TRANSCRIPTION_")
         for name in publisher_environment
     )
     for service_name in ("database-migrations", "web", "worker-retention"):

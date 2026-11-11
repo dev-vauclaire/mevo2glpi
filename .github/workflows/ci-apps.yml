@@ -100,7 +100,7 @@ jobs:
         run: >-
           uv run --all-packages pytest
           apps packages tests
-          -m "not database and not deployment and not glpi and not transcription_model and not transcribe_ai and not e2e"
+          -m "not database and not deployment and not glpi and not transcription_model and not e2e"
           --maxfail=1
 
       - name: Vérifier les manifests uv copiés dans les images

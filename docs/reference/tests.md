@@ -16,7 +16,6 @@ contenu réel de production ne doit être utilisé.
 | Persistance | `database` | Migrations, contraintes, repositories, transactions et verrous | PostgreSQL Testcontainers |
 | Déploiement | `deployment` | Dockerfiles, rendu Compose, réseaux, volumes, sécurité et healthchecks | Docker et Docker Compose |
 | Contrat GLPI | `glpi` | OAuth, API GLPI V2.3.0 et création de ticket | GLPI 11.0.7 et MySQL jetables |
-| Provider historique | `transcribe_ai` | Soumission, polling et réponses du provider historique | Stack Transcribe AI jetable |
 | Modèle local réel | `transcription_model` | Chargement et inférence du GGUF Parakeet Ultra | Modèle fourni localement et CPU |
 | Parcours aval complet | `e2e` | Migration, automation, GLPI, web et rétention | PostgreSQL, GLPI et provider de transcription jetables |
 | Parcours nominal Parakeet | `e2e` et `transcription_model` | Audio synthétique, transcription CPU réelle et ticket GLPI corrélé | Image Parakeet épinglée, modèle GGUF, PostgreSQL et GLPI jetables |
@@ -45,7 +44,7 @@ uv sync --locked --all-packages --all-groups
 uv run ruff format --check .
 uv run ruff check .
 uv run --all-packages pytest apps packages tests \
-  -m "not database and not deployment and not glpi and not transcription_model and not transcribe_ai and not e2e" \
+  -m "not database and not deployment and not glpi and not transcription_model and not e2e" \
   --maxfail=1
 uv run pytest providers --maxfail=1
 ```
@@ -86,23 +85,6 @@ La stack GLPI est jetable. Cette commande couvre le client partagé et
 l'intégration du worker de rétention. Elle ne doit jamais être remplacée dans
 cette suite par une instance de staging ou de production.
 
-### Provider Transcribe AI historique
-
-Le passage CPU est la référence :
-
-```bash
-TRANSCRIBE_AI_TEST_DEVICE=cpu \
-uv run --all-packages pytest -m transcribe_ai -vv --maxfail=1
-```
-
-Une validation GPU peut compléter la preuve lorsqu'un runtime NVIDIA est
-disponible, sans remplacer le passage CPU :
-
-```bash
-TRANSCRIBE_AI_TEST_DEVICE=gpu \
-uv run --all-packages pytest -m transcribe_ai -vv --maxfail=1
-```
-
 ### Modèle Parakeet Ultra réel
 
 Les tests ordinaires de `transcription-api` injectent un moteur et ne chargent
@@ -134,22 +116,12 @@ construit l'image locale. Il exige donc un accès aux sources configurées, du
 temps, de l'espace disque et suffisamment de mémoire. L'inférence reste
 strictement exécutée sur CPU.
 
-La régression du provider historique reste disponible séparément. Son passage
-CPU est séquentiel :
+La régression du pipeline avec le simulateur OpenAI-compatible est
+séquentielle :
 
 ```bash
-TRANSCRIBE_AI_TEST_DEVICE=cpu \
 uv run --all-packages pytest -m "e2e and not transcription_model" \
-  apps/worker-automation/tests/integration/e2e tests/e2e \
-  -vv --maxfail=1
-```
-
-Son mode GPU est optionnel :
-
-```bash
-TRANSCRIBE_AI_TEST_DEVICE=gpu \
-uv run --all-packages pytest -m "e2e and not transcription_model" \
-  apps/worker-automation/tests/integration/e2e tests/e2e \
+  tests/e2e \
   -vv --maxfail=1
 ```
 
@@ -161,14 +133,14 @@ sont couverts séparément par ses tests et le simulateur stateful.
 
 Le scénario nominal qualifie le contrat OpenAI-compatible et le modèle
 Parakeet Ultra sur un audio synthétique ; les autres scénarios de résilience
-utilisent encore le provider historique jetable. Aucun de ces parcours ne
+utilisent le simulateur OpenAI-compatible jetable. Aucun de ces parcours ne
 qualifie Traefik, les certificats TLS ou un tenant Entra ID réel. La topologie
 et les scénarios sont détaillés dans le
 [README de la suite E2E](../../tests/e2e/README.md).
 
 ## Séquentialité et nettoyage
 
-Les suites `database`, `deployment`, `glpi`, `transcribe_ai` et `e2e` ne doivent
+Les suites `database`, `deployment`, `glpi` et `e2e` ne doivent
 pas être parallélisées entre elles. N'utilisez ni `pytest-xdist`, ni l'option
 `-n` pour les suites qui partagent le daemon Docker.
 

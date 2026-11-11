@@ -102,9 +102,6 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
     assert documented_values["PUBLISHER_GRAPH_BASE_URL"] == (
         "http://mevo2glpi-staging-microsoft-graph:8080/v1.0"
     )
-    assert documented_values["LEGACY_TRANSCRIPTION_BASE_URL"] == (
-        "http://mevo2glpi-staging-transcribe-ai:8080"
-    )
     assert documented_values["OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL"] == (
         "http://mevo2glpi-staging-transcription:5092/v1"
     )
@@ -159,7 +156,6 @@ def test_staging_manifest_uses_separate_external_dependency_networks(
     assert set(services["web"]["networks"]) == {"database", "dokploy-network"}
     assert set(services["worker-automation"]["networks"]) == {
         "database",
-        "simulators",
         "transcription",
     }
     assert set(services["worker-publisher"]["networks"]) == {
@@ -193,9 +189,6 @@ def test_staging_uses_the_separated_simulator_and_transcription_services(
     assert publisher_environment["PUBLISHER_GRAPH_BASE_URL"] == (
         "http://mevo2glpi-staging-microsoft-graph:8080/v1.0"
     )
-    assert automation_environment["LEGACY_TRANSCRIPTION_BASE_URL"] == (
-        "http://mevo2glpi-staging-transcribe-ai:8080"
-    )
     assert automation_environment["TRANSCRIPTION_PROVIDER"] == "openai_compatible"
     assert automation_environment["OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL"] == (
         "http://mevo2glpi-staging-transcription:5092/v1"
@@ -209,7 +202,6 @@ def test_staging_uses_the_separated_simulator_and_transcription_services(
     assert automation_environment["GLPI_TICKET_REQUEST_SOURCE_ID"] == (
         "CHANGE_ME_WITH_THE_STAGING_MEVO_REQUEST_SOURCE_ID"
     )
-    assert "LEGACY_TRANSCRIPTION_API_KEY" in automation_environment
     assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" in automation_environment
     assert not any(
         name.startswith("PUBLISHER_ENTRA_") for name in publisher_environment
@@ -298,16 +290,11 @@ def test_staging_credentials_follow_least_privilege(
     retention_environment = services["worker-retention"]["environment"]
     web_environment = services["web"]["environment"]
 
-    assert "TRANSCRIBE_AI_SIMULATOR_API_KEY" not in publisher_environment
-    assert "LEGACY_TRANSCRIPTION_API_KEY" not in publisher_environment
     assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" not in publisher_environment
     assert not any(name.startswith("GLPI_") for name in publisher_environment)
-    assert "LEGACY_TRANSCRIPTION_API_KEY" not in retention_environment
-    assert "LEGACY_TRANSCRIPTION_API_KEY" in automation_environment
     assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" not in retention_environment
     assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" in automation_environment
     assert not any(name.startswith("GLPI_") for name in web_environment)
-    assert "LEGACY_TRANSCRIPTION_API_KEY" not in web_environment
     assert "OPENAI_COMPATIBLE_TRANSCRIPTION_API_KEY" not in web_environment
     for environment in (
         publisher_environment,

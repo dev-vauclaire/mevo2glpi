@@ -28,7 +28,6 @@ EXPECTED_SERVICES = {
     "glpi-test",
     "microsoft-graph-simulator",
     "openai-transcription-simulator",
-    "transcribe-ai-simulator",
 }
 
 
@@ -37,11 +36,9 @@ def _clean_environment() -> dict[str, str]:
         "COMPOSE_",
         "GLPI_",
         "MEVO2GLPI_DEV_",
-        "LEGACY_TRANSCRIPTION_",
         "MICROSOFT_GRAPH_",
         "OPENAI_",
         "PUBLISHER_",
-        "TRANSCRIBE_AI_",
     )
     return {
         name: value
@@ -113,7 +110,6 @@ def test_development_http_services_are_bound_only_to_loopback(
     services = _services(test_services_config)
     expected_ports = {
         "microsoft-graph-simulator": (18080, 8080),
-        "transcribe-ai-simulator": (18081, 8080),
         "openai-transcription-simulator": (18082, 8080),
         "glpi-test": (18083, 80),
     }
@@ -135,14 +131,12 @@ def test_development_http_services_are_bound_only_to_loopback(
 def test_development_http_ports_are_configurable() -> None:
     config = _render_compose(
         MEVO2GLPI_DEV_MICROSOFT_GRAPH_PORT="28080",
-        MEVO2GLPI_DEV_TRANSCRIBE_AI_PORT="28081",
         MEVO2GLPI_DEV_OPENAI_TRANSCRIPTION_PORT="28082",
         MEVO2GLPI_DEV_GLPI_PORT="28083",
     )
     services = _services(config)
 
     assert services["microsoft-graph-simulator"]["ports"][0]["published"] == "28080"
-    assert services["transcribe-ai-simulator"]["ports"][0]["published"] == "28081"
     assert (
         services["openai-transcription-simulator"]["ports"][0]["published"] == "28082"
     )
@@ -154,7 +148,6 @@ def test_root_environment_targets_the_loopback_test_services() -> None:
 
     assert environment["PUBLISHER_GRAPH_AUTH_MODE"] == "synthetic"
     assert environment["PUBLISHER_GRAPH_BASE_URL"] == ("http://127.0.0.1:18080/v1.0")
-    assert environment["LEGACY_TRANSCRIPTION_BASE_URL"] == ("http://127.0.0.1:18081")
     assert environment["OPENAI_COMPATIBLE_TRANSCRIPTION_BASE_URL"] == (
         "http://127.0.0.1:18082/v1"
     )
@@ -220,7 +213,6 @@ def test_simulators_are_hardened_and_use_synthetic_configuration(
     services = _services(test_services_config)
     for service_name in (
         "microsoft-graph-simulator",
-        "transcribe-ai-simulator",
         "openai-transcription-simulator",
     ):
         service = services[service_name]

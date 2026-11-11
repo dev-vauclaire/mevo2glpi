@@ -194,7 +194,6 @@ def test_minimal_job_detail_returns_persisted_state(
     assert body["attempt_count"] == 0
     assert body["retention_status"] is None
     assert "storage_key" not in body
-    assert "transcription_provider_job_id" not in body
 
 
 def test_job_detail_returns_404_for_unknown_uuid(web_context: WebTestContext) -> None:

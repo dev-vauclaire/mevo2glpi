@@ -25,7 +25,6 @@ produit. Une version déployable est identifiée par un tag Git immuable
 | `packages/glpi-client` | Client et contrats GLPI V2.3.0 | [README](../../packages/glpi-client/README.md) |
 | `providers/simulators/microsoft-graph-simulator` | Simulateur Graph de staging | [README](../../providers/simulators/microsoft-graph-simulator/README.md) |
 | `providers/simulators/openai-transcription-simulator` | Simulateur synchrone OpenAI-compatible | [README](../../providers/simulators/openai-transcription-simulator/README.md) |
-| `providers/simulators/transcribe-ai-simulator` | Simulateur Transcribe AI | [README](../../providers/simulators/transcribe-ai-simulator/README.md) |
 
 Les applications n'importent pas les modules internes d'une autre application.
 Le code partagé appartient aux packages.
@@ -36,7 +35,7 @@ Le code partagé appartient aux packages.
 | --- | --- |
 | `apps/` | Contient les six applications exécutables du projet. Leurs tests unitaires et d'intégration propres restent au plus près du code concerné. |
 | `packages/` | Contient les trois bibliothèques partagées par les applications : utilitaires communs, persistance PostgreSQL et client GLPI. |
-| `providers/` | Contient les simulateurs Microsoft Graph, Transcribe AI et OpenAI-compatible réservés au développement, au staging et aux tests. |
+| `providers/` | Contient les simulateurs Microsoft Graph et OpenAI-compatible réservés au développement, au staging et aux tests. |
 | `infra/` | Regroupe les images, les fichiers Compose et les exemples de configuration nécessaires aux différents environnements. |
 | `docs/` | Contient les procédures d'exploitation, les références techniques et les conceptions futures validées. |
 | `tests/` | Contient les tests transversaux de déploiement, d'intégration et de bout en bout, ainsi que leur support partagé. |
