@@ -192,7 +192,7 @@ sont pas conservés dans le cookie.
 
 Paramètres appliqués :
 
-- durée maximale : 30 minutes ;
+- durée par défaut : 30 minutes, configurable entre 5 minutes et 24 heures ;
 - `HttpOnly=true` ;
 - `SameSite=Lax` ;
 - `Secure=false` uniquement en développement HTTP local ;

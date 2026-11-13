@@ -148,6 +148,10 @@ Selon le périmètre, la CI exécute :
 6. les contrats ciblés des images et de la stack de transcription ;
 7. l'existence des cibles des liens Markdown relatifs.
 
+La [matrice de preuves](tests.md#matrice-de-preuves) distingue précisément les
+contrôles automatiques, les suites manuelles et les portes conditionnelles à
+appliquer selon le type de changement.
+
 Les suites `glpi`, `transcription_model`, `e2e` et certains
 tests `deployment` restent des validations manuelles. La CI ne démontre donc
 pas le fonctionnement des services réels de l'établissement.

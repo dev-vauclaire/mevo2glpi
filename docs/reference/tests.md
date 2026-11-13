@@ -22,6 +22,29 @@ contenu réel de production ne doit être utilisé.
 
 Les marqueurs sont déclarés dans le [`pyproject.toml`](../../pyproject.toml).
 
+## Matrice de preuves
+
+Cette matrice relie les principaux risques du produit à leur preuve actuelle.
+Une porte **systématique** s'applique à tout changement. Une porte
+**conditionnelle** devient obligatoire lorsque le périmètre indiqué est
+modifié.
+
+| Risque couvert | Preuve actuelle | Exécution | Porte de validation |
+| --- | --- | --- | --- |
+| Régression des règles métier, clients et workers | Tests unitaires et contractuels déterministes | CI applications ou providers selon les chemins modifiés | Systématique |
+| Schéma, migrations, repositories et transactions | Suite `database` sur PostgreSQL jetable | CI applications | Conditionnelle à toute modification de persistance |
+| Contrats des simulateurs Graph et OpenAI-compatible | Tests providers et contrat conteneurisé des simulateurs | CI providers | Conditionnelle aux providers et à leur infrastructure |
+| Dockerfiles, Compose, réseaux, volumes et durcissement runtime | Suite `deployment` | Partielle en CI, complète en local | Conditionnelle à toute modification de `infra/docker` ou d'une image |
+| OAuth, API GLPI, création et suivi d'un ticket | Suite `glpi` avec GLPI et MySQL jetables | Manuelle | Conditionnelle au client GLPI, à l'automatisation ou à la rétention |
+| Résilience du pipeline aval OpenAI-compatible | E2E avec simulateur de transcription | Manuelle | Conditionnelle à l'automatisation, au web ou à la rétention |
+| Chargement et inférence du modèle Parakeet réel | Suite `transcription_model` | Manuelle | Conditionnelle à l'API, au modèle ou à l'image de transcription |
+| Parcours nominal Parakeet vers GLPI | E2E réel CPU | Manuelle | Conditionnelle à une release de transcription |
+| Authentification locale et OIDC | Tests web, persistance et contrats du laboratoire Keycloak | Partielle en CI | Recette staging obligatoire pour un fournisseur OIDC réel |
+| Entra ID, Exchange Online, Traefik, TLS et Dokploy | Recette opérateur sur données fictives | Staging manuel | Obligatoire avant toute promotion en production |
+
+La colonne « Exécution » décrit l'état du dépôt, pas une intention future. Une
+suite manuelle n'est donc pas implicitement couverte par une CI verte.
+
 ## Préparation
 
 Prérequis communs :
@@ -52,6 +75,30 @@ uv run pytest providers --maxfail=1
 Les workflows `ci-apps.yml` et `ci-providers.yml` exécutent ces contrôles selon
 les chemins modifiés. La CI des applications valide également PostgreSQL, les
 migrations et les principaux contrats statiques des fichiers Compose.
+
+### Périmètre exact de la CI
+
+La CI **applications** exécute :
+
+- Ruff sur l'ensemble du dépôt ;
+- la suite déterministe de `apps/`, `packages/` et `tests/` ;
+- toute la suite `database` ;
+- le rendu des Compose applicatifs de production et de staging ;
+- des contrats ciblés sur les Dockerfiles, PostgreSQL de développement,
+  l'image GLPI canonique et la stack de transcription.
+
+Elle n'exécute pas toute la suite `deployment` et ne construit donc pas les
+cinq images applicatives à chaque changement.
+
+La CI **providers** exécute :
+
+- Ruff et tous les tests sous `providers/` ;
+- le contrat conteneurisé des simulateurs Microsoft Graph et
+  OpenAI-compatible.
+
+Les suites `glpi`, `transcription_model` et `e2e` ne sont exécutées par aucun
+workflow. Elles restent des portes locales ou de staging selon la matrice
+ci-dessus.
 
 ## Suites spécialisées
 
@@ -162,3 +209,54 @@ jetable. La procédure de staging complète cette preuve avec :
 
 Une panne ne doit jamais être injectée dans Exchange, GLPI ou un provider de
 production pour valider un scénario de test.
+
+## Portes avant fusion et release
+
+### Pour tout changement
+
+1. exécuter les tests ciblés du composant modifié ;
+2. exécuter Ruff et la suite déterministe pertinente ;
+3. vérifier que le workflow GitHub attendu est déclenché par ses filtres de
+   chemins et qu'il termine avec succès ;
+4. contrôler que les journaux et artefacts ne contiennent ni secret ni donnée
+   réelle.
+
+### Selon le périmètre
+
+- persistance ou migration : exécuter toute la suite `database` ;
+- `infra/docker`, Dockerfile ou topologie réseau : exécuter toute la suite
+  `deployment`, pas seulement `docker compose config` ;
+- client GLPI, création de ticket ou rétention GLPI : exécuter `glpi` ;
+- automation, web ou rétention aval : exécuter l'E2E avec simulateur ;
+- API, image ou modèle de transcription : exécuter le smoke test du modèle et
+  l'E2E Parakeet nominal ;
+- authentification OIDC, Entra ID, Exchange, TLS ou routage : compléter les
+  tests automatisés par la recette de staging correspondante.
+
+### Avant une release
+
+La CI doit être verte sur le SHA candidat. Les portes conditionnelles du
+changement doivent avoir réussi, puis le même SHA doit être validé en staging
+avec la [procédure CI/CD](ci-cd.md). Un tag ne doit pas être créé à partir d'un
+autre commit.
+
+## Limites connues
+
+L'état des lieux fait apparaître les limites suivantes :
+
+- la suite `deployment` complète n'est pas encore exécutée par la CI
+  applications ;
+- aucun E2E automatisé ne contacte un tenant Entra ID ou Exchange Online réel
+  et ne démarre le publisher dans cette frontière réelle ;
+- aucun E2E ne qualifie un fournisseur OIDC réel, Traefik, les certificats ou
+  Dokploy ;
+- la CI ne fixe pas encore de seuil de couverture et n'exécute pas de contrôle
+  dédié de typage, de vulnérabilités, d'images ou de secrets ;
+- la qualité linguistique de la transcription reste une validation
+  fonctionnelle de staging, distincte de la réussite technique du modèle.
+
+Ces limites ne doivent pas être contournées par des appels aux services de
+production. Leur automatisation sera priorisée selon le risque et le coût
+d'exploitation. Toute réorganisation de `infra/docker` devra également mettre
+à jour les filtres de chemins des deux workflows et conserver les contrats de
+rendu des recettes prises en charge.

@@ -210,7 +210,8 @@ Références officielles :
 
 Disposer :
 
-- du droit d'installer une GitHub App sur le dépôt privé ;
+- de l'URL du dépôt public ou, si l'intégration GitHub de Dokploy est retenue,
+  du droit d'installer une GitHub App limitée à `mevo2glpi` ;
 - d'un tag annoté immuable `vX.Y.Z` créé sur le SHA validé en staging ;
 - du SHA Git complet correspondant ;
 - de secrets, réseaux et volumes propres à la production.
@@ -233,7 +234,7 @@ source de celle-ci.
 | `NOM_GLPI_PRODUCTION` | adresse IP du GLPI | VM de production | rendre le nom résolvable par le DNS utilisé par Docker |
 | `login.microsoftonline.com` | adresses publiées par Microsoft | VM de production | autoriser la résolution pour l'obtention du jeton Entra |
 | `graph.microsoft.com` | adresses publiées par Microsoft | VM de production | autoriser la résolution pour Microsoft Graph |
-| `github.com`, `api.github.com` | adresses publiées par GitHub | VM de production | autoriser la résolution pour récupérer le dépôt privé |
+| `github.com`, et `api.github.com` si une GitHub App est utilisée | adresses publiées par GitHub | VM de production | autoriser la résolution nécessaire pour récupérer le dépôt public et, le cas échéant, utiliser l'intégration GitHub |
 | `auth.docker.io`, `registry-1.docker.io`, `production.cloudfront.docker.com`, `ghcr.io`, `pkg-containers.githubusercontent.com` | adresses publiées par Docker Hub et GHCR | VM de production | autoriser la résolution pour télécharger les images de base |
 | suffixes `huggingface.co` et `hf.co`, avec leurs sous-domaines | adresses publiées par Hugging Face | VM de production | autoriser la résolution pour télécharger le modèle Parakeet épinglé |
 
@@ -510,13 +511,14 @@ résultat des contrôles sans enregistrer de secret.
 
 ## Configuration de GitHub et Dokploy
 
-### Créer la GitHub App
+### Raccorder le dépôt GitHub
 
-Dans Dokploy, ouvrir **Git**, choisir GitHub, puis utiliser **Create GitHub
-App**. Installer l'application uniquement sur le dépôt `mevo2glpi`.
+Le dépôt `mevo2glpi` est public. Dokploy peut le récupérer directement depuis
+son URL sans secret GitHub. Une GitHub App reste optionnelle si l'intégration
+Dokploy associée est souhaitée ; dans ce cas, la limiter à ce seul dépôt.
 
-Vérifier que Dokploy peut lister le dépôt privé, le tag retenu et son SHA sans
-utiliser de Personal Access Token dans le Compose ou l'environnement.
+Vérifier que Dokploy peut récupérer le tag retenu et son SHA sans placer de
+Personal Access Token dans le Compose ou l'environnement.
 
 ### Créer le service PostgreSQL
 
@@ -569,9 +571,9 @@ mémoire qualifiées en staging.
 
 Copier le contenu de `infra/docker/apps/.env.example` dans l'onglet
 **Environment** du projet Applications et remplacer tous les placeholders.
-Ce modèle supporte les deux providers et conserve des valeurs génériques : pour
-la cible nominale de cette procédure, les valeurs Parakeet ci-dessous
-prévalent. Contrôler notamment :
+Le worker accepte uniquement le contrat synchrone OpenAI-compatible. Parakeet
+est l'implémentation nominale de cette procédure ; un autre serveur compatible
+doit être qualifié séparément. Contrôler notamment :
 
 - `APP_ENVIRONMENT=production` ;
 - `APP_RELEASE=vX.Y.Z` et `APP_COMMIT_SHA` contient le SHA complet du tag ;

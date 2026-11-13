@@ -218,7 +218,7 @@ donc apparaître avec l'adresse source de la VM.
 | --- | --- | --- | --- |
 | `NOM_VM_STAGING` | adresse IP de la VM de staging | postes opérateurs et administrateurs | créer un enregistrement interne `A` et, si utilisé, `AAAA` |
 | `NOM_GLPI_TEST` | adresse du GLPI externe, ou adresse de la VM lorsque le Compose optionnel est utilisé | VM de staging et postes chargés de la recette GLPI | rendre le nom résolvable par le DNS utilisé par Docker et les postes concernés |
-| `github.com`, `api.github.com` | adresses publiées par GitHub | VM de staging | autoriser leur résolution pour récupérer le dépôt privé |
+| `github.com`, et `api.github.com` si une GitHub App est utilisée | adresses publiées par GitHub | VM de staging | autoriser la résolution nécessaire pour récupérer le dépôt public et, le cas échéant, utiliser l'intégration GitHub |
 | `auth.docker.io`, `registry-1.docker.io`, `production.cloudfront.docker.com`, `ghcr.io`, `pkg-containers.githubusercontent.com` | adresses publiées par Docker Hub et GHCR | VM de staging | autoriser leur résolution pour télécharger les images de base |
 | suffixes `huggingface.co` et `hf.co`, avec tous leurs sous-domaines | adresses publiées par Hugging Face | VM de staging | autoriser leur résolution pour télécharger le modèle Parakeet épinglé |
 
@@ -243,7 +243,8 @@ sur l'hôte ni exposés par Traefik.
 
 Disposer :
 
-- du droit d'installer une GitHub App sur le dépôt privé ;
+- de l'URL du dépôt public ou, si l'intégration GitHub de Dokploy est retenue,
+  du droit d'installer une GitHub App limitée à `mevo2glpi` ;
 - d'une référence Git `main` ayant passé la CI ;
 - du SHA Git complet correspondant ;
 - de valeurs distinctes de la production pour les secrets, réseaux et volumes.
@@ -369,9 +370,9 @@ sudo docker network create --driver bridge mevo2glpi-staging-database-network
 
 `dokploy-network` est créé et géré par Dokploy.
 
-Les trois simulateurs et mevo2glpi sont des projets Compose exécutés sur la
-même VM. Un réseau externe `bridge` et `internal` leur permet de communiquer
-sans publier les simulateurs. Vérifier les réseaux avec :
+Les projets **Simulateurs**, **Transcription** et **Applications** sont
+exécutés sur la même VM. Des réseaux externes `bridge` permettent de les
+raccorder sans publier les simulateurs. Vérifier les réseaux avec :
 
 ```bash
 sudo docker network inspect --format '{{.Name}} {{.Driver}} {{.Internal}}' mevo2glpi-staging-simulators-network mevo2glpi-staging-transcription-network mevo2glpi-staging-database-network
@@ -416,26 +417,24 @@ sans enregistrer de secret.
 
 ## Configuration de GitHub et Dokploy
 
-### Créer la GitHub App
+### Raccorder le dépôt GitHub
 
-Dans Dokploy, ouvrir **Git**, choisir GitHub, puis utiliser **Create GitHub
-App**. Installer l'application uniquement sur le dépôt `mevo2glpi`, et non sur
-tous les dépôts de l'organisation.
-
-Suivre la
-[procédure GitHub officielle de Dokploy](https://docs.dokploy.com/docs/core/github).
-La clé privée de la GitHub App reste gérée par Dokploy et ne doit jamais être
-copiée dans un `.env` ou dans Git.
+Le dépôt `mevo2glpi` est public. Dokploy peut le récupérer directement depuis
+son URL sans secret GitHub. Une GitHub App reste optionnelle si l'intégration
+Dokploy associée est souhaitée. Dans ce cas, suivre la
+[procédure GitHub officielle de Dokploy](https://docs.dokploy.com/docs/core/github),
+limiter l'application au seul dépôt `mevo2glpi` et conserver sa clé privée dans
+Dokploy.
 
 Vérifier que Dokploy peut :
 
-1. lister le dépôt privé ;
+1. accéder au dépôt public ;
 2. lister la branche `main` ;
 3. récupérer le SHA qui a passé la CI ;
 4. reconstruire sans utiliser de jeton personnel dans le Compose.
 
-La GitHub App doit être révoquée ou renouvelée si la VM est compromise ou si
-elle n'est plus utilisée.
+Lorsqu'une GitHub App est utilisée, elle doit être révoquée ou renouvelée si la
+VM est compromise ou si elle n'est plus nécessaire.
 
 ### Créer le service PostgreSQL de staging
 
@@ -486,7 +485,7 @@ Pour tous les déploiements provenant du dépôt :
 - limiter les watch paths au périmètre du projet.
 
 Renseigner ce même SHA dans `APP_COMMIT_SHA` pour les projets **Transcription**
-et **Applications (mevo2glpi)**. GLPI et les trois simulateurs ne consomment ni
+et **Applications (mevo2glpi)**. GLPI et les deux simulateurs ne consomment ni
 `APP_RELEASE` ni `APP_COMMIT_SHA` : leur révision est contrôlée directement
 dans Dokploy.
 
@@ -749,7 +748,7 @@ PostgreSQL est irréversible ; les messages restent dans le dossier Exchange
 
 La recette fonctionnelle peut commencer uniquement lorsque :
 
-- [ ] les trois simulateurs sont `healthy` ;
+- [ ] les deux simulateurs sont `healthy` ;
 - [ ] la transcription est `healthy` ;
 - [ ] avec le Compose GLPI optionnel, `glpi-db` et `glpi-test` sont sains et
       `glpi-bootstrap` a terminé deux fois avec le code `0` ;
@@ -815,11 +814,11 @@ La commande affiche un manifeste JSON avec le scénario, le `message_id`, les
 pièces jointes et la date de réception de chaque message créé. Elle n'attend pas
 la fin des traitements et ne lance aucun `reset` automatique.
 
-Les cas acceptés créent des jobs consultables dans le dashboard. Les rejets ne
-sont pas encore affichés individuellement par le web : contrôler également le
-dossier mocké `Rejected` et les logs expurgés du publisher. Une nouvelle
-exécution de la commande produit de nouveaux messages et de nouveaux tickets
-pour les scénarios acceptés.
+Les cas acceptés créent des jobs consultables dans le dashboard. La vue
+« Messages rejetés » doit afficher chaque rejet avec son motif fonctionnel et
+son code technique expurgé. Contrôler également le dossier mocké `Rejected` et
+les logs expurgés du publisher. Une nouvelle exécution de la commande produit
+de nouveaux messages et de nouveaux tickets pour les scénarios acceptés.
 
 ### Audio fictif fourni par l'opérateur
 
@@ -905,8 +904,8 @@ Alembic sans procédure explicitement validée.
 Le staging est valide lorsque :
 
 - les deux portes de validation sont signées ;
-- les trois simulateurs, la transcription, les applications et la cible GLPI sont
-  sains ;
+- les deux simulateurs, la transcription, les applications et la cible GLPI
+  sont sains ;
 - la migration est terminée ;
 - les trois workers ont un heartbeat frais ;
 - les parcours WAV, OGG, MP3 et M4A créent chacun un ticket corrélé dans le

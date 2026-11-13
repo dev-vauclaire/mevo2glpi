@@ -3,7 +3,7 @@
 ## Workspace uv
 
 La racine est un workspace uv non publiable. `uv.lock` est l'unique verrou de
-dépendances pour ses douze membres. Le tableau ci-dessous reprend uniquement les
+dépendances pour ses onze membres. Le tableau ci-dessous reprend uniquement les
 chemins déclarés dans `[tool.uv.workspace].members` du fichier
 [`pyproject.toml`](../../pyproject.toml).
 

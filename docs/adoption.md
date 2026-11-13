@@ -22,7 +22,7 @@ l'évaluation.
 | GLPI | GLPI 11.0.7, API V2.3.0, OAuth Password | Toute autre version ou méthode d'authentification doit être requalifiée |
 | Messagerie | Exchange Online et Microsoft Graph, application Entra ID authentifiée par certificat et limitée à une boîte dédiée | Un autre système de messagerie nécessite un nouvel adaptateur |
 | Audio entrant | Une unique pièce jointe visible WAV, OGG, MP3 ou M4A par message, limitée à 25 Mio | Les autres formats et plusieurs pièces jointes visibles ne sont pas pris en charge |
-| Transcription nominale | API locale compatible OpenAI, Parakeet Ultra sur CPU | Le contrat permet un autre provider compatible ou l'adaptateur historique |
+| Transcription nominale | API locale compatible OpenAI, Parakeet Ultra sur CPU | Le contrat permet d'utiliser un autre provider OpenAI-compatible après qualification |
 | Persistance | PostgreSQL | Le schéma est géré par Alembic |
 | Déploiement de référence | Ubuntu Server 24.04 LTS, Docker et Dokploy | Dokploy est la topologie testée, pas une dépendance du code métier |
 

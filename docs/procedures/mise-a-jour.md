@@ -21,6 +21,29 @@ Une migration destructive, une restauration de données, une rotation de
 certificat ou une commande de rattrapage en mode `apply` nécessite un runbook
 spécifique.
 
+### Passage à `v0.12.0` ou une version ultérieure depuis une version antérieure
+
+La migration `0011_drop_legacy_polling`, introduite avec `v0.12.0`, retire les
+artefacts du client de transcription historique : les événements
+`transcription_submitted` et la colonne `transcription_provider_job_id`. Son
+downgrade restaure le schéma, mais ne recrée pas les données supprimées.
+
+Avant de franchir cette migration :
+
+1. vérifier qu'aucun job n'est `pending` ou `processing` ;
+2. consigner le tag, le SHA et la révision Alembic actuellement déployés ;
+3. si ces données historiques doivent être conservées, créer et qualifier un
+   point de reprise PostgreSQL avec le mécanisme de l'hyperviseur ;
+4. vérifier que la configuration cible utilise exclusivement
+   `TRANSCRIPTION_PROVIDER=openai_compatible` et les variables
+   `OPENAI_COMPATIBLE_TRANSCRIPTION_*`.
+
+Pendant la mise à jour, démarrer uniquement `database-migrations`, attendre son
+code `0`, puis vérifier que la révision Alembic attendue est appliquée avant de
+relancer les services persistants. Ne pas utiliser un downgrade Alembic comme
+mécanisme de restauration des événements supprimés : seul le point de reprise
+préparé avant la migration peut les restituer.
+
 ## Informations à relever
 
 Avant la fenêtre de maintenance, consigner :
