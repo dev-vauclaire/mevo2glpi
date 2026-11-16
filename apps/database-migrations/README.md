@@ -53,9 +53,9 @@ one-shot sans healthcheck ni politique de redémarrage.
 Cette application accède seulement à PostgreSQL. Elle ne monte pas le volume
 audio `/data/audios`. Elle attend elle-même la base externe dans un délai borné
 et sa réussite conditionne le démarrage des applications persistantes du MVP.
-Les ordres de démarrage et les contrôles opérateur sont décrits dans les
-procédures de [staging](../../docs/procedures/staging.md) et de
-[production](../../docs/procedures/production.md).
+Les ordres de démarrage et les contrôles opérateur sont décrits pour le
+[développement](../../docs/deploy/development/03-postgresql.md) et la
+[production](../../docs/deploy/production/09-deploiement.md).
 
 ## Historique courant
 

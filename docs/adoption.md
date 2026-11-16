@@ -65,17 +65,17 @@ healthchecks et l'ordre des migrations restent respectés.
 1. Cloner un tag Git immuable et lire la
    [référence d'architecture](reference/architecture.md).
 2. Exécuter les tests déterministes et lancer les services de test locaux selon
-   la [procédure de développement](procedures/developpement-local.md).
+   la [procédure de développement](deploy/development/README.md).
 3. Utiliser le simulateur Microsoft Graph et uniquement des audios synthétiques
    pour vérifier les acceptations et rejets.
-4. Déployer le même commit en staging selon la
-   [procédure dédiée](procedures/staging.md).
+4. Valider le pipeline local complet selon la
+   [recette synthétique](deploy/development/09-validation.md).
 5. Raccorder un GLPI de test et qualifier le client, les champs créés, la
    rétention et les droits.
 6. Faire valider localement l'application Entra ID, son certificat, son rôle
    Exchange et sa restriction à la boîte dédiée.
 7. Réaliser une analyse de risques, une revue RGPD et une recette fonctionnelle
-   avant d'envisager la production.
+   avant de suivre la [procédure de production](deploy/production/README.md).
 
 ## Sécurité et exploitation à qualifier localement
 

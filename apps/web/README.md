@@ -90,9 +90,9 @@ de droit d'écriture pour une ingestion.
 Le healthcheck de l'image appelle `/health`, qui reste une liveness locale et
 ne transforme pas PostgreSQL en dépendance de disponibilité HTTP. Le service
 web ne publie aucun port hôte ; le Traefik fourni par Dokploy route son port
-interne `8000`. Les contrôles de déploiement sont décrits dans les procédures
-de [staging](../../docs/procedures/staging.md) et de
-[production](../../docs/procedures/production.md).
+interne `8000`. Les contrôles de déploiement sont décrits pour le
+[développement](../../docs/deploy/development/08-applications.md) et la
+[production](../../docs/deploy/production/08-configuration-dokploy.md).
 
 ## Flux de consultation
 

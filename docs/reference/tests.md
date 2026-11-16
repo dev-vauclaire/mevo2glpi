@@ -39,8 +39,8 @@ modifié.
 | Résilience du pipeline aval OpenAI-compatible | E2E avec simulateur de transcription | Manuelle | Conditionnelle à l'automatisation, au web ou à la rétention |
 | Chargement et inférence du modèle Parakeet réel | Suite `transcription_model` | Manuelle | Conditionnelle à l'API, au modèle ou à l'image de transcription |
 | Parcours nominal Parakeet vers GLPI | E2E réel CPU | Manuelle | Conditionnelle à une release de transcription |
-| Authentification locale et OIDC | Tests web, persistance et contrats du laboratoire Keycloak | Partielle en CI | Recette staging obligatoire pour un fournisseur OIDC réel |
-| Entra ID, Exchange Online, Traefik, TLS et Dokploy | Recette opérateur sur données fictives | Staging manuel | Obligatoire avant toute promotion en production |
+| Authentification locale et OIDC | Tests web, persistance et contrats du laboratoire Keycloak | Partielle en CI | Validation locale avec Keycloak synthétique, puis validation contrôlée du fournisseur OIDC réel avant ouverture de la production |
+| Entra ID, Exchange Online, Traefik, TLS et Dokploy | Recette opérateur sur données fictives | Validation manuelle sur l'installation cible | Obligatoire avant l'ouverture de la production aux opérateurs |
 
 La colonne « Exécution » décrit l'état du dépôt, pas une intention future. Une
 suite manuelle n'est donc pas implicitement couverte par une CI verte.
@@ -83,7 +83,8 @@ La CI **applications** exécute :
 - Ruff sur l'ensemble du dépôt ;
 - la suite déterministe de `apps/`, `packages/` et `tests/` ;
 - toute la suite `database` ;
-- le rendu des Compose applicatifs de production et de staging ;
+- le rendu du Compose applicatif de production et de la recette de
+  compatibilité non recommandée encore présente dans le dépôt ;
 - des contrats ciblés sur les Dockerfiles, PostgreSQL de développement,
   l'image GLPI canonique et la stack de transcription.
 
@@ -97,8 +98,7 @@ La CI **providers** exécute :
   OpenAI-compatible.
 
 Les suites `glpi`, `transcription_model` et `e2e` ne sont exécutées par aucun
-workflow. Elles restent des portes locales ou de staging selon la matrice
-ci-dessus.
+workflow. Elles restent des portes locales manuelles selon la matrice ci-dessus.
 
 ## Suites spécialisées
 
@@ -130,7 +130,7 @@ uv run --all-packages pytest -m glpi -vv --maxfail=1
 
 La stack GLPI est jetable. Cette commande couvre le client partagé et
 l'intégration du worker de rétention. Elle ne doit jamais être remplacée dans
-cette suite par une instance de staging ou de production.
+cette suite par une instance persistante ou de production.
 
 ### Modèle Parakeet Ultra réel
 
@@ -144,8 +144,8 @@ uv run pytest -m transcription_model \
 ```
 
 Ce test vérifie le chargement et l'inférence, pas la qualité fonctionnelle. La
-qualité du français doit être qualifiée en staging avec des audios fictifs
-représentatifs.
+qualité du français doit être qualifiée localement avec des audios fictifs
+représentatifs avant toute mise en production.
 
 ### Parcours E2E aval
 
@@ -199,13 +199,16 @@ pour terminer une suite de ce dépôt.
 ## Frontières avec la recette opérateur
 
 Les tests automatisés prouvent les contrats logiciels dans un environnement
-jetable. La procédure de staging complète cette preuve avec :
+jetable. La validation synthétique locale complète cette preuve avec :
 
-- Microsoft Graph ou son simulateur selon le mode retenu ;
+- le simulateur Microsoft Graph ;
 - le provider de transcription réellement sélectionné ;
-- une instance GLPI de test ;
-- le routage Dokploy et les certificats internes ;
+- une instance GLPI locale jetable ;
 - une validation fonctionnelle sur des audios fictifs représentatifs.
+
+Le routage Dokploy, les certificats internes et les services externes réels
+sont ensuite validés sur l'installation cible avec des données fictives, avant
+son ouverture aux opérateurs.
 
 Une panne ne doit jamais être injectée dans Exchange, GLPI ou un provider de
 production pour valider un scénario de test.
@@ -230,15 +233,19 @@ production pour valider un scénario de test.
 - automation, web ou rétention aval : exécuter l'E2E avec simulateur ;
 - API, image ou modèle de transcription : exécuter le smoke test du modèle et
   l'E2E Parakeet nominal ;
-- authentification OIDC, Entra ID, Exchange, TLS ou routage : compléter les
-  tests automatisés par la recette de staging correspondante.
+- authentification OIDC : compléter les tests automatisés par le laboratoire
+  Keycloak local, puis qualifier le fournisseur réel avant ouverture de la
+  production ;
+- Entra ID, Exchange, TLS ou routage : exécuter les contrôles manuels de la
+  procédure de production avec des données fictives avant ouverture aux
+  opérateurs.
 
 ### Avant une release
 
 La CI doit être verte sur le SHA candidat. Les portes conditionnelles du
-changement doivent avoir réussi, puis le même SHA doit être validé en staging
-avec la [procédure CI/CD](ci-cd.md). Un tag ne doit pas être créé à partir d'un
-autre commit.
+changement et la validation synthétique locale doivent avoir réussi sur ce même
+SHA, conformément à la [procédure CI/CD](ci-cd.md). Un tag ne doit pas être
+créé à partir d'un autre commit.
 
 ## Limites connues
 
@@ -253,7 +260,8 @@ L'état des lieux fait apparaître les limites suivantes :
 - la CI ne fixe pas encore de seuil de couverture et n'exécute pas de contrôle
   dédié de typage, de vulnérabilités, d'images ou de secrets ;
 - la qualité linguistique de la transcription reste une validation
-  fonctionnelle de staging, distincte de la réussite technique du modèle.
+  fonctionnelle locale sur des audios fictifs représentatifs, distincte de la
+  réussite technique du modèle.
 
 Ces limites ne doivent pas être contournées par des appels aux services de
 production. Leur automatisation sera priorisée selon le risque et le coût

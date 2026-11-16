@@ -83,12 +83,13 @@ et de relancer ceux qui ne nécessitent pas de correction manuelle.
 
 ## Procédures par environnement
 
-Les déploiements en staging et en production s'effectuent avec **Dokploy**.
+Le développement s'exécute localement avec Docker Compose et uv. La production
+est déployée avec **Dokploy**.
 
-- [développement local](docs/procedures/developpement-local.md) ;
-- [staging](docs/procedures/staging.md) ;
-- [production](docs/procedures/production.md) ;
-- [mise à jour](docs/procedures/mise-a-jour.md).
+- [index des procédures de déploiement](docs/deploy/README.md) ;
+- [développement local](docs/deploy/development/README.md) ;
+- [production](docs/deploy/production/README.md) ;
+- [mise à jour de la production](docs/deploy/production/11-mise-a-jour.md).
 
 ## Documentation
 

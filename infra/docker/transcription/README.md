@@ -88,7 +88,7 @@ Le contrôle des variations de volume couvre notamment le
 [problème long-form connu de transcribe.cpp 0.4.1](https://github.com/handy-computer/transcribe.cpp/issues/235).
 
 L'ordre de déploiement, les valeurs propres à chaque environnement et la
-recette audio sont décrits dans les procédures de
-[staging](../../../docs/procedures/staging.md) et de
-[production](../../../docs/procedures/production.md). Les réseaux, clés et
-noms de projet doivent être distincts entre ces environnements.
+recette audio sont décrits pour le
+[développement](../../../docs/deploy/development/07-transcription-optionnelle.md)
+et la [production](../../../docs/deploy/production/07-transcription.md). Les
+réseaux, clés et noms de projet doivent rester propres à chaque déploiement.

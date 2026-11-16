@@ -96,9 +96,9 @@ premiers caractères destinés aux interfaces humaines.
 Le volume Docker canonique est monté en lecture-écriture par le publisher et le
 worker de rétention, et en lecture seule par le web et le worker
 d'automatisation. Les procédures de
-[staging](../../docs/procedures/staging.md) et de
-[production](../../docs/procedures/production.md) décrivent son volume
-persistant et sa configuration.
+[développement](../../docs/deploy/development/08-applications.md) et de
+[production](../../docs/deploy/production/06-postgresql-et-stockage.md)
+décrivent son volume persistant et sa configuration.
 
 `parse_audio_filename()` accepte une extension en majuscules à la frontière du
 provider et retourne une représentation normalisée. En revanche,

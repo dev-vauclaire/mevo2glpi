@@ -5,17 +5,17 @@
 Ce document décrit le cycle complet d'une modification :
 
 ```text
-développement -> push de main -> CI -> staging -> tag immuable -> production
+développement local -> push de main -> CI -> validation synthétique -> tag immuable -> production
 ```
 
 Il définit les références Git à promouvoir et les portes de validation. Les
 manipulations Dokploy — ordre d'arrêt, bouton **Deploy**, contrôles runtime et
 rollback immédiat — sont décrites dans la
-[procédure de mise à jour](../procedures/mise-a-jour.md).
+[procédure de mise à jour](../deploy/production/11-mise-a-jour.md).
 
 Le projet ne met pas en œuvre un déploiement continu automatique. La CI est
-automatique après un push, tandis que les promotions staging et production
-restent manuelles.
+automatique après un push, tandis que la création de la release et sa promotion
+en production restent manuelles.
 
 ## Pipeline
 
@@ -25,20 +25,18 @@ flowchart LR
     LOCAL["Tests locaux<br/>et relecture"]
     MAIN["Fusion locale<br/>push de main"]
     CI["CI GitHub Actions<br/>sans secret"]
-    STAGING["Déploiement manuel<br/>du SHA de main"]
-    RECIPE["Recette staging"]
+    VALIDATION["Recette locale synthétique<br/>du SHA de main"]
     TAG["Tag annoté immuable<br/>vX.Y.Z"]
     PROD["Promotion manuelle<br/>en production"]
 
     DEV --> LOCAL --> MAIN --> CI
-    CI -->|succès| STAGING --> RECIPE
-    RECIPE -->|succès| TAG --> PROD
+    CI -->|succès| VALIDATION -->|succès| TAG --> PROD
     CI -->|échec : commit correctif| DEV
-    RECIPE -->|échec : correction| DEV
+    VALIDATION -->|échec : correction| DEV
 ```
 
 L'invariant principal est le suivant : **le tag de production pointe exactement
-vers le SHA de `main` validé en staging**.
+vers le SHA de `main` validé par la CI et par la recette synthétique locale**.
 
 ## 1. Développer sur une branche courte
 
@@ -69,7 +67,7 @@ Pendant le développement :
   donnée sensible au dépôt.
 
 Les commandes locales sont décrites dans la
-[procédure de développement](../procedures/developpement-local.md).
+[procédure de développement](../deploy/development/README.md).
 
 ### Porte de validation locale
 
@@ -130,7 +128,7 @@ contrôles généraux du dépôt.
 | Workflow | Périmètre |
 | --- | --- |
 | [CI applications](../../.github/workflows/ci-apps.yml) | `apps/`, `packages/`, tests transversaux, recettes et composants Compose applicatifs, PostgreSQL de développement, image GLPI de test et stack de transcription |
-| [CI providers de test](../../.github/workflows/ci-providers.yml) | simulateurs de `providers/`, images associées, composant partagé et recettes Compose locales ou staging |
+| [CI providers de test](../../.github/workflows/ci-providers.yml) | simulateurs de `providers/`, images associées, composant partagé et recettes Compose de test |
 
 Le workspace uv et `uv.lock` sont communs aux deux périmètres. Une modification
 du manifeste racine, du verrou ou de `.dockerignore` peut déclencher les deux
@@ -161,7 +159,7 @@ pas le fonctionnement des services réels de l'établissement.
 Les workflows :
 
 - utilisent uniquement la permission GitHub `contents: read` ;
-- n'utilisent aucun secret de staging ou de production ;
+- n'utilisent aucun secret d'un service externe ou de production ;
 - ne lisent aucun fichier `.env` réel, certificat ou clé privée ;
 - épinglent les actions tierces sur des révisions immuables ;
 - n'appellent ni Exchange, ni GLPI, ni un provider réel ;
@@ -172,7 +170,7 @@ Les workflows :
 Le push direct peut placer temporairement un commit en échec dans `main`. Si un
 job échoue :
 
-1. ne rien déployer en staging ;
+1. ne créer aucun tag et ne rien déployer en production ;
 2. créer un commit correctif ;
 3. pousser de nouveau `main` ;
 4. attendre la réussite de la nouvelle exécution ;
@@ -185,63 +183,43 @@ job échoue :
 - [ ] les logs ne contiennent aucune donnée sensible ;
 - [ ] aucun déploiement n'a commencé avant la fin des contrôles.
 
-## 4. Promouvoir le SHA en staging
+## 4. Valider le SHA de `main`
 
 Relever le SHA exact validé par la CI :
 
 ```bash
 git fetch origin --tags
-git rev-parse origin/main^{commit}
+MEVO2GLPI_VALIDATED_SHA=$(git rev-parse origin/main^{commit})
+printf '%s\n' "$MEVO2GLPI_VALIDATED_SHA"
 ```
 
-L'auto-déploiement Dokploy reste désactivé. Dans le projet staging
-**Applications (mevo2glpi)**, utiliser :
+Depuis un checkout propre de ce SHA, suivre la
+[procédure de développement](../deploy/development/README.md) et sa
+[recette synthétique](../deploy/development/09-validation.md). Utiliser
+uniquement les simulateurs, un GLPI local et des audios fictifs. La validation
+doit au minimum couvrir :
 
-```text
-APP_ENVIRONMENT=staging
-APP_RELEASE=main
-APP_COMMIT_SHA=<SHA_COMPLET_VALIDE_PAR_LA_CI>
-```
-
-Dans le projet **Transcription**, lorsqu'il est concerné, utiliser uniquement :
-
-```text
-APP_RELEASE=main
-APP_COMMIT_SHA=<SHA_COMPLET_VALIDE_PAR_LA_CI>
-```
-
-Le projet **Providers mocks** ne consomme pas ces variables ; sa révision doit
-être contrôlée depuis le déploiement Dokploy lorsqu'il est concerné.
-
-Suspendre les nouveaux push de `main` pendant la recette, ou vérifier de nouveau
-le SHA après le déploiement puis avant la validation. Les variables d'identité
-sont déclaratives et ne verrouillent pas le checkout réalisé par Dokploy.
-
-Exécuter le déploiement avec la
-[procédure de mise à jour](../procedures/mise-a-jour.md), puis appliquer la
-recette de la [procédure staging](../procedures/staging.md). Cette recette doit
-au minimum valider :
-
-- la migration ;
-- l'identité `staging`, `main` et le SHA ;
-- les heartbeats des workers ;
+- la migration depuis une base neuve ;
+- le démarrage et les heartbeats des services nécessaires ;
 - les flux synthétiques WAV, OGG, MP3 et M4A ;
-- la création du ticket dans le GLPI de test ;
-- l'absence de secret ou de contenu métier dans les logs.
+- les principaux rejets contrôlés ;
+- la création du ticket dans le GLPI local ;
+- l'absence de secret, donnée réelle ou transcription dans les logs.
 
-Toute modification après cette recette produit un nouveau SHA et invalide la
-promotion. Le nouveau commit doit repasser par la CI et staging.
+Suspendre les nouveaux push de `main` pendant la recette ou relever de nouveau
+le SHA avant de créer la release. Toute correction produit un nouveau SHA qui
+doit repasser par la CI et par cette validation.
 
-### Porte de validation staging
+### Porte de validation synthétique
 
-- [ ] le SHA déployé correspond au SHA validé par la CI ;
-- [ ] la recette synthétique est réussie ;
+- [ ] le SHA testé correspond au SHA validé par la CI ;
+- [ ] la recette locale synthétique est réussie ;
 - [ ] les anomalies et résultats sont consignés ;
 - [ ] aucun commit ultérieur n'est inclus dans la future release.
 
 ## 5. Créer la release
 
-Après validation de staging, créer un tag annoté sur le SHA exactement recetté :
+Après validation du SHA, créer un tag annoté sur le commit exactement recetté :
 
 ```bash
 git fetch origin --tags
@@ -249,15 +227,16 @@ git switch main
 git pull --ff-only
 
 MEVO2GLPI_RELEASE_TAG=vX.Y.Z
-MEVO2GLPI_STAGING_SHA=<SHA_COMPLET_VALIDE_EN_STAGING>
+MEVO2GLPI_VALIDATED_SHA=<SHA_COMPLET_VALIDE>
 
-test "$(git rev-parse HEAD)" = "$MEVO2GLPI_STAGING_SHA"
-git tag -a "$MEVO2GLPI_RELEASE_TAG" "$MEVO2GLPI_STAGING_SHA" -m "release: $MEVO2GLPI_RELEASE_TAG"
+test "$(git rev-parse HEAD)" = "$MEVO2GLPI_VALIDATED_SHA"
+git tag -a "$MEVO2GLPI_RELEASE_TAG" "$MEVO2GLPI_VALIDATED_SHA" -m "release: $MEVO2GLPI_RELEASE_TAG"
 git rev-parse "$MEVO2GLPI_RELEASE_TAG^{commit}"
 git push origin "$MEVO2GLPI_RELEASE_TAG"
 ```
 
-La commande `git rev-parse` doit retourner le SHA validé en staging. Le tag :
+La commande `git rev-parse` doit retourner le SHA validé localement et par la
+CI. Le tag :
 
 - respecte `vMAJEUR.MINEUR.CORRECTIF` ;
 - n'est jamais déplacé, supprimé puis recréé ou réutilisé ;
@@ -273,7 +252,7 @@ explicitement.
 - [ ] il pointe exactement vers le SHA recetté ;
 - [ ] ce SHA appartient à `main` et sa CI est verte ;
 - [ ] le tag est poussé sans modifier un tag existant ;
-- [ ] le résultat de la recette staging est associé à la release.
+- [ ] le résultat de la recette synthétique est associé à la release.
 
 ## 6. Promouvoir la release en production
 
@@ -297,14 +276,14 @@ Ne jamais déployer `main`, une branche de fonctionnalité ou un alias mutable
 comme `latest` en production. La promotion reste une action manuelle dans
 Dokploy.
 
-Appliquer la [procédure de mise à jour](../procedures/mise-a-jour.md) pour
+Appliquer la [procédure de mise à jour](../deploy/production/11-mise-a-jour.md) pour
 l'arrêt, le déploiement, les contrôles et le rollback immédiat. La décision de
 maintenir ou de retirer la release appartient à l'opérateur désigné pour la
 fenêtre de maintenance.
 
 ### Porte de validation production
 
-- [ ] le tag et son SHA correspondent à ceux validés en staging ;
+- [ ] le tag et son SHA correspondent au commit validé localement et par la CI ;
 - [ ] la procédure de mise à jour est entièrement validée ;
 - [ ] le traitement synthétique autorisé est réussi ;
 - [ ] la décision de maintien est consignée.
@@ -317,7 +296,7 @@ Conserver pour chaque version :
 - les validations locales exécutées ;
 - le SHA de `main` contrôlé par la CI ;
 - les résultats des workflows ;
-- le SHA et le résultat de la recette staging ;
+- le SHA et le résultat de la recette synthétique locale ;
 - le tag annoté et son SHA ;
 - la date et le résultat de la promotion production ;
 - l'identité de l'opérateur et du décideur, sans secret ni donnée sensible.
@@ -327,9 +306,10 @@ Conserver pour chaque version :
 - l'absence de Pull Request signifie que `main` peut temporairement être rouge ;
 - GitHub Free ne rend pas toutes les règles de branche obligatoires sur ce dépôt
   privé ;
-- les services réels sont validés en staging, pas par la CI ;
-- les images staging et production sont reconstruites séparément en l'absence
-  de registre d'images ;
+- les services réels de l'établissement ne sont pas qualifiés par la CI et
+  nécessitent des contrôles manuels avant maintien de la production ;
+- les images sont reconstruites lors du déploiement en l'absence de registre
+  d'images ;
 - `APP_COMMIT_SHA` reste contrôlé par l'opérateur et ne verrouille pas le
   checkout Dokploy ;
 - la production n'est jamais déployée automatiquement.

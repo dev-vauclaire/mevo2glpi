@@ -83,6 +83,5 @@ docker compose --env-file infra/docker/transcription/staging.env.example --file 
 ```
 
 Les manipulations complètes sont décrites dans les procédures de
-[développement local](../../docs/procedures/developpement-local.md), de
-[staging](../../docs/procedures/staging.md) et de
-[production](../../docs/procedures/production.md).
+[développement local](../../docs/deploy/development/README.md) et de
+[production](../../docs/deploy/production/README.md).

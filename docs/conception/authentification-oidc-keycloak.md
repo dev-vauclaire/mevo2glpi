@@ -14,8 +14,9 @@ des établissements :
 - `local` pour administrer des comptes propres à mevo2glpi dans PostgreSQL ;
 - `oidc` pour déléguer l'authentification à un fournisseur d'identité.
 
-Le [laboratoire Keycloak local](../procedures/keycloak-local.md) permet de
-manipuler manuellement les realms, clients, rôles et utilisateurs synthétiques.
+Le [laboratoire Keycloak local](../deploy/development/06-authentification.md)
+permet de manipuler manuellement les realms, clients, rôles et utilisateurs
+synthétiques.
 L'intégration applicative cible le standard OpenID Connect (OIDC), et
 non des API privées de Keycloak, afin de pouvoir raccorder ultérieurement le
 Keycloak de l'établissement sans réécrire le cœur de l'authentification.
@@ -24,7 +25,7 @@ Keycloak de l'établissement sans réécrire le cœur de l'authentification.
 
 L'implémentation couvre :
 
-- l'application web dans les trois environnements ;
+- l'application web dans les environnements pris en charge ;
 - un Keycloak de développement contenant exclusivement des identités
   synthétiques ;
 - la connexion locale ou OIDC et la déconnexion applicative ;
@@ -37,7 +38,7 @@ L'implémentation couvre :
 
 Il ne comprend pas :
 
-- le déploiement de Keycloak en staging ou en production ;
+- le déploiement du fournisseur d'identité administré en production ;
 - une modification des workers ou de leur authentification ;
 - la persistance de l'identité de l'opérateur dans les événements métier ;
 - la synchronisation des comptes locaux avec un annuaire ;
@@ -318,8 +319,8 @@ synthétiques. Le fichier d'exemple contient uniquement des valeurs locales
 explicitement identifiées comme non sensibles.
 
 `start-dev` est strictement réservé au développement. Un raccordement OIDC en
-staging ou production utilise une instance administrée et un client distinct
-par environnement.
+production utilise une instance administrée et un client dédié à cette
+installation.
 
 ## Mode local
 
@@ -445,11 +446,10 @@ authentification rouvrirait le dashboard et ne constitue pas une stratégie
 acceptable. La migration PostgreSQL est additive ; un rollback applicatif doit
 conserver la table des comptes tant que des comptes existent.
 
-## Décisions à prendre avant staging et production
+## Décisions à prendre avant la production
 
 Les points suivants restent volontairement ouverts :
 
-- disponibilité d'un Keycloak de staging ;
 - realm, client, groupes et attribution du rôle gérés par l'établissement ;
 - URLs publiques, reverse proxy, certificats et issuer exacts ;
 - niveau de disponibilité attendu pour le fournisseur d'identité ;

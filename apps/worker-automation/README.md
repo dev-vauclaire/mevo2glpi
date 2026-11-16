@@ -479,10 +479,10 @@ installe cette application sans dépendances de développement et l'exécute en
 non-root. Le volume partagé `/data/audios` est monté en lecture seule : le
 worker inspecte et transmet les octets, mais ne peut ni les modifier ni les
 supprimer. Les procédures de
-[staging](../../docs/procedures/staging.md) et de
-[production](../../docs/procedures/production.md) décrivent sa configuration
-Dokploy et le montage en lecture seule du bundle de confiance interne, sans
-désactiver la vérification TLS.
+[développement](../../docs/deploy/development/08-applications.md) et de
+[production](../../docs/deploy/production/08-configuration-dokploy.md)
+décrivent sa configuration et le montage en lecture seule du bundle de
+confiance interne, sans désactiver la vérification TLS.
 
 Suite unitaire du workspace :
 

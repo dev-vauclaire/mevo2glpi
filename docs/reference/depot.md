@@ -23,7 +23,7 @@ produit. Une version déployable est identifiée par un tag Git immuable
 | `packages/common` | Audio, backoff, attente et identité de release | [README](../../packages/common/README.md) |
 | `packages/database` | Modèles, repositories et verrous PostgreSQL | [README](../../packages/database/README.md) |
 | `packages/glpi-client` | Client et contrats GLPI V2.3.0 | [README](../../packages/glpi-client/README.md) |
-| `providers/simulators/microsoft-graph-simulator` | Simulateur Graph de staging | [README](../../providers/simulators/microsoft-graph-simulator/README.md) |
+| `providers/simulators/microsoft-graph-simulator` | Simulateur Graph de développement et de test | [README](../../providers/simulators/microsoft-graph-simulator/README.md) |
 | `providers/simulators/openai-transcription-simulator` | Simulateur synchrone OpenAI-compatible | [README](../../providers/simulators/openai-transcription-simulator/README.md) |
 
 Les applications n'importent pas les modules internes d'une autre application.
@@ -35,7 +35,7 @@ Le code partagé appartient aux packages.
 | --- | --- |
 | `apps/` | Contient les six applications exécutables du projet. Leurs tests unitaires et d'intégration propres restent au plus près du code concerné. |
 | `packages/` | Contient les trois bibliothèques partagées par les applications : utilitaires communs, persistance PostgreSQL et client GLPI. |
-| `providers/` | Contient les simulateurs Microsoft Graph et OpenAI-compatible réservés au développement, au staging et aux tests. |
+| `providers/` | Contient les simulateurs Microsoft Graph et OpenAI-compatible réservés au développement et aux tests. |
 | `infra/` | Regroupe les images, les fichiers Compose et les exemples de configuration nécessaires aux différents environnements. |
 | `docs/` | Contient les procédures d'exploitation, les références techniques et les conceptions futures validées. |
 | `tests/` | Contient les tests transversaux de déploiement, d'intégration et de bout en bout, ainsi que leur support partagé. |
@@ -43,13 +43,16 @@ Le code partagé appartient aux packages.
 
 Le dossier `infra/docker/` est organisé par périmètre de déploiement :
 
-- `apps/` construit et orchestre les applications pour le staging et la
-  production ;
+- `apps/` construit et orchestre les applications de production. Il conserve
+  aussi la recette de compatibilité historique
+  `docker-compose.staging.yml`, qui n'est plus un parcours de déploiement
+  recommandé ;
 - `components/` contient les définitions de services réutilisées avec
   `extends` ; ces composants ne sont jamais des points d'entrée de déploiement ;
 - `development/` orchestre PostgreSQL et les services de test locaux ;
-- `providers/` regroupe les images des services de test et leur orchestration
-  staging ;
+- `providers/` regroupe les images des services de test. Les fichiers dont le
+  nom contient `staging` restent présents pour compatibilité matérielle, sans
+  définir un environnement procédural recommandé ;
 - `transcription/` déploie indépendamment le service local de transcription
   CPU.
 

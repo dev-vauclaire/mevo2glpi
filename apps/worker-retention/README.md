@@ -275,9 +275,10 @@ installe l'application sans dépendances de développement et l'exécute en
 non-root. Dans Compose, `/data/audios` est monté en lecture-écriture car ce
 worker est l'unique application chargée de la quarantaine et de la suppression
 des octets après ingestion. Les procédures de
-[staging](../../docs/procedures/staging.md) et de
-[production](../../docs/procedures/production.md) décrivent sa configuration
-Dokploy et le montage en lecture seule du bundle de confiance interne.
+[développement](../../docs/deploy/development/08-applications.md) et de
+[production](../../docs/deploy/production/08-configuration-dokploy.md)
+décrivent sa configuration et le montage en lecture seule du bundle de
+confiance interne.
 
 ## Tests
 
