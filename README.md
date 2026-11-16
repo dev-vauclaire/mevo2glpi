@@ -30,7 +30,7 @@
 - [Procédures par environnement](#procédures-par-environnement)
 - [Documentation](#documentation)
 - [Feuille de route](#feuille-de-route)
-  - [Simplification et maintenabilité](#simplification-et-maintenabilité)
+  - [Exploitation et qualité](#exploitation-et-qualité)
   - [Résilience de la transcription](#résilience-de-la-transcription)
   - [Génération assistée du ticket par LLM](#génération-assistée-du-ticket-par-llm)
 - [Licence](#licence)
@@ -107,6 +107,16 @@ est déployée avec **Dokploy**.
 
 Cette feuille de route contient uniquement les évolutions prévues. Les
 fonctionnalités déjà disponibles sont décrites dans les sections précédentes.
+
+### Exploitation et qualité
+
+- [ ] Réaliser un état des lieux de la stratégie de tests et identifier les
+  scénarios à renforcer.
+- [ ] Permettre à l'opérateur de consulter et de lire un audio depuis le
+  dashboard, avec l'état et les détails du traitement. Le lien audio exposé
+  dans GLPI doit mener à cette vue.
+- [ ] Permettre à l'opérateur de relancer depuis le dashboard un worker bloqué,
+  avec des contrôles d'autorisation et une action traçable.
 
 ### Résilience de la transcription
 
