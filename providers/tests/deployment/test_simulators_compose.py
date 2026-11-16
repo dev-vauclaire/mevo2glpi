@@ -18,6 +18,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 SIMULATORS_DOCKER_ROOT = REPOSITORY_ROOT / "infra" / "docker" / "providers"
 SIMULATORS_COMPOSE_FILE = SIMULATORS_DOCKER_ROOT / "docker-compose.staging.yml"
 SIMULATORS_ENV_FILE = SIMULATORS_DOCKER_ROOT / "staging.env.example"
+SIMULATOR_COMPONENT_FILE = (
+    REPOSITORY_ROOT / "infra" / "docker" / "components" / "simulator-services.yml"
+)
 
 SIMULATOR_SERVICES = {
     "microsoft-graph-simulator",
@@ -85,7 +88,10 @@ def _services(config: dict[str, object]) -> dict[str, dict[str, Any]]:
 
 
 def test_simulators_environment_documents_every_interpolated_variable() -> None:
-    compose_source = SIMULATORS_COMPOSE_FILE.read_text(encoding="utf-8")
+    compose_source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (SIMULATORS_COMPOSE_FILE, SIMULATOR_COMPONENT_FILE)
+    )
     example_source = SIMULATORS_ENV_FILE.read_text(encoding="utf-8")
     active_compose_source = "\n".join(
         line
@@ -116,6 +122,19 @@ def test_simulators_environment_documents_every_interpolated_variable() -> None:
         r"(?i)(?:api[_-]?key|secret|password|token)=[0-9a-f]{32,}",
         example_source,
     )
+
+
+def test_staging_simulators_extend_the_canonical_component() -> None:
+    compose_source = SIMULATORS_COMPOSE_FILE.read_text(encoding="utf-8")
+
+    assert SIMULATOR_COMPONENT_FILE.is_file()
+    for service_name in SIMULATOR_SERVICES:
+        declaration = f"""  {service_name}:
+    extends:
+      file: ../components/simulator-services.yml
+      service: {service_name}
+"""
+        assert declaration in compose_source
 
 
 def test_simulators_manifest_contains_only_the_active_staging_simulators(
@@ -258,3 +277,22 @@ def test_simulator_build_context_contains_only_required_workspace_sources() -> N
             assert f"COPY {manifest} {manifest}" in dockerfile
         assert "HEALTHCHECK " in dockerfile
         assert "/health" in dockerfile
+
+
+def test_simulator_component_builds_from_the_repository_root(
+    simulators_compose_config: dict[str, object],
+) -> None:
+    services = _services(simulators_compose_config)
+    expected_dockerfiles = {
+        "microsoft-graph-simulator": (
+            "infra/docker/providers/microsoft-graph-simulator/Dockerfile"
+        ),
+        "openai-transcription-simulator": (
+            "infra/docker/providers/openai-transcription-simulator/Dockerfile"
+        ),
+    }
+
+    for service_name, dockerfile in expected_dockerfiles.items():
+        build = services[service_name]["build"]
+        assert Path(build["context"]).resolve() == REPOSITORY_ROOT.resolve()
+        assert build["dockerfile"] == dockerfile

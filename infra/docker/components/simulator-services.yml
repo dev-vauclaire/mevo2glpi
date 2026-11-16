@@ -1,0 +1,30 @@
+# Composant interne : utiliser une recette providers/ ou development/.
+x-simulator-runtime: &simulator-runtime
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  microsoft-graph-simulator:
+    <<: *simulator-runtime
+    build:
+      context: ../../..
+      dockerfile: infra/docker/providers/microsoft-graph-simulator/Dockerfile
+
+  openai-transcription-simulator:
+    <<: *simulator-runtime
+    build:
+      context: ../../..
+      dockerfile: infra/docker/providers/openai-transcription-simulator/Dockerfile

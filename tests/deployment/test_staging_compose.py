@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 
 from .conftest import (
+    APPLICATION_SERVICES_COMPONENT_FILE,
     APPS_DOCKER_ROOT,
-    COMMON_COMPOSE_SERVICES_FILE,
     STAGING_COMPOSE_FILE,
     SYNTHETIC_APP_COMMIT_SHA,
 )
@@ -46,7 +46,7 @@ def test_staging_entrypoint_exposes_only_the_five_applications() -> None:
     for service_name in STAGING_SERVICES:
         declaration = f"""  {service_name}:
     extends:
-      file: ./docker-compose.common.services.yml
+      file: ../components/application-services.yml
       service: {service_name}
 """
         assert declaration in source
@@ -67,7 +67,7 @@ def test_staging_environment_documents_every_interpolated_variable() -> None:
         path.read_text(encoding="utf-8")
         for path in (
             STAGING_COMPOSE_FILE,
-            COMMON_COMPOSE_SERVICES_FILE,
+            APPLICATION_SERVICES_COMPONENT_FILE,
         )
     )
     example_source = (APPS_DOCKER_ROOT / "staging.env.example").read_text(

@@ -17,6 +17,7 @@ on:
       - conftest.py
       - docs/**
       - infra/docker/apps/**
+      - infra/docker/components/**
       - infra/docker/development/**
       - infra/docker/providers/glpi-test/**
       - infra/docker/transcription/**
@@ -40,6 +41,7 @@ on:
       - conftest.py
       - docs/**
       - infra/docker/apps/**
+      - infra/docker/components/**
       - infra/docker/development/**
       - infra/docker/providers/glpi-test/**
       - infra/docker/transcription/**

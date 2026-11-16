@@ -60,6 +60,7 @@ Watch paths recommandés :
 
 ```text
 providers/**
+infra/docker/components/simulator-services.yml
 infra/docker/providers/**
 .dockerignore
 pyproject.toml

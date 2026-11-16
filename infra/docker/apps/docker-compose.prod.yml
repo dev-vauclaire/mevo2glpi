@@ -6,17 +6,17 @@ name: ${COMPOSE_PROJECT_NAME:-mevo2glpi-prod}
 services:
   database-migrations:
     extends:
-      file: ./docker-compose.common.services.yml
+      file: ../components/application-services.yml
       service: database-migrations
 
   web:
     extends:
-      file: ./docker-compose.common.services.yml
+      file: ../components/application-services.yml
       service: web
 
   worker-automation:
     extends:
-      file: ./docker-compose.common.services.yml
+      file: ../components/application-services.yml
       service: worker-automation
     environment:
       TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-openai_compatible}
@@ -37,7 +37,7 @@ services:
 
   worker-publisher:
     extends:
-      file: ./docker-compose.common.services.yml
+      file: ../components/application-services.yml
       service: worker-publisher
     environment:
       PUBLISHER_GRAPH_AUTH_MODE: entra_certificate
@@ -63,7 +63,7 @@ services:
 
   worker-retention:
     extends:
-      file: ./docker-compose.common.services.yml
+      file: ../components/application-services.yml
       service: worker-retention
     environment:
       GLPI_BASE_URL: ${GLPI_BASE_URL:?Set GLPI_BASE_URL}

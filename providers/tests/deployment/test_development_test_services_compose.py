@@ -21,6 +21,9 @@ COMPOSE_FILE = (
     / "development"
     / "docker-compose.test-services.yml"
 )
+SIMULATOR_COMPONENT_FILE = (
+    REPOSITORY_ROOT / "infra" / "docker" / "components" / "simulator-services.yml"
+)
 ROOT_ENV_EXAMPLE = REPOSITORY_ROOT / ".env.example"
 EXPECTED_SERVICES = {
     "glpi-bootstrap",
@@ -102,6 +105,22 @@ def test_development_manifest_contains_only_expected_test_services(
 ) -> None:
     assert test_services_config["name"] == "mevo2glpi-development-test-services"
     assert set(_services(test_services_config)) == EXPECTED_SERVICES
+
+
+def test_development_simulators_extend_the_canonical_component() -> None:
+    compose_source = COMPOSE_FILE.read_text(encoding="utf-8")
+
+    assert SIMULATOR_COMPONENT_FILE.is_file()
+    for service_name in (
+        "microsoft-graph-simulator",
+        "openai-transcription-simulator",
+    ):
+        declaration = f"""  {service_name}:
+    extends:
+      file: ../components/simulator-services.yml
+      service: {service_name}
+"""
+        assert declaration in compose_source
 
 
 def test_development_http_services_are_bound_only_to_loopback(
@@ -227,3 +246,22 @@ def test_simulators_are_hardened_and_use_synthetic_configuration(
         "OPENAI_TRANSCRIPTION_SIMULATOR_MAX_UPLOAD_BYTES": "26214400",
         "OPENAI_TRANSCRIPTION_SIMULATOR_PORT": "8080",
     }
+
+
+def test_development_simulators_build_from_the_repository_root(
+    test_services_config: dict[str, object],
+) -> None:
+    services = _services(test_services_config)
+    expected_dockerfiles = {
+        "microsoft-graph-simulator": (
+            "infra/docker/providers/microsoft-graph-simulator/Dockerfile"
+        ),
+        "openai-transcription-simulator": (
+            "infra/docker/providers/openai-transcription-simulator/Dockerfile"
+        ),
+    }
+
+    for service_name, dockerfile in expected_dockerfiles.items():
+        build = services[service_name]["build"]
+        assert Path(build["context"]).resolve() == REPOSITORY_ROOT.resolve()
+        assert build["dockerfile"] == dockerfile

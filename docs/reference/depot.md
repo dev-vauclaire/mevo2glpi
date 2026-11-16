@@ -45,11 +45,16 @@ Le dossier `infra/docker/` est organisé par périmètre de déploiement :
 
 - `apps/` construit et orchestre les applications pour le staging et la
   production ;
+- `components/` contient les définitions de services réutilisées avec
+  `extends` ; ces composants ne sont jamais des points d'entrée de déploiement ;
 - `development/` orchestre PostgreSQL et les services de test locaux ;
 - `providers/` regroupe les images des services de test et leur orchestration
   staging ;
 - `transcription/` déploie indépendamment le service local de transcription
   CPU.
+
+La [matrice des recettes Docker](../../infra/docker/README.md) distingue les
+points d'entrée supportés de leurs composants internes.
 
 ## Identifiants internes stables
 

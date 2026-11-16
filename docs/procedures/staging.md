@@ -508,6 +508,7 @@ infra/docker/providers/docker-compose.staging.yml
 infra/docker/providers/staging.env.example
 infra/docker/providers/microsoft-graph-simulator/**
 infra/docker/providers/openai-transcription-simulator/**
+infra/docker/components/simulator-services.yml
 .dockerignore
 pyproject.toml
 uv.lock
@@ -527,6 +528,7 @@ apps/worker-publisher/**
 apps/worker-retention/**
 packages/**
 infra/docker/apps/**
+infra/docker/components/application-services.yml
 .dockerignore
 pyproject.toml
 uv.lock

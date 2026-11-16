@@ -1,3 +1,5 @@
+# Composant interne : utiliser les recettes apps/docker-compose.*.yml.
+# `extends` importe les services, pas les ressources de premier niveau.
 x-ca-bundle: &ca-bundle
   type: bind
   source: ${CA_BUNDLE_HOST_PATH:-/etc/ssl/certs/ca-certificates.crt}
@@ -217,6 +219,8 @@ services:
     restart: "on-failure:5"
 
 networks:
+  # Ces déclarations rendent le composant valide isolément. Chaque recette
+  # redéclare les ressources avec les valeurs propres à son environnement.
   database:
     name: ${DATABASE_NETWORK_NAME:-mevo2glpi-prod-database-network}
     external: true

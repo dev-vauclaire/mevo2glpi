@@ -43,6 +43,7 @@ def test_local_markdown_links_target_existing_files() -> None:
 
 def _documentation_files() -> tuple[Path, ...]:
     documents = list((REPOSITORY_ROOT / "docs").rglob("*.md"))
+    documents.extend((REPOSITORY_ROOT / "infra" / "docker").rglob("*.md"))
     documents.extend(
         path
         for name in ROOT_DOCUMENT_NAMES

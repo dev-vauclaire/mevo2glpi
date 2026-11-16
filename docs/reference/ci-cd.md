@@ -129,8 +129,8 @@ contrôles généraux du dépôt.
 
 | Workflow | Périmètre |
 | --- | --- |
-| [CI applications](../../.github/workflows/ci-apps.yml) | `apps/`, `packages/`, tests transversaux, Compose applicatifs, PostgreSQL de développement, image GLPI de test et stack de transcription |
-| [CI providers de test](../../.github/workflows/ci-providers.yml) | simulateurs de `providers/`, images associées et Compose local ou staging |
+| [CI applications](../../.github/workflows/ci-apps.yml) | `apps/`, `packages/`, tests transversaux, recettes et composants Compose applicatifs, PostgreSQL de développement, image GLPI de test et stack de transcription |
+| [CI providers de test](../../.github/workflows/ci-providers.yml) | simulateurs de `providers/`, images associées, composant partagé et recettes Compose locales ou staging |
 
 Le workspace uv et `uv.lock` sont communs aux deux périmètres. Une modification
 du manifeste racine, du verrou ou de `.dockerignore` peut déclencher les deux

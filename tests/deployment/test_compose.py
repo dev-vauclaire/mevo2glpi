@@ -14,9 +14,10 @@ import pytest
 
 from .conftest import (
     ALL_SERVICES,
+    APPLICATION_SERVICES_COMPONENT_FILE,
     APPS_DOCKER_ROOT,
     BASE_COMPOSE_FILE,
-    COMMON_COMPOSE_SERVICES_FILE,
+    COMPONENTS_DOCKER_ROOT,
     CUSTOM_SERVICES,
     DOCKER_ROOT,
     SYNTHETIC_APP_COMMIT_SHA,
@@ -45,11 +46,32 @@ def _volume_for(service: dict[str, Any], target: str) -> dict[str, Any] | None:
 def test_production_manifest_contains_only_the_five_applications() -> None:
     assert BASE_COMPOSE_FILE == APPS_DOCKER_ROOT / "docker-compose.prod.yml"
     assert BASE_COMPOSE_FILE.is_file()
-    assert COMMON_COMPOSE_SERVICES_FILE == (
-        APPS_DOCKER_ROOT / "docker-compose.common.services.yml"
+    assert APPLICATION_SERVICES_COMPONENT_FILE == (
+        COMPONENTS_DOCKER_ROOT / "application-services.yml"
     )
-    assert COMMON_COMPOSE_SERVICES_FILE.is_file()
+    assert APPLICATION_SERVICES_COMPONENT_FILE.is_file()
     assert (APPS_DOCKER_ROOT / ".env.example").is_file()
+
+
+def test_docker_infrastructure_readme_indexes_supported_recipes() -> None:
+    readme_source = (DOCKER_ROOT / "README.md").read_text(encoding="utf-8")
+    expected_recipe_links = {
+        "development/docker-compose.postgres.yml",
+        "development/docker-compose.keycloak.yml",
+        "development/docker-compose.test-services.yml",
+        "providers/docker-compose.staging.yml",
+        "providers/glpi-test/docker-compose.staging.yml",
+        "transcription/docker-compose.transcription.yml",
+        "apps/docker-compose.staging.yml",
+        "apps/docker-compose.prod.yml",
+    }
+
+    for recipe_link in expected_recipe_links:
+        assert f"]({recipe_link})" in readme_source
+        assert (DOCKER_ROOT / recipe_link).is_file()
+
+    for heading in ("## Composants", "## Recettes", "## Invariants"):
+        assert heading in readme_source
 
 
 def test_production_entrypoint_uses_portable_service_extends() -> None:
@@ -59,7 +81,7 @@ def test_production_entrypoint_uses_portable_service_extends() -> None:
     for service_name in CUSTOM_SERVICES:
         declaration = f"""  {service_name}:
     extends:
-      file: ./docker-compose.common.services.yml
+      file: ../components/application-services.yml
       service: {service_name}
 """
         assert declaration in compose_source
@@ -69,7 +91,7 @@ def test_dokploy_domain_patch_merges_with_web_configuration(tmp_path: Path) -> N
     compose_source = BASE_COMPOSE_FILE.read_text(encoding="utf-8")
     web_declaration = """  web:
     extends:
-      file: ./docker-compose.common.services.yml
+      file: ../components/application-services.yml
       service: web
 """
     assert compose_source.count(web_declaration) == 1
@@ -77,7 +99,7 @@ def test_dokploy_domain_patch_merges_with_web_configuration(tmp_path: Path) -> N
         web_declaration,
         """  web:
     extends:
-      file: ./docker-compose.common.services.yml
+      file: ../components/application-services.yml
       service: web
     labels:
       - traefik.docker.network=dokploy-network
@@ -126,7 +148,7 @@ def test_environment_example_documents_every_compose_variable_without_secrets() 
     compose_source = "\n".join(
         (
             BASE_COMPOSE_FILE.read_text(encoding="utf-8"),
-            COMMON_COMPOSE_SERVICES_FILE.read_text(encoding="utf-8"),
+            APPLICATION_SERVICES_COMPONENT_FILE.read_text(encoding="utf-8"),
         )
     )
     example_source = (APPS_DOCKER_ROOT / ".env.example").read_text(encoding="utf-8")

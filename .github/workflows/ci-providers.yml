@@ -10,6 +10,7 @@ on:
       - .github/workflows/ci-providers.yml
       - conftest.py
       - infra/docker/development/docker-compose.test-services.yml
+      - infra/docker/components/**
       - infra/docker/providers/**
       - providers/**
       - pyproject.toml
@@ -24,6 +25,7 @@ on:
       - .github/workflows/ci-providers.yml
       - conftest.py
       - infra/docker/development/docker-compose.test-services.yml
+      - infra/docker/components/**
       - infra/docker/providers/**
       - providers/**
       - pyproject.toml
