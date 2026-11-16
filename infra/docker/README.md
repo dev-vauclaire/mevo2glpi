@@ -62,6 +62,9 @@ démarrage des services applicatifs persistants.
 - Aucun service de staging ou de production ne publie directement un port ; le
   web est exposé par le réseau Dokploy. Les ports de développement sont liés à
   `127.0.0.1`.
+- Le web et les trois workers utilisent `restart: unless-stopped` afin de
+  repartir après un redémarrage de la VM. La migration one-shot conserve
+  `restart: "no"`.
 - Les composants ne portent aucun secret. Les recettes et leurs fichiers
   d'environnement contrôlent les valeurs réellement déployées.
 - Un changement de composant doit être validé depuis toutes les recettes qui le

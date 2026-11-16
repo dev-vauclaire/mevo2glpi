@@ -147,7 +147,7 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     networks:
       - database
-    restart: "on-failure:5"
+    restart: unless-stopped
 
   worker-publisher:
     <<: *application-runtime
@@ -185,7 +185,7 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     networks:
       - database
-    restart: "on-failure:5"
+    restart: unless-stopped
 
   worker-retention:
     <<: *application-runtime
@@ -216,7 +216,7 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     networks:
       - database
-    restart: "on-failure:5"
+    restart: unless-stopped
 
 networks:
   # Ces déclarations rendent le composant valide isolément. Chaque recette

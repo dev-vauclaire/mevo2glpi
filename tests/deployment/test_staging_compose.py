@@ -323,6 +323,21 @@ def test_staging_workers_depend_only_on_database_migrations(
         }
 
 
+def test_staging_persistent_services_restart_after_host_reboot(
+    render_staging_compose: Callable[[], dict[str, object]],
+) -> None:
+    services = _services(render_staging_compose())
+
+    assert services["database-migrations"]["restart"] == "no"
+    for service_name in (
+        "web",
+        "worker-automation",
+        "worker-publisher",
+        "worker-retention",
+    ):
+        assert services[service_name]["restart"] == "unless-stopped"
+
+
 def test_staging_rejected_ingestion_retention_uses_shared_interval(
     render_staging_compose: Callable[[], dict[str, object]],
 ) -> None:

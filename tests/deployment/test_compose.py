@@ -414,9 +414,9 @@ def test_runtime_hardening_and_restart_policies_are_explicit(
     expected_restarts = {
         "database-migrations": "no",
         "web": "unless-stopped",
-        "worker-automation": "on-failure:5",
-        "worker-publisher": "on-failure:5",
-        "worker-retention": "on-failure:5",
+        "worker-automation": "unless-stopped",
+        "worker-publisher": "unless-stopped",
+        "worker-retention": "unless-stopped",
     }
     for service_name, service in services.items():
         assert service["read_only"] is True
