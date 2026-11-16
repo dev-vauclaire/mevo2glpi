@@ -107,13 +107,6 @@ Les déploiements en staging et en production s'effectuent avec **Dokploy**.
 Cette feuille de route contient uniquement les évolutions prévues. Les
 fonctionnalités déjà disponibles sont décrites dans les sections précédentes.
 
-### Simplification et maintenabilité
-
-- [ ] Réorganiser `infra/docker` en briques composables et fournir des recettes
-  d'exemple pour les combinaisons de services prises en charge.
-- [ ] Aligner la documentation et les procédures d'exploitation avec cette
-  infrastructure simplifiée.
-
 ### Résilience de la transcription
 
 - [ ] Permettre de configurer une chaîne ordonnée de providers de transcription

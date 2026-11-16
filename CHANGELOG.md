@@ -5,6 +5,33 @@ Ce fichier recense les changements fonctionnels et opérationnels destinés aux
 par les tags Git immuables `vX.Y.Z` ; les versions `0.1.0` des packages Python
 sont des métadonnées internes au workspace et ne constituent pas des releases.
 
+## v0.13.0 — 2026-11-16
+
+### Ajouté
+
+- composants Docker partagés pour le socle applicatif et les deux simulateurs,
+  consommés par les recettes avec `extends` ;
+- matrice des recettes Docker prises en charge, de leurs configurations et de
+  leurs invariants d'exploitation.
+
+### Modifié
+
+- les points d'entrée Dokploy de staging et de production conservent leurs
+  chemins, réseaux, volumes, services et variables tout en réutilisant les
+  composants communs ;
+- le web et les trois workers persistants utilisent désormais
+  `restart: unless-stopped` afin de repartir après un redémarrage de la VM ; la
+  migration Alembic one-shot conserve `restart: "no"` ;
+- les filtres CI, les tests de déploiement et la documentation couvrent les
+  composants partagés et les différentes recettes.
+
+### Déploiement
+
+- aucune migration PostgreSQL ni modification de variable d'environnement,
+  réseau, volume, domaine ou chemin Compose n'est requise ;
+- un redéploiement du projet Applications est nécessaire pour recréer les
+  conteneurs existants avec leur nouvelle politique de redémarrage.
+
 ## v0.12.0 — 2026-11-11
 
 ### Modifié
